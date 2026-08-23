@@ -156,18 +156,31 @@ export interface Candidate {
   profile: ProfileSample[]
 }
 
-export interface DatasetMeta {
-  generatedAt: string
-  aoi: Aoi
+/**
+ * One rasterised grid and what came out of it.
+ *
+ * Several AOIs share a region when they are close enough for a line to span between them, so the
+ * search sees one grid rather than two that each miss the seam -- which is why this carries a list
+ * of AOIs rather than one.
+ */
+export interface Region {
+  aois: Aoi[]
   /** EPSG:25833 bounds actually rasterised. */
   bbox25833: { minE: number; minN: number; maxE: number; maxN: number }
+  width: number
+  height: number
+  groundMin: number
+  groundMax: number
+  anchorsScanned: number
+  anchorsKept: number
+}
+
+export interface DatasetMeta {
+  generatedAt: string
+  regions: Region[]
   params: Params
   sources: { name: string; url: string; attribution: string; note: string }[]
   stats: {
-    aoiWidth: number
-    aoiHeight: number
-    groundMin: number
-    groundMax: number
     anchorsScanned: number
     anchorsKept: number
     pairsInRange: number

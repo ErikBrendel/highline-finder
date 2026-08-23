@@ -3,13 +3,14 @@
 Finds candidate [highline](https://en.wikipedia.org/wiki/Slacklining#Highlining) locations
 automatically from open LiDAR elevation data, instead of scanning maps by eye.
 
-Give it a bounding box. It downloads the terrain and surface models, works out which points could
-serve as anchors and in which directions, tests the spans between them against a sagging-line
-model, and produces a ranked, browsable set of candidate lines with elevation profiles.
+Give it one or more bounding boxes. It downloads the terrain and surface models, works out which
+points could serve as anchors and in which directions, tests the spans between them against a
+sagging-line model, and produces a ranked, browsable set of candidate lines with elevation profiles.
 
 The MVP covers **Brandenburg and Berlin**, where the state survey office publishes 1 m LiDAR
-terrain and 20 cm surface models as open data. Default area of interest is the Sperenberg gypsum
-pits south of Berlin (38 m of relief in 1 km²).
+terrain and 20 cm surface models as open data. The default areas of interest are the Sperenberg
+gypsum pits south of Berlin (38 m of relief in 1.2 km²) and the Chorin area to the north-east
+(18.6 km²).
 
 ## Quickstart
 
@@ -19,11 +20,16 @@ npm run pipeline      # downloads rasters, computes candidates.json  (~30 s, ~70
 npm run dev           # browse the results
 ```
 
-Custom area of interest:
+Custom areas of interest — one rectangle, or several:
 
 ```bash
-npm run pipeline -- <south> <west> <north> <east>
+npm run pipeline -- <south> <west> <north> <east> [<south> <west> <north> <east> ...]
 ```
+
+Areas that come within `maxLength` of each other are rasterised as a single grid, so lines can be
+found crossing between them; further apart they are searched independently and the results pooled.
+Overlapping areas are allowed — the dedup pass collapses whatever both of them find. See
+[`src/pipeline/regions.ts`](src/pipeline/regions.ts).
 
 Rasters are cached in `data/cache/`, so re-runs after a parameter change skip all downloads.
 Tunables all live in [`src/pipeline/params.ts`](src/pipeline/params.ts).
@@ -51,7 +57,7 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
 
 ## How it works
 
-1. **Ingest** — resolve the AOI to EPSG:25833, download the 1 km tiles it touches, assemble a 1 m
+1. **Ingest** — resolve each area to EPSG:25833, download the 1 km tiles it touches, assemble a 1 m
    terrain grid and a 1 m surface grid (the 0.2 m surface model is downsampled by *max*, because
    for clearance the tallest obstacle in a cell is the one that matters).
 2. **Openness scan** — for every point on a 5 m grid, cast a ray in each of 64 directions and

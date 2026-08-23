@@ -62,6 +62,9 @@ export function App() {
     fetch(`${import.meta.env.BASE_URL}candidates.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d: Dataset) => {
+        // A file from an older pipeline would otherwise fail deep inside rendering, which reads as
+        // a broken app rather than as stale output.
+        if (!d.meta?.regions?.length) throw new Error('no regions in it — re-run `npm run pipeline`')
         setData(d)
         setSagPct(d.meta.params.sagRatio * 100)
       })
@@ -210,7 +213,11 @@ export function App() {
   if (error) return <div className="loading">Failed to load candidates.json &mdash; {error}</div>
   if (!data || sagPct === null) return <div className="loading">Loading&hellip;</div>
 
-  const { stats, aoi } = data.meta
+  const { stats, regions } = data.meta
+  const aoiCount = regions.reduce((n, r) => n + r.aois.length, 0)
+  const areaKm2 = regions.reduce((s, r) => s + r.width * r.height, 0) / 1e6
+  const groundMin = Math.min(...regions.map((r) => r.groundMin))
+  const groundMax = Math.max(...regions.map((r) => r.groundMax))
   const maxScore = Math.ceil(Math.max(...data.candidates.map((c) => c.score), 1))
   const maxLen = Math.ceil(Math.max(...data.candidates.map((c) => c.length), 100))
   const maxExp = Math.ceil(Math.max(...data.candidates.map((c) => c.exposure), 10))
@@ -223,9 +230,10 @@ export function App() {
       <header>
         <h1>Highline Finder</h1>
         <span className="meta">
-          {aoi.south.toFixed(4)},{aoi.west.toFixed(4)} &rarr; {aoi.north.toFixed(4)},{aoi.east.toFixed(4)}
-          {' · '}{stats.aoiWidth}&times;{stats.aoiHeight} m
-          {' · '}terrain {stats.groundMin}&ndash;{stats.groundMax} m
+          {aoiCount} AOI{aoiCount === 1 ? '' : 's'}
+          {regions.length !== aoiCount && ` in ${regions.length} regions`}
+          {' · '}{areaKm2.toFixed(1)} km&sup2;
+          {' · '}terrain {groundMin}&ndash;{groundMax} m
         </span>
         <span className="spacer" />
         <span className="meta">

@@ -86,9 +86,14 @@ export const DEFAULT_PARAMS: Params = {
  * Chosen because highlines are known to be riggable here, so it doubles as a sanity check
  * that the finder produces plausible geometry.
  */
-export const DEFAULT_AOI: Aoi = {
-  south: 52.197701,
-  west: 13.651291,
-  north: 52.206631,
-  east: 13.668149,
-}
+/**
+ * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
+ * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the
+ * dedup pass rather than reported twice.
+ */
+export const DEFAULT_AOIS: Aoi[] = [
+  // Sperenberg gypsum pits: 38 m of relief in flat Brandenburg, and the reason this project exists.
+  { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
+  // Chorin / Oderbruch edge, north-east of Berlin.
+  { south: 52.818013, west: 13.896186, north: 52.862093, east: 13.950634 },
+]

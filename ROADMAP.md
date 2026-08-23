@@ -54,8 +54,10 @@ anchors only, one AOI, static viewer.
 - **Tighten the openness prefilter.** It currently only removes ~80 % of in-range pairs in high
   relief terrain, because a 5 m drop within 120 m is easy to satisfy where there is 38 m of relief.
   Scaling `minProbeDrop` to local relief would sharpen it.
-- **Spatial index for pairing.** The plain double loop is fine for 1 km² but not for a region; a
-  uniform grid keyed on `maxLength` makes the pair enumeration output-sensitive.
+- **Spatial index for pairing.** The plain double loop is quadratic in anchors while the number of
+  pairs actually *in range* grows only linearly with area, so nearly all of its work is rejecting
+  pairs kilometres apart. A uniform grid keyed on `maxLength` makes the enumeration
+  output-sensitive. This is now the top compute cost of adding area.
 - **Validation set.** Import documented real highlines and assert the finder rediscovers them.
   Nothing else distinguishes "found 2000 candidates" from "found 2000 artefacts".
 

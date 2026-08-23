@@ -17,11 +17,21 @@ const present = existsSync(PATH)
 
 describe.skipIf(!present)('generated candidates.json', () => {
   const data: Dataset = JSON.parse(readFileSync(PATH, 'utf8'))
-  const { params, aoi } = data.meta
+  const { params, regions } = data.meta
+  const aois = regions.flatMap((r) => r.aois)
+  const inSomeAoi = (lat: number, lon: number) =>
+    aois.some(
+      (a) =>
+        lat >= a.south - 1e-4 &&
+        lat <= a.north + 1e-4 &&
+        lon >= a.west - 1e-4 &&
+        lon <= a.east + 1e-4,
+    )
 
-  it('produced candidates for the default AOI', () => {
+  it('produced candidates, over ground with real relief', () => {
     expect(data.candidates.length).toBeGreaterThan(0)
-    expect(data.meta.stats.groundMax - data.meta.stats.groundMin).toBeGreaterThan(10)
+    expect(regions.length).toBeGreaterThan(0)
+    for (const r of regions) expect(r.groundMax - r.groundMin).toBeGreaterThan(10)
   })
 
   it('respects every hard filter it claims to enforce', () => {
@@ -35,7 +45,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
     }
   })
 
-  it('keeps anchor coordinates consistent between WGS84 and UTM, and inside the AOI', () => {
+  it('keeps anchor coordinates consistent between WGS84 and UTM, and inside an AOI', () => {
     for (const c of data.candidates.slice(0, 40)) {
       for (const a of [c.a, c.b]) {
         expect(a.aFrame).toBeGreaterThanOrEqual(params.aFrameMin - 1e-9)
@@ -43,10 +53,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
         const [e, n] = toUtm33(a.lat, a.lon)
         expect(e).toBeCloseTo(a.e, 1)
         expect(n).toBeCloseTo(a.n, 1)
-        expect(a.lat).toBeGreaterThanOrEqual(aoi.south - 1e-4)
-        expect(a.lat).toBeLessThanOrEqual(aoi.north + 1e-4)
-        expect(a.lon).toBeGreaterThanOrEqual(aoi.west - 1e-4)
-        expect(a.lon).toBeLessThanOrEqual(aoi.east + 1e-4)
+        expect(inSomeAoi(a.lat, a.lon)).toBe(true)
       }
     }
   })

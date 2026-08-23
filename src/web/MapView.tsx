@@ -254,7 +254,9 @@ export function MapView({
 
   useEffect(() => {
     if (!el.current || map.current) return
-    const { aoi } = data.meta
+    const aois = data.meta.regions.flatMap((r) => r.aois)
+    const bounds = new maplibregl.LngLatBounds()
+    for (const a of aois) bounds.extend([a.west, a.south]).extend([a.east, a.north])
     const m = new maplibregl.Map({
       container: el.current,
       style: {
@@ -276,7 +278,7 @@ export function MapView({
           })),
         ],
       },
-      bounds: [[aoi.west, aoi.south], [aoi.east, aoi.north]],
+      bounds,
       fitBoundsOptions: { padding: 40 },
     })
     map.current = m
@@ -290,15 +292,18 @@ export function MapView({
       m.addSource('aoi', {
         type: 'geojson',
         data: {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [aoi.west, aoi.south], [aoi.east, aoi.south],
-              [aoi.east, aoi.north], [aoi.west, aoi.north], [aoi.west, aoi.south],
-            ],
-          },
+          type: 'FeatureCollection',
+          features: aois.map((a) => ({
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [a.west, a.south], [a.east, a.south],
+                [a.east, a.north], [a.west, a.north], [a.west, a.south],
+              ],
+            },
+          })),
         },
       })
       m.addLayer({

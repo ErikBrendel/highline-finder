@@ -1,50 +1,51 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { toUtm33, toWgs84 } from '../shared/geo.js'
+import { toWgs84 } from '../shared/geo.js'
 import { loadProduct } from './raster.js'
-import { packSectors, scanAnchors } from './openness.js'
+import { packSectors, scanAnchors, type Anchor } from './openness.js'
 import { dedupe, findLines, refine } from './lines.js'
-import { DEFAULT_AOI, DEFAULT_PARAMS } from './params.js'
-import type { AnchorDump, Dataset } from '../shared/types.js'
+import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
+import { contains, workAreas, type WorkArea } from './regions.js'
+import type { Aoi, AnchorDump, Candidate, Dataset, Params, Region } from '../shared/types.js'
 
 /**
  * CLI entry point. Writes src/web/public/candidates.json, which is the only artefact the web app
  * needs -- the app is a static viewer over precomputed results and never talks to the pipeline.
  *
- * Override the AOI with: npm run pipeline -- <south> <west> <north> <east>
+ * Each work area is rasterised, searched and refined on its own, and the results are pooled and
+ * deduped once at the end. Grids are the expensive thing here -- an 18 km2 area is ~75 MB per
+ * layer -- so they are scoped to one iteration and dropped before the next area loads.
+ *
+ * Override the AOIs with: npm run pipeline -- <south> <west> <north> <east> [<south> ... ]
  */
 
 const OUT = new URL('../web/public/candidates.json', import.meta.url).pathname
 const ANCHORS_OUT = new URL('../web/public/anchors.json', import.meta.url).pathname
 
-async function main() {
-  const started = Date.now()
-  const argv = process.argv.slice(2).map(Number)
-  const aoi =
-    argv.length === 4 && argv.every((v) => Number.isFinite(v))
-      ? { south: argv[0]!, west: argv[1]!, north: argv[2]!, east: argv[3]! }
-      : DEFAULT_AOI
-  const p = DEFAULT_PARAMS
-
-  const corners = [
-    toUtm33(aoi.south, aoi.west),
-    toUtm33(aoi.south, aoi.east),
-    toUtm33(aoi.north, aoi.west),
-    toUtm33(aoi.north, aoi.east),
-  ]
-  const bbox = {
-    minE: Math.min(...corners.map((c) => c[0])),
-    maxE: Math.max(...corners.map((c) => c[0])),
-    minN: Math.min(...corners.map((c) => c[1])),
-    maxN: Math.max(...corners.map((c) => c[1])),
+interface AreaResult {
+  region: Region
+  /** Anchors inside the AOIs, for the debug dump. */
+  anchors: Anchor[]
+  refined: {
+    candidates: Candidate[]
+    improved: number
+    totalGain: number
+    find: {
+      pairsInRange: number
+      pairsSectorPassed: number
+      pairsLevelEnough: number
+      pairsFeasible: number
+      candidatesAfterDedup: number
+    }
   }
-  console.log(
-    `AOI ${aoi.south},${aoi.west} .. ${aoi.north},${aoi.east}\n` +
-      `    EPSG:25833 E ${bbox.minE.toFixed(0)}..${bbox.maxE.toFixed(0)} ` +
-      `N ${bbox.minN.toFixed(0)}..${bbox.maxN.toFixed(0)} ` +
-      `(${(bbox.maxE - bbox.minE).toFixed(0)} x ${(bbox.maxN - bbox.minN).toFixed(0)} m)`,
-  )
+}
 
-  console.log('\n[1/5] ingest')
+const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
+const pct2 = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : 'n/a')
+
+async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
+  const { bbox, boxes } = area
+
+  console.log(`[1/4] ingest (${label})`)
   const ground = await loadProduct('dgm', bbox, 1)
   const surface = await loadProduct('bdom', bbox, 1)
   const ext = ground.extent()
@@ -54,52 +55,152 @@ async function main() {
   )
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-  console.log('\n[2/5] openness scan')
-  const { anchors, scanned, passedDropTest } = scanAnchors(ground, p)
+  console.log('[2/4] openness scan')
+  const scan = scanAnchors(ground, p)
+  // Ground merged in between two AOIs is read for profiles but never searched.
+  const anchors = scan.anchors.filter((a) => boxes.some((b) => contains(b, a.e, a.n)))
   const meanOpen = anchors.length
     ? anchors.reduce((s, a) => s + a.openCount, 0) / anchors.length
     : 0
-  const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
-  console.log(`  ${scanned} points scanned @${p.anchorStep}m`)
+  console.log(`  ${scan.scanned} points scanned @${p.anchorStep}m`)
   console.log(
-    `  drop within ${p.dropSearchRadius}m       ${passedDropTest}  (${pctOf(passedDropTest, scanned)})`,
+    `  drop within ${p.dropSearchRadius}m       ${scan.passedDropTest}  ` +
+      `(${pctOf(scan.passedDropTest, scan.scanned)})`,
   )
   console.log(
-    `  any direction falls away  ${anchors.length}  (${pctOf(anchors.length, passedDropTest)} of those), ` +
+    `  any direction falls away  ${scan.anchors.length}  ` +
+      `(${pctOf(scan.anchors.length, scan.passedDropTest)} of those), ` +
       `mean ${meanOpen.toFixed(1)}/${p.sectorCount} open sectors`,
   )
+  if (anchors.length !== scan.anchors.length) {
+    console.log(`  inside an AOI             ${anchors.length}`)
+  }
 
-  console.log('\n[3/6] pairing  [4/6] profiles  [5/6] score')
+  console.log('[3/4] pairing, profiles, score')
   const r = findLines(anchors, ground, surface, p)
-  const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : 'n/a')
   console.log(`  pairs in length range      ${r.pairsInRange}`)
   console.log(
-    `  survived sector test       ${r.pairsSectorPassed}  (${pct(r.pairsSectorPassed, r.pairsInRange)} -- work the prefilter saved)`,
+    `  survived sector test       ${r.pairsSectorPassed}  ` +
+      `(${pct2(r.pairsSectorPassed, r.pairsInRange)} -- work the prefilter saved)`,
   )
   console.log(
-    `  level enough to rig        ${r.pairsLevelEnough}  (${pct(r.pairsLevelEnough, r.pairsSectorPassed)} of those)`,
+    `  level enough to rig        ${r.pairsLevelEnough}  ` +
+      `(${pct2(r.pairsLevelEnough, r.pairsSectorPassed)} of those)`,
   )
   console.log(
-    `  feasible after profile     ${r.pairsFeasible}  (${pct(r.pairsFeasible, r.pairsLevelEnough)} of those tested)`,
+    `  feasible after profile     ${r.pairsFeasible}  ` +
+      `(${pct2(r.pairsFeasible, r.pairsLevelEnough)} of those tested)`,
   )
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
 
-  console.log('\n[6/6] local refinement')
+  console.log('[4/4] local refinement')
   const ref = refine(r.candidates, ground, surface, p)
-  const meanGain = ref.improved ? ref.totalGain / ref.improved : 0
+  const gain = ref.improved ? ref.totalGain / ref.improved : 0
   console.log(
     `  ${ref.improved}/${r.candidates.length} improved from ${ref.evaluations} evaluations, ` +
-      `mean +${meanGain.toFixed(2)} score`,
+      `mean +${gain.toFixed(2)} score`,
   )
-  // Refined anchors can converge on the same optimum, so collapse again before capping.
-  const finalCandidates = dedupe(ref.candidates, p.dedupRadius).slice(0, p.maxCandidates)
-  console.log(`  ${finalCandidates.length} after re-dedup and cap`)
+
+  return {
+    region: {
+      aois: area.aois,
+      bbox25833: bbox,
+      width: Math.round(bbox.maxE - bbox.minE),
+      height: Math.round(bbox.maxN - bbox.minN),
+      groundMin: Math.round(ext.min * 100) / 100,
+      groundMax: Math.round(ext.max * 100) / 100,
+      anchorsScanned: scan.scanned,
+      anchorsKept: anchors.length,
+    },
+    anchors,
+    refined: {
+      candidates: ref.candidates,
+      improved: ref.improved,
+      totalGain: ref.totalGain,
+      find: {
+        pairsInRange: r.pairsInRange,
+        pairsSectorPassed: r.pairsSectorPassed,
+        pairsLevelEnough: r.pairsLevelEnough,
+        pairsFeasible: r.pairsFeasible,
+        candidatesAfterDedup: r.candidatesAfterDedup,
+      },
+    },
+  }
+}
+
+function aoisFromArgv(argv: number[]): Aoi[] | null {
+  if (!argv.length || argv.length % 4 !== 0 || !argv.every((v) => Number.isFinite(v))) return null
+  const out: Aoi[] = []
+  for (let i = 0; i < argv.length; i += 4) {
+    out.push({ south: argv[i]!, west: argv[i + 1]!, north: argv[i + 2]!, east: argv[i + 3]! })
+  }
+  return out
+}
+
+async function main() {
+  const started = Date.now()
+  const p = DEFAULT_PARAMS
+  const aois = aoisFromArgv(process.argv.slice(2).map(Number)) ?? DEFAULT_AOIS
+  const areas = workAreas(aois, p.maxLength)
+
+  console.log(`${aois.length} AOI(s) in ${areas.length} region(s):`)
+  for (const area of areas) {
+    const { bbox } = area
+    console.log(
+      `  ${area.aois.map((a) => `${a.south},${a.west}..${a.north},${a.east}`).join(' + ')}\n` +
+        `    EPSG:25833 E ${bbox.minE.toFixed(0)}..${bbox.maxE.toFixed(0)} ` +
+        `N ${bbox.minN.toFixed(0)}..${bbox.maxN.toFixed(0)} ` +
+        `(${(bbox.maxE - bbox.minE).toFixed(0)} x ${(bbox.maxN - bbox.minN).toFixed(0)} m, ` +
+        `${(((bbox.maxE - bbox.minE) * (bbox.maxN - bbox.minN)) / 1e6).toFixed(1)} km2)`,
+    )
+  }
+
+  const regions: Region[] = []
+  const dumpAnchors: Anchor[] = []
+  const refinedAll: Candidate[] = []
+  const totals = {
+    anchorsScanned: 0,
+    anchorsKept: 0,
+    pairsInRange: 0,
+    pairsSectorPassed: 0,
+    pairsLevelEnough: 0,
+    pairsFeasible: 0,
+    candidatesAfterDedup: 0,
+    refinedCount: 0,
+    refineGain: 0,
+  }
+
+  for (const [index, area] of areas.entries()) {
+    const label = `region ${index + 1}/${areas.length}`
+    console.log(`\n=== ${label} ===`)
+    const { anchors, region, refined } = await searchArea(area, p, label)
+    regions.push(region)
+    dumpAnchors.push(...anchors)
+    refinedAll.push(...refined.candidates)
+    totals.anchorsScanned += region.anchorsScanned
+    totals.anchorsKept += region.anchorsKept
+    totals.pairsInRange += refined.find.pairsInRange
+    totals.pairsSectorPassed += refined.find.pairsSectorPassed
+    totals.pairsLevelEnough += refined.find.pairsLevelEnough
+    totals.pairsFeasible += refined.find.pairsFeasible
+    totals.candidatesAfterDedup += refined.find.candidatesAfterDedup
+    totals.refinedCount += refined.improved
+    totals.refineGain += refined.totalGain
+  }
+
+  // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
+  // can walk two neighbours onto the same optimum.
+  const finalCandidates = dedupe(refinedAll, p.dedupRadius).slice(0, p.maxCandidates)
+  const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
+  console.log(
+    `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +
+      `${finalCandidates.length} after dedup and cap`,
+  )
 
   const dataset: Dataset = {
     meta: {
       generatedAt: new Date().toISOString(),
-      aoi,
-      bbox25833: bbox,
+      regions,
       params: p,
       sources: [
         {
@@ -116,18 +217,14 @@ async function main() {
         },
       ],
       stats: {
-        aoiWidth: Math.round(bbox.maxE - bbox.minE),
-        aoiHeight: Math.round(bbox.maxN - bbox.minN),
-        groundMin: Math.round(ext.min * 100) / 100,
-        groundMax: Math.round(ext.max * 100) / 100,
-        anchorsScanned: scanned,
-        anchorsKept: anchors.length,
-        pairsInRange: r.pairsInRange,
-        pairsSectorPassed: r.pairsSectorPassed,
-        pairsLevelEnough: r.pairsLevelEnough,
-        pairsFeasible: r.pairsFeasible,
-        candidatesAfterDedup: r.candidatesAfterDedup,
-        refinedCount: ref.improved,
+        anchorsScanned: totals.anchorsScanned,
+        anchorsKept: totals.anchorsKept,
+        pairsInRange: totals.pairsInRange,
+        pairsSectorPassed: totals.pairsSectorPassed,
+        pairsLevelEnough: totals.pairsLevelEnough,
+        pairsFeasible: totals.pairsFeasible,
+        candidatesAfterDedup: totals.candidatesAfterDedup,
+        refinedCount: totals.refinedCount,
         refineMeanGain: Math.round(meanGain * 100) / 100,
         runtimeMs: Date.now() - started,
       },
@@ -153,7 +250,7 @@ async function main() {
     drop: [],
     open: [],
   }
-  for (const a of anchors) {
+  for (const a of dumpAnchors) {
     const { lat, lon } = toWgs84(a.e, a.n)
     dump.lat.push(r6(lat))
     dump.lon.push(r6(lon))
@@ -166,7 +263,7 @@ async function main() {
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
   console.log(
     `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB), ` +
-      `anchors.json (${anchorKb} KB, ${anchors.length} points)`,
+      `anchors.json (${anchorKb} KB, ${dumpAnchors.length} points)`,
   )
 
   if (finalCandidates.length) {
