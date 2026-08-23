@@ -193,9 +193,27 @@ function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection
   }
 }
 
+export interface LatLon {
+  lat: number
+  lon: number
+}
+
 export interface CustomPoints {
-  a: { lat: number; lon: number } | null
-  b: { lat: number; lon: number } | null
+  a: LatLon | null
+  b: LatLon | null
+}
+
+function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [[a.lon, a.lat], [b.lon, b.lat]] },
+      },
+    ],
+  }
 }
 
 interface Props {
@@ -207,7 +225,8 @@ interface Props {
   custom: CustomPoints
   showLines: boolean
   onSelect: (id: string | null) => void
-  onSetCustom: (which: 'a' | 'b', at: { lat: number; lon: number } | null) => void
+  onSetCustom: (which: 'a' | 'b', at: LatLon | null) => void
+  onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
 }
 
 export function MapView({
@@ -220,11 +239,11 @@ export function MapView({
   showLines,
   onSelect,
   onSetCustom,
+  onMoveAnchor,
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
-  const markers = useRef<maplibregl.Marker[]>([])
   const popup = useRef<maplibregl.Popup | null>(null)
   // Read inside map event handlers, which are registered once and outlive any single render.
   const sectorCount = useRef(64)
@@ -232,10 +251,10 @@ export function MapView({
   // How far the hover wedges reach; the scan's own near-field probe distance.
   const wedgeMetres = useRef(40)
   const dropRadius = useRef(25)
-  const customMarkers = useRef<Partial<Record<'a' | 'b', maplibregl.Marker>>>({})
+  const anchorMarkers = useRef<Partial<Record<'a' | 'b', maplibregl.Marker>>>({})
   const dragging = useRef<'a' | 'b' | null>(null)
-  const onSetCustomRef = useRef(onSetCustom)
-  onSetCustomRef.current = onSetCustom
+  const onMoveAnchorRef = useRef(onMoveAnchor)
+  onMoveAnchorRef.current = onMoveAnchor
   const ready = useRef(false)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -425,10 +444,8 @@ export function MapView({
     })
     return () => {
       popup.current?.remove()
-      Object.values(customMarkers.current).forEach((mk) => mk?.remove())
-      customMarkers.current = {}
-      markers.current.forEach((mk) => mk.remove())
-      markers.current = []
+      Object.values(anchorMarkers.current).forEach((mk) => mk?.remove())
+      anchorMarkers.current = {}
       m.remove()
       map.current = null
       ready.current = false
@@ -456,20 +473,6 @@ export function MapView({
     m.removeFeatureState({ source: 'lines' })
     const index = selected ? visible.findIndex((c) => c.id === selected.id) : -1
     if (index >= 0) m.setFeatureState({ source: 'lines', id: index }, { sel: true })
-
-    // Only for a *found* line. The planned line already has its own draggable markers, and drawing
-    // these on top of them meant the user was grabbing an undraggable marker and nothing happened.
-    // The two sets can now never occupy the same coordinates.
-    markers.current.forEach((mk) => mk.remove())
-    markers.current =
-      selected && selected.id !== PLANNED_ID
-        ? ([['A', selected.a], ['B', selected.b]] as const).map(([label, pt]) => {
-            const node = document.createElement('div')
-            node.className = 'anchor-marker'
-            node.textContent = label
-            return new maplibregl.Marker({ element: node }).setLngLat([pt.lon, pt.lat]).addTo(m)
-          })
-        : []
   }, [selected, visible])
 
   useEffect(() => {
@@ -492,69 +495,68 @@ export function MapView({
   useEffect(() => {
     const m = map.current
     if (!m || !ready.current) return
-
     const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
-    src?.setData(
-      custom.a && custom.b
-        ? {
-            type: 'FeatureCollection',
-            features: [
-              {
-                type: 'Feature',
-                properties: {},
-                geometry: {
-                  type: 'LineString',
-                  coordinates: [
-                    [custom.a.lon, custom.a.lat],
-                    [custom.b.lon, custom.b.lat],
-                  ],
-                },
-              },
-            ],
-          }
-        : emptyCollection,
-    )
+    src?.setData(custom.a && custom.b ? lineFeature(custom.a, custom.b) : emptyCollection)
+  }, [custom])
 
-    // Markers are created once and then only repositioned. Recreating them on every state change
-    // destroys the DOM element the browser is tracking the gesture on, which turns a smooth drag
-    // into a series of jumps -- and the drag handler updates state on every pointer move, so it was
-    // tearing down the very element being dragged.
+  /**
+   * The two anchor handles, for whichever line is being looked at.
+   *
+   * One set, not one per kind of line. Dragging a found line's anchor forks it into the planned
+   * line, which means the selection changes mid-gesture -- so the same DOM elements have to serve
+   * both, and are created once and thereafter only repositioned and restyled. Recreating them would
+   * destroy the element the browser is tracking the gesture on, which is what previously turned a
+   * drag into a series of jumps.
+   *
+   * Positions follow the selection when there is one, and fall back to the placed custom points so
+   * a single point placed on its own is still visible and movable.
+   */
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready.current) return
+
+    const planning = !selected || selected.id === PLANNED_ID
+    const at: Record<'a' | 'b', LatLon | null> = selected
+      ? { a: { lat: selected.a.lat, lon: selected.a.lon }, b: { lat: selected.b.lat, lon: selected.b.lon } }
+      : custom
+
     for (const which of ['a', 'b'] as const) {
-      const at = custom[which]
-      const existing = customMarkers.current[which]
+      const pt = at[which]
+      const existing = anchorMarkers.current[which]
 
-      if (!at) {
+      if (!pt) {
         existing?.remove()
-        delete customMarkers.current[which]
+        delete anchorMarkers.current[which]
         continue
       }
       if (existing) {
+        existing.getElement().className = planning ? 'custom-marker' : 'anchor-marker'
         // Never fight the pointer: while this end is being dragged the marker is authoritative.
-        if (dragging.current !== which) existing.setLngLat([at.lon, at.lat])
+        if (dragging.current !== which) existing.setLngLat([pt.lon, pt.lat])
         continue
       }
 
       const node = document.createElement('div')
-      node.className = 'custom-marker'
+      node.className = planning ? 'custom-marker' : 'anchor-marker'
       node.textContent = which.toUpperCase()
       const marker = new maplibregl.Marker({ element: node, draggable: true })
-        .setLngLat([at.lon, at.lat])
+        .setLngLat([pt.lon, pt.lat])
         .addTo(m)
+      const report = () => {
+        const { lat, lng } = marker.getLngLat()
+        onMoveAnchorRef.current(which, { lat, lon: lng })
+      }
       marker.on('dragstart', () => {
         dragging.current = which
       })
-      marker.on('drag', () => {
-        const { lat, lng } = marker.getLngLat()
-        onSetCustomRef.current(which, { lat, lon: lng })
-      })
+      marker.on('drag', report)
       marker.on('dragend', () => {
         dragging.current = null
-        const { lat, lng } = marker.getLngLat()
-        onSetCustomRef.current(which, { lat, lon: lng })
+        report()
       })
-      customMarkers.current[which] = marker
+      anchorMarkers.current[which] = marker
     }
-  }, [custom])
+  }, [selected, custom])
 
   useEffect(() => {
     const m = map.current

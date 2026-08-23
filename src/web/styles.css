@@ -316,3 +316,14 @@ header .spacer { flex: 1; }
 
 .loading { padding: 40px; color: var(--muted); font-size: 13px; }
 
+
+/* Rig-height controls, only on the planned line: two sliders side by side with a reset. */
+.rig { display: flex; align-items: flex-end; gap: 12px; margin-top: 10px; }
+.rig .filter { flex: 1; margin-bottom: 0; }
+.rig button {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 5px; cursor: pointer; padding: 3px 9px; font-size: 11px;
+}
+.rig button:disabled { opacity: 0.4; cursor: default; }
+.anchor-marker { cursor: grab; }
+.anchor-marker:active { cursor: grabbing; }

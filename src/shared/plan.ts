@@ -13,6 +13,22 @@ import { toWgs84 } from './geo.js'
 /** Id a planned line carries, so callers can distinguish it from a found candidate. */
 export const PLANNED_ID = 'custom'
 
+/**
+ * Highest rig height the planner offers, deliberately above what the search allows.
+ *
+ * The search only ever rigs off the ground with an A-frame, but "what if I could get 4 m up here"
+ * is the question the planner exists to answer -- tree-trunk and structure anchors are a roadmap
+ * item, and this is how you check by hand whether one would be worth the trouble. Anything over
+ * `aFrameMax` is reported as a violation rather than silently accepted.
+ */
+export const PLANNED_RIG_MAX = 5
+
+/** Attachment heights above ground at each end, when the user sets them by hand. */
+export interface RigHeights {
+  a: number
+  b: number
+}
+
 export interface PlannedLine {
   candidate: Candidate
   /** Hard constraints this line fails. Empty means the search would have accepted it. */
@@ -30,6 +46,8 @@ export interface PlannedLine {
  * so a mismatched pair reports how far off level it is instead of being refused. And nothing is
  * rejected: failures come back as `violations` for display, because "why does this spot not work"
  * is as useful an answer as a list of spots that do.
+ *
+ * Pass `rig` to set the attachment heights by hand instead of taking the best available pair.
  */
 export function planLine(
   a: Pos,
@@ -38,6 +56,7 @@ export function planLine(
   surface: Sampler,
   sagRatio: number,
   p: Params,
+  rig: RigHeights | null = null,
 ): PlannedLine | null {
   const gA = ground.sample(a.e, a.n)
   const gB = ground.sample(b.e, b.n)
@@ -46,13 +65,15 @@ export function planLine(
   const length = Math.hypot(b.e - a.e, b.n - a.n)
   if (length < 1) return null
 
-  const h = chooseHeights(
-    gA + p.aFrameMin,
-    gA + p.aFrameMax,
-    gB + p.aFrameMin,
-    gB + p.aFrameMax,
-    Infinity,
-  )
+  const h = rig
+    ? { hA: gA + rig.a, hB: gB + rig.b, offLevel: Math.abs(gA + rig.a - (gB + rig.b)) }
+    : chooseHeights(
+        gA + p.aFrameMin,
+        gA + p.aFrameMax,
+        gB + p.aFrameMin,
+        gB + p.aFrameMax,
+        Infinity,
+      )
   if (!h) return null
 
   const profile = buildProfile(a, b, h.hA, h.hB, length, ground, surface, p)
@@ -84,6 +105,20 @@ export function planLine(
       scoreParts: parts,
       profile: profile.map((s, i) => ({ ...s, line: r2(line[i]!) })),
     },
-    violations: violationsOf(m, length, h.offLevel, p),
+    violations: [...violationsOf(m, length, h.offLevel, p), ...rigViolations(h, gA, gB, p)],
   }
+}
+
+function rigViolations(
+  h: { hA: number; hB: number },
+  gA: number,
+  gB: number,
+  p: Params,
+): string[] {
+  return ([['A', h.hA - gA], ['B', h.hB - gB]] as const)
+    .filter(([, aFrame]) => aFrame > p.aFrameMax + 1e-9)
+    .map(
+      ([label, aFrame]) =>
+        `rigged ${aFrame.toFixed(1)} m up at ${label}, over the ${p.aFrameMax} m an A-frame reaches`,
+    )
 }

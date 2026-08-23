@@ -73,6 +73,21 @@ describe('planLine', () => {
     expect(planLine(a, b, empty, empty, p.sagRatio, p)).toBeNull()
   })
 
+  it('rigs at the heights it is handed, and derives the offlevel from them', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: 0.5, b: 1.2 })!
+    expect(r.candidate.a.aFrame).toBeCloseTo(0.5, 2)
+    expect(r.candidate.b.aFrame).toBeCloseTo(1.2, 2)
+    expect(r.candidate.offLevel).toBeCloseTo(0.7, 2)
+  })
+
+  it('flags a rig height no A-frame reaches', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: 4, b: 4 })!
+    expect(r.violations.join(' ')).toMatch(/over the 1.5 m an A-frame reaches/)
+    expect(r.candidate.clearanceMin).toBeGreaterThan(0)
+  })
+
   it('responds to the sag setting the same way the found candidates do', () => {
     const { ground, surface } = terrain(15)
     const tight = planLine(a, b, ground, surface, 0.05, p)!

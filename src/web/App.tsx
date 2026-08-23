@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { BASEMAPS, MIX_MAX, MapView, type CustomPoints } from './MapView.js'
+import { BASEMAPS, MIX_MAX, MapView, type CustomPoints, type LatLon } from './MapView.js'
 import { toUtm33 } from '../shared/geo.js'
-import { PLANNED_ID, planLine, type PlannedLine } from '../shared/plan.js'
+import {
+  PLANNED_ID,
+  PLANNED_RIG_MAX,
+  planLine,
+  type PlannedLine,
+  type RigHeights,
+} from '../shared/plan.js'
 import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
 import { ProfileChart } from './ProfileChart.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -75,6 +81,8 @@ export function App() {
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [custom, setCustom] = useState<CustomPoints>({ a: null, b: null })
+  // null means "as level and as high as the ground allows", the same choice the search makes.
+  const [rig, setRig] = useState<RigHeights | null>(null)
   // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
   // computed, not held in state, so no effect has to write it.
@@ -148,8 +156,9 @@ export function App() {
       surfaceSampler,
       sagPct / 100,
       data.meta.params,
+      rig,
     )
-  }, [data, customUtm, sagPct, terrainVersion])
+  }, [data, customUtm, sagPct, terrainVersion, rig])
 
   const planError =
     customUtm && !planned
@@ -163,11 +172,31 @@ export function App() {
    * consequence of the click, and an effect that both reads and writes the selection is exactly
    * what produced a maximum-update-depth loop before.
    */
-  const setCustomPoint = (which: 'a' | 'b', at: { lat: number; lon: number } | null) => {
+  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => {
     setCustom((prev) => ({ ...prev, [which]: at }))
     const other = which === 'a' ? custom.b : custom.a
     if (at && other) setSelectedId(PLANNED_ID)
-    if (!at) setSelectedId((cur) => (cur === PLANNED_ID ? null : cur))
+    if (!at) {
+      setRig(null)
+      setSelectedId((cur) => (cur === PLANNED_ID ? null : cur))
+    }
+  }
+
+  /**
+   * Dragging an anchor handle. Dragging one that belongs to a *found* line forks that line into the
+   * planned one, which is the quick way to ask "what if this candidate started three metres over
+   * there" -- the candidate itself is untouched and the copy becomes the thing under the pointer.
+   */
+  const moveAnchor = (which: 'a' | 'b', at: LatLon) => {
+    const from =
+      selected && selected.id !== PLANNED_ID
+        ? {
+            a: { lat: selected.a.lat, lon: selected.a.lon },
+            b: { lat: selected.b.lat, lon: selected.b.lon },
+          }
+        : custom
+    setCustom({ ...from, [which]: at })
+    setSelectedId(PLANNED_ID)
   }
 
   /**
@@ -332,6 +361,7 @@ export function App() {
             showLines={showLines}
             onSelect={setSelectedId}
             onSetCustom={setCustomPoint}
+            onMoveAnchor={moveAnchor}
           />
 
           {selected && (
@@ -381,8 +411,12 @@ export function App() {
                   </dd>
                   <dt>Ground A / B</dt>
                   <dd>{selected.a.ground.toFixed(1)} / {selected.b.ground.toFixed(1)} m</dd>
-                  <dt>Rig height A / B</dt>
-                  <dd>+{selected.a.aFrame.toFixed(2)} / +{selected.b.aFrame.toFixed(2)} m</dd>
+                  {selected.id !== PLANNED_ID && (
+                    <>
+                      <dt>Rig height A / B</dt>
+                      <dd>+{selected.a.aFrame.toFixed(2)} / +{selected.b.aFrame.toFixed(2)} m</dd>
+                    </>
+                  )}
                   <dt>Score: exp / len / canopy / margin / level</dt>
                   <dd>
                     {(selected.scoreParts.exposure * 100).toFixed(0)}/
@@ -393,6 +427,37 @@ export function App() {
                   </dd>
                 </dl>
               </div>
+
+              {selected.id === PLANNED_ID && (
+                <div className="rig">
+                  {(['a', 'b'] as const).map((which) => (
+                    <Slider
+                      key={which}
+                      label={`Rig ${which.toUpperCase()}`}
+                      value={selected[which].aFrame}
+                      min={0}
+                      max={PLANNED_RIG_MAX}
+                      step={0.1}
+                      unit=" m"
+                      format={(v) => v.toFixed(1)}
+                      onChange={(v) =>
+                        setRig(
+                          which === 'a'
+                            ? { a: v, b: selected.b.aFrame }
+                            : { a: selected.a.aFrame, b: v },
+                        )
+                      }
+                    />
+                  ))}
+                  <button
+                    disabled={rig === null}
+                    onClick={() => setRig(null)}
+                    title="Rig as level and as high as the ground allows, like the search does"
+                  >
+                    auto
+                  </button>
+                </div>
+              )}
 
               {selected.id === PLANNED_ID && planned && planned.violations.length > 0 && (
                 <div className="violations">

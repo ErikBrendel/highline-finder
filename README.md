@@ -98,8 +98,11 @@ sensitive parameter in the whole tool — on the default AOI the candidate count
 65 at 5 %, 31 at 6 % and 16 at 7 %.
 
 **Planning your own line.** Right-click the map to set a custom point A and B, then drag either
-anchor to adjust. The line is measured live by the same code the search uses, so its numbers are
-directly comparable to a found candidate's. It is deliberately exempt from every filter and from
+anchor to adjust. Dragging an anchor of a *found* line forks it into the planned line, which is the
+quick way to try variations on a candidate without losing it. Rig height at each end is a slider
+(0-5 m, above the 1.5 m an A-frame reaches, so a tree or a structure can be modelled by hand);
+`auto` goes back to the level-first choice the search makes. The line is measured live by the same
+code the search uses, so its numbers are directly comparable to a found candidate's. It is deliberately exempt from every filter and from
 the validity checks — instead of disappearing, an unworkable line tells you *why* it does not
 qualify. Terrain comes from the survey's WCS a 256 m window at a time, cached in the browser, so
 this works anywhere in Brandenburg rather than only inside the generated AOI.
