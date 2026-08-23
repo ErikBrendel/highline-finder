@@ -530,7 +530,11 @@ export function MapView({
         continue
       }
       if (existing) {
-        existing.getElement().className = planning ? 'custom-marker' : 'anchor-marker'
+        // classList, not className: MapLibre positions markers through its own `maplibregl-marker`
+        // class (position: absolute, origin at the container's top left), so overwriting className
+        // drops the element back into static flow and its transform lands dozens of pixels off.
+        existing.getElement().classList.toggle('custom-marker', planning)
+        existing.getElement().classList.toggle('anchor-marker', !planning)
         // Never fight the pointer: while this end is being dragged the marker is authoritative.
         if (dragging.current !== which) existing.setLngLat([pt.lon, pt.lat])
         continue
