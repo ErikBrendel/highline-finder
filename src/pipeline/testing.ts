@@ -1,4 +1,4 @@
-import { Grid } from './raster.js'
+import { Grid } from '../shared/grid.js'
 
 /** Builds a synthetic 1 m grid from a height function, for tests. */
 export function gridFrom(

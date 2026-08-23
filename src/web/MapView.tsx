@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
@@ -192,16 +192,35 @@ function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection
   }
 }
 
+export interface CustomPoints {
+  a: { lat: number; lon: number } | null
+  b: { lat: number; lon: number } | null
+}
+
 interface Props {
   data: Dataset
   visible: Candidate[]
   selected: Candidate | null
   basemapMix: number
   anchorDump: AnchorDump | null
+  custom: CustomPoints
+  customLine: Candidate | null
   onSelect: (id: string | null) => void
+  onSetCustom: (which: 'a' | 'b', at: { lat: number; lon: number } | null) => void
 }
 
-export function MapView({ data, visible, selected, basemapMix, anchorDump, onSelect }: Props) {
+export function MapView({
+  data,
+  visible,
+  selected,
+  basemapMix,
+  anchorDump,
+  custom,
+  customLine,
+  onSelect,
+  onSetCustom,
+}: Props) {
+  const [menu, setMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
   const markers = useRef<maplibregl.Marker[]>([])
@@ -212,6 +231,9 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
   // How far the hover wedges reach; the scan's own near-field probe distance.
   const wedgeMetres = useRef(40)
   const dropRadius = useRef(25)
+  const customMarkers = useRef<maplibregl.Marker[]>([])
+  const onSetCustomRef = useRef(onSetCustom)
+  onSetCustomRef.current = onSetCustom
   const ready = useRef(false)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -331,6 +353,12 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
           onSelectRef.current(null)
         }
       })
+      m.on('contextmenu', (e) => {
+        setMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lon: e.lngLat.lng })
+      })
+      m.on('movestart', () => setMenu(null))
+      m.on('click', () => setMenu(null))
+
       m.on('mouseenter', 'lines-hit', () => { m.getCanvas().style.cursor = 'pointer' })
       m.on('mouseleave', 'lines-hit', () => { m.getCanvas().style.cursor = '' })
 
@@ -371,6 +399,8 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
     })
     return () => {
       popup.current?.remove()
+      customMarkers.current.forEach((mk) => mk.remove())
+      customMarkers.current = []
       markers.current.forEach((mk) => mk.remove())
       markers.current = []
       m.remove()
@@ -425,6 +455,55 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
   useEffect(() => {
     const m = map.current
     if (!m || !ready.current) return
+
+    const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
+    src?.setData(
+      custom.a && custom.b
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [
+                    [custom.a.lon, custom.a.lat],
+                    [custom.b.lon, custom.b.lat],
+                  ],
+                },
+              },
+            ],
+          }
+        : emptyCollection,
+    )
+
+    // Rebuilt rather than repositioned: there are at most two, and this keeps the drag handlers
+    // bound to the correct end without tracking marker identity across renders.
+    customMarkers.current.forEach((mk) => mk.remove())
+    customMarkers.current = (['a', 'b'] as const)
+      .filter((which) => custom[which])
+      .map((which) => {
+        const at = custom[which]!
+        const node = document.createElement('div')
+        node.className = 'custom-marker'
+        node.textContent = which.toUpperCase()
+        const marker = new maplibregl.Marker({ element: node, draggable: true })
+          .setLngLat([at.lon, at.lat])
+          .addTo(m)
+        const push = () => {
+          const { lat, lng } = marker.getLngLat()
+          onSetCustomRef.current(which, { lat, lon: lng })
+        }
+        marker.on('drag', push)
+        marker.on('dragend', push)
+        return marker
+      })
+  }, [custom])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready.current) return
     BASEMAPS.forEach((_, i) => {
       const id = `base${i}`
       const visible = basemapVisible(i, basemapMix, BASEMAPS.length)
@@ -433,5 +512,43 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
     })
   }, [basemapMix])
 
-  return <div id="map" ref={el} />
+  return (
+    <>
+      <div id="map" ref={el} />
+      {menu && (
+        <div className="mapmenu" style={{ left: menu.x, top: menu.y }}>
+          <button
+            onClick={() => {
+              onSetCustom('a', { lat: menu.lat, lon: menu.lon })
+              setMenu(null)
+            }}
+          >
+            Set custom point A
+          </button>
+          <button
+            onClick={() => {
+              onSetCustom('b', { lat: menu.lat, lon: menu.lon })
+              setMenu(null)
+            }}
+          >
+            Set custom point B
+          </button>
+          {(custom.a || custom.b) && (
+            <button
+              onClick={() => {
+                onSetCustom('a', null)
+                onSetCustom('b', null)
+                setMenu(null)
+              }}
+            >
+              Clear custom line
+            </button>
+          )}
+          <div className="coord">
+            {menu.lat.toFixed(6)}, {menu.lon.toFixed(6)}
+          </div>
+        </div>
+      )}
+    </>
+  )
 }

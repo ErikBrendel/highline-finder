@@ -140,6 +140,22 @@ export function installTileCache(): void {
   })
 }
 
+/**
+ * Fetches a URL through the same persistent store the basemap tiles use.
+ *
+ * Exposed because the elevation windows the line planner needs are the same kind of thing: large,
+ * immutable, and expensive to re-request while dragging an anchor around.
+ */
+export async function fetchCached(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const hit = await read(url).catch(() => null)
+  if (hit) return hit
+  const res = await fetch(url, { signal })
+  if (!res.ok) throw new Error(`${res.status} for ${url}`)
+  const bytes = await res.arrayBuffer()
+  void write(url, bytes).catch(() => {})
+  return bytes
+}
+
 export function cacheStats(): { count: number; bytes: number } {
   return { count: memIndex.size, bytes: memBytes }
 }

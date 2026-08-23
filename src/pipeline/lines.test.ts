@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { chooseHeights, dedupe, evaluateLine, findLines, refine } from './lines.js'
+import { dedupe, evaluateLine, findLines, refine } from './lines.js'
+import { chooseHeights } from '../shared/scoring.js'
 import { gridFrom } from './testing.js'
 import { DEFAULT_PARAMS } from './params.js'
 import type { Anchor } from './openness.js'
-import type { Grid } from './raster.js'
+import type { Grid } from '../shared/grid.js'
 import type { Params } from '../shared/types.js'
 
 const p: Params = DEFAULT_PARAMS

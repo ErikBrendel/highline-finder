@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Grid } from './raster.js'
+import { Grid } from '../shared/grid.js'
 import { gridFrom } from './testing.js'
 
 describe('Grid', () => {

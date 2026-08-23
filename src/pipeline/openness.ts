@@ -1,4 +1,4 @@
-import { Grid, minFilter } from './raster.js'
+import { Grid, minFilter } from '../shared/grid.js'
 import type { Params } from '../shared/types.js'
 
 /**

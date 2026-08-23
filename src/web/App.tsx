@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
+import { BASEMAPS, MIX_MAX, MapView, type CustomPoints } from './MapView.js'
+import { toUtm33 } from '../shared/geo.js'
+import { planLine, type PlannedLine } from '../shared/plan.js'
+import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
 import { ProfileChart } from './ProfileChart.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 
@@ -72,6 +75,9 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [basemapMix, setBasemapMix] = useState(0)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
+  const [custom, setCustom] = useState<CustomPoints>({ a: null, b: null })
+  const [planned, setPlanned] = useState<PlannedLine | null>(null)
+  const [planError, setPlanError] = useState<string | null>(null)
   const [anchorError, setAnchorError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -97,6 +103,52 @@ export function App() {
       .map((c) => rescoreAtSag(c, sagPct / 100, data.meta.params))
       .filter((c): c is Candidate => c !== null)
   }, [data, sagPct])
+
+  /**
+   * Measures the user-placed line whenever either end moves.
+   *
+   * Terrain arrives from the WCS a window at a time, so this runs twice: once immediately against
+   * whatever is already cached, giving instant feedback while dragging, and again once the missing
+   * windows have landed. The stale guard matters because dragging fires far faster than the network.
+   */
+  useEffect(() => {
+    if (!data || !custom.a || !custom.b) {
+      setPlanned(null)
+      setPlanError(null)
+      return
+    }
+    const a = { e: 0, n: 0 }
+    const b = { e: 0, n: 0 }
+    ;[a.e, a.n] = toUtm33(custom.a.lat, custom.a.lon)
+    ;[b.e, b.n] = toUtm33(custom.b.lat, custom.b.lon)
+
+    const p = data.meta.params
+    const sag = (sagPct ?? p.sagRatio * 100) / 100
+    const attempt = () => planLine(a, b, groundSampler, surfaceSampler, sag, p)
+
+    let stale = false
+    const immediate = attempt()
+    if (immediate) {
+      setPlanned(immediate)
+      setPlanError(null)
+    }
+    ensureTerrain(a, b)
+      .then(() => {
+        if (stale) return
+        const result = attempt()
+        setPlanned(result)
+        setPlanError(result ? null : 'no elevation data here')
+      })
+      .catch(() => {
+        if (!stale) setPlanError('could not load elevation for this area')
+      })
+    return () => {
+      stale = true
+    }
+  }, [data, custom, sagPct])
+
+  const setCustomPoint = (which: 'a' | 'b', at: { lat: number; lon: number } | null) =>
+    setCustom((prev) => ({ ...prev, [which]: at }))
 
   /**
    * Debug overlay of every anchor the openness scan kept. Development only: anchors.json is
@@ -135,9 +187,12 @@ export function App() {
     return out.sort((a, b) => key[sort](b) - key[sort](a))
   }, [data, rescored, minScore, minLength, minExposure, maxCanopy, maxOffLevel, sort])
 
+  // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
-    () => visible.find((c) => c.id === selectedId) ?? null,
-    [visible, selectedId],
+    () =>
+      (selectedId === 'custom' ? planned?.candidate : visible.find((c) => c.id === selectedId)) ??
+      null,
+    [visible, selectedId, planned],
   )
 
   if (error) return <div className="loading">Failed to load candidates.json &mdash; {error}</div>
@@ -272,6 +327,8 @@ export function App() {
 
           <CacheBadge />
 
+          {planError && <div className="planerror">{planError}</div>}
+
           {import.meta.env.DEV && (
             <div className="debugbar">
               <button data-active={!!anchorDump} onClick={toggleAnchors}>
@@ -288,14 +345,19 @@ export function App() {
             selected={selected}
             basemapMix={basemapMix}
             anchorDump={anchorDump}
+            custom={custom}
+            customLine={planned?.candidate ?? null}
             onSelect={setSelectedId}
+            onSetCustom={setCustomPoint}
           />
 
           {selected && (
             <div className="details">
               <div className="head">
-                <strong style={{ color: scoreColor(selected.score) }}>
-                  Score {selected.score.toFixed(1)}
+                <strong
+                  style={{ color: selected.id === 'custom' ? '#22c55e' : scoreColor(selected.score) }}
+                >
+                  {selected.id === 'custom' ? 'Planned line · ' : ''}Score {selected.score.toFixed(1)}
                 </strong>
                 <span className="sub">
                   {selected.length.toFixed(0)} m &middot; bearing {selected.bearing.toFixed(0)}&deg;
@@ -348,6 +410,22 @@ export function App() {
                   </dd>
                 </dl>
               </div>
+
+              {selected.id === 'custom' && planned && planned.violations.length > 0 && (
+                <div className="violations">
+                  <b>Would not qualify as a candidate:</b>
+                  <ul>
+                    {planned.violations.map((v) => (
+                      <li key={v}>{v}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {selected.id === 'custom' && planned && planned.violations.length === 0 && (
+                <div className="note" style={{ margin: '8px 0 0' }}>
+                  Meets every hard constraint — the search would have accepted this line.
+                </div>
+              )}
 
               <div className="anchors">
                 A{' '}

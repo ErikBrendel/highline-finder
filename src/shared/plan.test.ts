@@ -1,0 +1,83 @@
+import { describe, expect, it } from 'vitest'
+import { planLine } from './plan.js'
+import { Grid } from './grid.js'
+import { DEFAULT_PARAMS } from '../pipeline/params.js'
+
+const p = DEFAULT_PARAMS
+
+/** A flat plateau at 50 m with a canyon floor at `floor` between e=50 and e=250. */
+function terrain(floor: number, canopy = 0): { ground: Grid; surface: Grid } {
+  const make = (fn: (e: number) => number) => {
+    const g = Grid.filled(300, 300, 0, 300, 1)
+    for (let row = 0; row < 300; row++) {
+      for (let col = 0; col < 300; col++) g.data[row * 300 + col] = fn(col + 0.5)
+    }
+    return g
+  }
+  const base = (e: number) => (e <= 50 || e >= 250 ? 50 : floor)
+  return { ground: make(base), surface: make((e) => base(e) + (e > 50 && e < 250 ? canopy : 0)) }
+}
+
+describe('planLine', () => {
+  const a = { e: 45, n: 150 }
+  const b = { e: 255, n: 150 }
+
+  it('measures a valid line and reports no violations', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p)!
+    expect(r.violations).toEqual([])
+    expect(r.candidate.id).toBe('custom')
+    expect(r.candidate.length).toBeCloseTo(210, 0)
+    expect(r.candidate.clearanceMin).toBeGreaterThanOrEqual(p.minClearance)
+  })
+
+  it('still returns a line that fails, with the reasons', () => {
+    // A shallow dip: the sagging line runs into the ground and never gets high above it.
+    const { ground, surface } = terrain(48)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p)!
+    expect(r.candidate.length).toBeCloseTo(210, 0)
+    expect(r.violations.length).toBeGreaterThan(0)
+    expect(r.violations.join(' ')).toMatch(/clears the ground|off the ground/)
+  })
+
+  it('reports offlevel instead of refusing a mismatched pair', () => {
+    // Rims 8 m apart in height, far beyond what a 1.5 m A-frame range can level out.
+    const g = Grid.filled(300, 300, 0, 300, 1)
+    for (let row = 0; row < 300; row++) {
+      for (let col = 0; col < 300; col++) {
+        const e = col + 0.5
+        g.data[row * 300 + col] = e <= 50 ? 50 : e >= 250 ? 58 : 15
+      }
+    }
+    const r = planLine(a, b, g, g, p.sagRatio, p)!
+    expect(r.candidate.offLevel).toBeCloseTo(8 - p.aFrameMax, 1)
+    expect(r.violations.join(' ')).toMatch(/offlevel/)
+  })
+
+  it('flags a span outside the length window without discarding it', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine({ e: 45, n: 150 }, { e: 75, n: 150 }, ground, surface, p.sagRatio, p)!
+    expect(r.candidate.length).toBeCloseTo(30, 0)
+    expect(r.violations.join(' ')).toMatch(/under the 50 m minimum/)
+  })
+
+  it('scores canopy the line passes through', () => {
+    const { ground, surface } = terrain(15, 30)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p)!
+    expect(r.candidate.canopyBlockedFraction).toBeGreaterThan(0)
+    expect(r.candidate.canopyClearanceMin).toBeLessThan(0)
+  })
+
+  it('returns null where there is no elevation data', () => {
+    const empty = Grid.filled(300, 300, 0, 300, 1)
+    expect(planLine(a, b, empty, empty, p.sagRatio, p)).toBeNull()
+  })
+
+  it('responds to the sag setting the same way the found candidates do', () => {
+    const { ground, surface } = terrain(15)
+    const tight = planLine(a, b, ground, surface, 0.05, p)!
+    const loose = planLine(a, b, ground, surface, 0.09, p)!
+    expect(loose.candidate.clearanceMin).toBeLessThan(tight.candidate.clearanceMin)
+    expect(loose.candidate.sag).toBeGreaterThan(tight.candidate.sag)
+  })
+})

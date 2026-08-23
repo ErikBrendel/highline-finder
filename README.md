@@ -97,6 +97,18 @@ setting than 5 % would present an incomplete result as a complete one. Sag is th
 sensitive parameter in the whole tool — on the default AOI the candidate count runs 124 at 4 %,
 65 at 5 %, 31 at 6 % and 16 at 7 %.
 
+**Planning your own line.** Right-click the map to set a custom point A and B, then drag either
+anchor to adjust. The line is measured live by the same code the search uses, so its numbers are
+directly comparable to a found candidate's. It is deliberately exempt from every filter and from
+the validity checks — instead of disappearing, an unworkable line tells you *why* it does not
+qualify. Terrain comes from the survey's WCS a 256 m window at a time, cached in the browser, so
+this works anywhere in Brandenburg rather than only inside the generated AOI.
+
+One caveat: the WCS resamples the 0.2 m surface model server-side, where the pipeline takes the
+maximum of each block so the tallest obstacle in a cell wins. Measured against the pipeline's rule
+the WCS under-reports canopy by more than a metre on 16 % of cells, so a planned line's canopy
+figures are slightly optimistic. Terrain, the hard constraint, matches exactly.
+
 **What the ISA says about height.** The 2015 guidance required a highline be rigged at least
 `length/3 + 3 m` above the ground, so that a fall caught by the backup alone would not reach the
 ground. Nothing in Brandenburg satisfies that — with 38 m of relief the best candidate here is

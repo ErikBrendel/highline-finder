@@ -14,6 +14,45 @@ import type { Candidate, Params, ProfileSample, ScoreParts } from './types.js'
  * sample's worth of terrain and the numbers beside the chart contradict the chart.
  */
 
+export interface HeightChoice {
+  hA: number
+  hB: number
+  offLevel: number
+}
+
+/**
+ * Picks where the line attaches at each end, given the range each anchor allows and how much
+ * offlevel the span can afford.
+ *
+ * Rule: get as level as possible first, then as high as possible. If the two ranges overlap at all,
+ * a dead-level line exists, and it is rigged at the top of the overlap. Only when the ranges are
+ * disjoint is any offlevel unavoidable, and then the minimum is the gap between them -- reject if
+ * that exceeds the budget.
+ *
+ * Levelness wins over height deliberately. Giving up a metre of attachment height costs almost
+ * nothing when a candidate already has 20 m of air underneath, whereas offlevel is a real rigging
+ * problem at any scale. Maximising height first would have the search choose an offlevel line and
+ * then get marked down for it by its own score.
+ *
+ * Pass Infinity as the budget to ask what the best achievable heights are regardless of the cap,
+ * which is what the interactive planner wants: it reports the offlevel rather than refusing.
+ */
+export function chooseHeights(
+  loA: number,
+  hiA: number,
+  loB: number,
+  hiB: number,
+  budget: number,
+): HeightChoice | null {
+  const lo = Math.max(loA, loB)
+  const hi = Math.min(hiA, hiB)
+  if (lo <= hi) return { hA: hi, hB: hi, offLevel: 0 }
+
+  const offLevel = loA > hiB ? loA - hiB : loB - hiA
+  if (offLevel > budget) return null
+  return loA > hiB ? { hA: loA, hB: hiB, offLevel } : { hA: hiA, hB: loB, offLevel }
+}
+
 export interface Metrics {
   clearanceMin: number
   exposure: number
@@ -45,7 +84,7 @@ export function lineOverProfile(
  * The ISA's own guidance points the same way: mount a few metres in from the edge rather than
  * walking straight off it.
  */
-export function metricsOf(
+export function rawMetrics(
   profile: ProfileSample[],
   line: number[],
   length: number,
@@ -72,13 +111,62 @@ export function metricsOf(
     samples++
   }
 
-  if (samples === 0 || clearanceMin < p.minClearance || exposure < p.minExposure) return null
+  if (samples === 0) return null
   return {
     clearanceMin,
     exposure,
     canopyClearanceMin,
     canopyBlockedFraction: blocked / samples,
   }
+}
+
+/**
+ * Which hard constraints a line fails, in words. Empty means it is a valid candidate.
+ *
+ * Split out from the measurement so the interactive planner can describe a line that does not
+ * qualify instead of discarding it -- "why does this spot not work" is as useful an answer as a
+ * list of spots that do.
+ */
+export function violationsOf(
+  m: Metrics,
+  length: number,
+  offLevel: number,
+  p: Params,
+): string[] {
+  const out: string[] = []
+  if (length < p.minLength) out.push(`${length.toFixed(0)} m is under the ${p.minLength} m minimum`)
+  if (length > p.maxLength) out.push(`${length.toFixed(0)} m is over the ${p.maxLength} m maximum`)
+  if (m.clearanceMin < p.minClearance) {
+    out.push(
+      `clears the ground by only ${m.clearanceMin.toFixed(1)} m, under the ` +
+        `${p.minClearance} m minimum`,
+    )
+  }
+  if (m.exposure < p.minExposure) {
+    out.push(
+      `never more than ${m.exposure.toFixed(1)} m off the ground, under the ` +
+        `${p.minExposure} m that makes it a highline`,
+    )
+  }
+  const budget = p.maxOffLevelRatio * length
+  if (offLevel > budget) {
+    out.push(
+      `offlevel by ${offLevel.toFixed(1)} m, over the ${budget.toFixed(1)} m allowed at this span`,
+    )
+  }
+  return out
+}
+
+/** Measurement plus the validity gate, for the pipeline. Null when the line is not a candidate. */
+export function metricsOf(
+  profile: ProfileSample[],
+  line: number[],
+  length: number,
+  p: Params,
+): Metrics | null {
+  const m = rawMetrics(profile, line, length, p)
+  if (!m) return null
+  return m.clearanceMin < p.minClearance || m.exposure < p.minExposure ? null : m
 }
 
 /**

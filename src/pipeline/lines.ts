@@ -1,8 +1,9 @@
-import { Grid } from './raster.js'
+import type { Grid, Pos } from '../shared/grid.js'
 import { bearingOf, oppositeBearing, sectorOf, toWgs84 } from '../shared/geo.js'
 import type { Anchor } from './openness.js'
-import type { AnchorOut, Candidate, Params, ProfileSample } from '../shared/types.js'
-import { lineHeightAt, rescoreAtSag } from '../shared/scoring.js'
+import type { AnchorOut, Candidate, Params } from '../shared/types.js'
+import { chooseHeights, lineHeightAt, rescoreAtSag } from '../shared/scoring.js'
+import { buildProfile } from '../shared/profile.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -35,53 +36,6 @@ import { lineHeightAt, rescoreAtSag } from '../shared/scoring.js'
  * forest most candidates will have a high canopyBlockedFraction. That column is the real filter,
  * and the score weights it accordingly.
  */
-
-/** A candidate anchor position in EPSG:25833. */
-export interface Pos {
-  e: number
-  n: number
-}
-
-export interface HeightChoice {
-  hA: number
-  hB: number
-  offLevel: number
-}
-
-/**
- * Picks where the line attaches at each end, given the range each anchor allows and how much
- * offlevel the span can afford.
- *
- * Rule: get as level as possible first, then as high as possible. If the two ranges overlap at
- * all, a dead-level line exists, and it is rigged at the top of the overlap. Only when the ranges
- * are disjoint is any offlevel unavoidable, and then the minimum is the gap between them --
- * reject if that exceeds the budget.
- *
- * Levelness wins over height deliberately. Giving up a metre of attachment height costs almost
- * nothing when a candidate already has 20 m of air underneath, whereas offlevel is a real rigging
- * problem at any scale. Maximising height first would have the search choose an offlevel line and
- * then get marked down for it by its own score.
- *
- * This is what makes the anchor range worth modelling: two rims 1.5 m apart in ground height can
- * still give a perfectly level line, because one end goes on an A-frame and the other does not.
- */
-export function chooseHeights(
-  loA: number,
-  hiA: number,
-  loB: number,
-  hiB: number,
-  budget: number,
-): HeightChoice | null {
-  const lo = Math.max(loA, loB)
-  const hi = Math.min(hiA, hiB)
-  if (lo <= hi) return { hA: hi, hB: hi, offLevel: 0 }
-
-  const offLevel = loA > hiB ? loA - hiB : loB - hiA
-  if (offLevel > budget) return null
-  return loA > hiB
-    ? { hA: loA, hB: hiB, offLevel }
-    : { hA: hiA, hB: loB, offLevel }
-}
 
 /**
  * Cheap gate used during the pair search: does the line clear the terrain at all, and does it get
@@ -127,38 +81,6 @@ function clearsTerrain(
     if (d >= inner0 && d <= inner1 && clear < p.minClearance) return false
   }
   return exposure >= p.minExposure
-}
-
-function buildProfile(
-  a: Pos,
-  b: Pos,
-  hA: number,
-  hB: number,
-  length: number,
-  ground: Grid,
-  surface: Grid,
-  p: Params,
-): ProfileSample[] {
-  const sag = p.sagRatio * length
-  const de = (b.e - a.e) / length
-  const dn = (b.n - a.n) / length
-  const steps = Math.min(p.profilePoints, Math.max(8, Math.round(length / p.profileStep)))
-  const out: ProfileSample[] = []
-  const r2 = (v: number) => Math.round(v * 100) / 100
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    const d = t * length
-    const e = a.e + de * d
-    const n = a.n + dn * d
-    const g = ground.sample(e, n)
-    out.push({
-      d: r2(d),
-      ground: r2(g),
-      surface: r2(Math.max(g, surface.sample(e, n) || g)),
-      line: r2(lineHeightAt(hA, hB, sag, t)),
-    })
-  }
-  return out
 }
 
 export interface FindResult {

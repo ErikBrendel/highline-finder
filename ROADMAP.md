@@ -84,6 +84,10 @@ anchors only, one AOI, static viewer.
 ## Viewer
 
 - 3D terrain view with the line drawn in space.
-- Re-run the search in the browser against cached rasters, so parameters become interactive
-  instead of requiring a pipeline run.
+- Re-run the *search* in the browser, not just the measurement. Most of what this needs now exists:
+  the WCS gives the browser terrain and canopy for any window, and the openness scan, pairing and
+  scoring are all platform-independent. What is missing is running it off the main thread and
+  deciding how much area to fetch. Note the canopy discrepancy first -- the WCS resamples where the
+  pipeline takes a block maximum, so a browser-side search would be systematically optimistic about
+  trees unless the 0.2 m data is used.
 - Permalinks to a candidate, and GPX export for the walk in.
