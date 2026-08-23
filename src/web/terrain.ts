@@ -64,19 +64,29 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   loaded.set(keyOf(tx, ty), { ground, surface })
 }
 
-/** Windows covering the corridor between two points, plus a margin for dragging. */
-function windowsFor(a: Pos, b: Pos, margin = TILE): [number, number][] {
-  const minE = Math.min(a.e, b.e) - margin
-  const maxE = Math.max(a.e, b.e) + margin
-  const minN = Math.min(a.n, b.n) - margin
-  const maxN = Math.max(a.n, b.n) + margin
-  const out: [number, number][] = []
-  for (let tx = Math.floor(minE / TILE); tx <= Math.floor(maxE / TILE); tx++) {
-    for (let ty = Math.floor(minN / TILE); ty <= Math.floor(maxN / TILE); ty++) {
-      out.push([tx, ty])
+/**
+ * Windows covering the corridor between two points, plus a margin for dragging.
+ *
+ * A band along the line, not its bounding box. The box is the same thing for an axis-aligned line
+ * and quadratically worse for a diagonal one -- at the planner's 4 km span cap that is the
+ * difference between roughly 60 windows and 320, each of them two requests, for area the line never
+ * crosses. Walking the segment in half-window steps and taking the neighbours of each step covers
+ * the same line with no gap: consecutive steps land at most half a window apart, so their
+ * neighbourhoods always overlap.
+ */
+export function windowsFor(a: Pos, b: Pos, margin = TILE): [number, number][] {
+  const steps = Math.ceil(Math.hypot(b.e - a.e, b.n - a.n) / (TILE / 2))
+  const reach = Math.ceil(margin / TILE)
+  const out = new Map<string, [number, number]>()
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps
+    const cx = Math.floor((a.e + (b.e - a.e) * t) / TILE)
+    const cy = Math.floor((a.n + (b.n - a.n) * t) / TILE)
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dy = -reach; dy <= reach; dy++) out.set(`${cx + dx}_${cy + dy}`, [cx + dx, cy + dy])
     }
   }
-  return out
+  return [...out.values()]
 }
 
 /**

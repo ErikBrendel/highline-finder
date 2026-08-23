@@ -3,6 +3,7 @@ import maplibregl, { type Map as MlMap } from 'maplibre-gl'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
 import { PLANNED_ID } from '../shared/plan.js'
+import type { CustomPoints, LatLon } from './planPoints.js'
 
 /**
  * Basemaps come straight from the LGB WMS endpoints, which serve EPSG:3857 -- so MapLibre's
@@ -191,16 +192,6 @@ function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection
       geometry: { type: 'Point', coordinates: [dump.lon[i]!, lat] },
     })),
   }
-}
-
-export interface LatLon {
-  lat: number
-  lon: number
-}
-
-export interface CustomPoints {
-  a: LatLon | null
-  b: LatLon | null
 }
 
 function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { BASEMAPS, MIX_MAX, MapView, type CustomPoints, type LatLon } from './MapView.js'
+import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
+import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
@@ -136,19 +137,19 @@ export function App() {
   const planPending = selectedId === PLANNED_ID && !!custom.a && !!custom.b && !planned
 
   /**
-   * Moving or placing an anchor. Selection happens here rather than in an effect: it is a
+   * Adopts a new pair of planned points. Selection happens here rather than in an effect: it is a
    * consequence of the click, and an effect that both reads and writes the selection is exactly
    * what produced a maximum-update-depth loop before.
    */
-  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => {
-    setCustom((prev) => ({ ...prev, [which]: at }))
-    const other = which === 'a' ? custom.b : custom.a
-    if (at && other) setSelectedId(PLANNED_ID)
-    if (!at) {
-      setRig(null)
-      setSelectedId((cur) => (cur === PLANNED_ID ? null : cur))
-    }
+  const commit = (next: CustomPoints) => {
+    setCustom(next)
+    const complete = !!next.a && !!next.b
+    if (!complete) setRig(null)
+    setSelectedId((cur) => (complete ? PLANNED_ID : cur === PLANNED_ID ? null : cur))
   }
+
+  /** Places one end of the planned line. */
+  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => commit(place(custom, which, at))
 
   /**
    * Dragging an anchor handle. Dragging one that belongs to a *found* line forks that line into the
@@ -163,8 +164,7 @@ export function App() {
             b: { lat: selected.b.lat, lon: selected.b.lon },
           }
         : custom
-    setCustom({ ...from, [which]: at })
-    setSelectedId(PLANNED_ID)
+    commit(place(from, which, at))
   }
 
   /**

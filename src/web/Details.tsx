@@ -2,7 +2,7 @@ import type { Candidate } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
-import type { LatLon } from './MapView.js'
+import type { LatLon } from './planPoints.js'
 
 function scoreColor(score: number): string {
   if (score >= 70) return '#22c55e'
