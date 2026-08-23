@@ -4,6 +4,7 @@ import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
+import { installLoadingOverlay } from './loadingOverlay.js'
 
 /**
  * Basemaps come straight from the LGB WMS endpoints, which serve EPSG:3857 -- so MapLibre's
@@ -247,6 +248,7 @@ export function MapView({
   const onMoveAnchorRef = useRef(onMoveAnchor)
   onMoveAnchorRef.current = onMoveAnchor
   const ready = useRef(false)
+  const removeOverlay = useRef<(() => void) | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
 
@@ -282,6 +284,9 @@ export function MapView({
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
 
     m.on('load', () => {
+      // First, so every other overlay draws above it.
+      removeOverlay.current = installLoadingOverlay(m)
+
       m.addSource('aoi', {
         type: 'geojson',
         data: {
@@ -434,6 +439,8 @@ export function MapView({
       ready.current = true
     })
     return () => {
+      removeOverlay.current?.()
+      removeOverlay.current = null
       popup.current?.remove()
       Object.values(anchorMarkers.current).forEach((mk) => mk?.remove())
       anchorMarkers.current = {}

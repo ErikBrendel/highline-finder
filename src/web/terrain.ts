@@ -41,6 +41,32 @@ const inFlight = new Map<string, Promise<void>>()
 
 const keyOf = (tx: number, ty: number) => `${tx}_${ty}`
 
+/** The UTM 33N square one window covers, for drawing it on the map. */
+export function windowBounds(tx: number, ty: number): { e0: number; n0: number; size: number } {
+  return { e0: tx * TILE, n0: ty * TILE, size: TILE }
+}
+
+export interface WindowEvent {
+  tx: number
+  ty: number
+  state: 'loading' | 'loaded' | 'failed'
+}
+
+/**
+ * Reports which elevation windows are being fetched, so the map can show it in place.
+ *
+ * A callback rather than React state: a drag can touch a dozen windows a second, and the overlay
+ * animates per frame anyway, so routing this through a re-render would buy nothing.
+ */
+const listeners = new Set<(e: WindowEvent) => void>()
+
+export function onWindowActivity(fn: (e: WindowEvent) => void): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+const emit = (e: WindowEvent) => listeners.forEach((fn) => fn(e))
+
 function url(layer: Layer, e0: number, n0: number): string {
   const { service, coverage } = LAYERS[layer]
   return (
@@ -55,13 +81,20 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   const n0 = ty * TILE
   const ground = Grid.filled(TILE, TILE, e0, n0 + TILE, 1)
   const surface = Grid.filled(TILE, TILE, e0, n0 + TILE, 1)
-  await Promise.all(
-    (['ground', 'surface'] as Layer[]).map(async (layer) => {
-      const bytes = await fetchCached(url(layer, e0, n0))
-      await blitGeoTiff(bytes, layer === 'ground' ? ground : surface)
-    }),
-  )
+  emit({ tx, ty, state: 'loading' })
+  try {
+    await Promise.all(
+      (['ground', 'surface'] as Layer[]).map(async (layer) => {
+        const bytes = await fetchCached(url(layer, e0, n0))
+        await blitGeoTiff(bytes, layer === 'ground' ? ground : surface)
+      }),
+    )
+  } catch (e) {
+    emit({ tx, ty, state: 'failed' })
+    throw e
+  }
   loaded.set(keyOf(tx, ty), { ground, surface })
+  emit({ tx, ty, state: 'loaded' })
 }
 
 /**
