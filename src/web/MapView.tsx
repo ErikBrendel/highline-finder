@@ -205,6 +205,7 @@ interface Props {
   anchorDump: AnchorDump | null
   custom: CustomPoints
   customLine: Candidate | null
+  showLines: boolean
   onSelect: (id: string | null) => void
   onSetCustom: (which: 'a' | 'b', at: { lat: number; lon: number } | null) => void
 }
@@ -217,6 +218,7 @@ export function MapView({
   anchorDump,
   custom,
   customLine,
+  showLines,
   onSelect,
   onSetCustom,
 }: Props) {
@@ -415,6 +417,13 @@ export function MapView({
     const src = m.getSource('lines') as maplibregl.GeoJSONSource | undefined
     src?.setData(toGeoJson(visible))
   }, [visible])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready.current) return
+    const v = showLines ? 'visible' : 'none'
+    for (const id of ['lines', 'lines-hit']) m.setLayoutProperty(id, 'visibility', v)
+  }, [showLines])
 
   useEffect(() => {
     const m = map.current

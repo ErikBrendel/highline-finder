@@ -82,13 +82,13 @@ export const DEFAULT_PARAMS: Params = {
 }
 
 /**
- * Sperenberg gypsum pits, Brandenburg. ~1030 x 837 m, terrain 34.5-72.9 m.
+ * Sperenberg gypsum pits, Brandenburg. ~1150 x 990 m, spanning four 1 km source tiles.
  * Chosen because highlines are known to be riggable here, so it doubles as a sanity check
  * that the finder produces plausible geometry.
  */
 export const DEFAULT_AOI: Aoi = {
-  south: 52.199278,
+  south: 52.197701,
   west: 13.651291,
   north: 52.206631,
-  east: 13.666139,
+  east: 13.668149,
 }

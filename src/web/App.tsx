@@ -8,8 +8,6 @@ import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
 import { ProfileChart } from './ProfileChart.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 
-type SortKey = 'score' | 'length' | 'exposure' | 'offlevel'
-
 function scoreColor(score: number): string {
   if (score >= 70) return '#22c55e'
   if (score >= 60) return '#a3e635'
@@ -71,9 +69,10 @@ export function App() {
   const [minExposure, setMinExposure] = useState(0)
   const [maxCanopy, setMaxCanopy] = useState(100)
   const [maxOffLevel, setMaxOffLevel] = useState(100)
-  const [sort, setSort] = useState<SortKey>('score')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [basemapMix, setBasemapMix] = useState(0)
+  const [showLines, setShowLines] = useState(true)
+  const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [custom, setCustom] = useState<CustomPoints>({ a: null, b: null })
   const [planned, setPlanned] = useState<PlannedLine | null>(null)
@@ -169,23 +168,17 @@ export function App() {
 
   const visible = useMemo(() => {
     if (!data) return []
-    const out = rescored.filter(
-      (c) =>
-        c.score >= minScore &&
-        c.length >= minLength &&
-        c.exposure >= minExposure &&
-        c.canopyBlockedFraction * 100 <= maxCanopy &&
-        c.offLevelRatio * 100 <= maxOffLevel,
-    )
-    const key: Record<SortKey, (c: Candidate) => number> = {
-      score: (c) => c.score,
-      length: (c) => c.length,
-      exposure: (c) => c.exposure,
-      // Lower is better, so negate to keep the shared descending sort.
-      offlevel: (c) => -c.offLevelRatio,
-    }
-    return out.sort((a, b) => key[sort](b) - key[sort](a))
-  }, [data, rescored, minScore, minLength, minExposure, maxCanopy, maxOffLevel, sort])
+    return rescored
+      .filter(
+        (c) =>
+          c.score >= minScore &&
+          c.length >= minLength &&
+          c.exposure >= minExposure &&
+          c.canopyBlockedFraction * 100 <= maxCanopy &&
+          c.offLevelRatio * 100 <= maxOffLevel,
+      )
+      .sort((a, b) => b.score - a.score)
+  }, [data, rescored, minScore, minLength, minExposure, maxCanopy, maxOffLevel])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
@@ -224,84 +217,8 @@ export function App() {
       </header>
 
       <div className="layout">
-        <aside>
-          <div className="filters">
-            <h2>Rigging</h2>
-            <Slider
-              label="Midspan sag"
-              value={sagPct}
-              min={sagFloor}
-              max={10}
-              step={0.5}
-              unit=" % of span"
-              format={(v) => v.toFixed(1)}
-              onChange={setSagPct}
-            />
-            <div className="note">
-              {rescored.length} of {data.candidates.length} lines still clear the terrain at{' '}
-              {sagPct.toFixed(1)} %. Cannot go below {sagFloor.toFixed(1)} % &mdash; the dataset was
-              generated there, so looser lines were never evaluated.
-            </div>
-
-            <h2 style={{ marginTop: 16 }}>Filters</h2>
-            <Slider label="Min score" value={Math.min(minScore, maxScore)} min={0} max={maxScore} step={1} unit="" onChange={setMinScore} />
-            <Slider label="Min length" value={minLength} min={0} max={maxLen} step={10} unit=" m" onChange={setMinLength} />
-            <Slider label="Min exposure (air below)" value={minExposure} min={0} max={maxExp} step={1} unit=" m" onChange={setMinExposure} />
-            <Slider label="Max canopy blocked" value={maxCanopy} min={0} max={100} step={1} unit=" %" onChange={setMaxCanopy} />
-            <Slider
-              label="Max offlevel"
-              value={Math.min(maxOffLevel, offLevelCap)}
-              min={0}
-              max={offLevelCap}
-              step={0.1}
-              unit=" % of span"
-              onChange={setMaxOffLevel}
-            />
-            <h2 style={{ marginTop: 16 }}>Sort by</h2>
-            <div className="sortrow">
-              {(['score', 'length', 'exposure', 'offlevel'] as SortKey[]).map((k) => (
-                <button key={k} data-active={sort === k} onClick={() => setSort(k)}>
-                  {k}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="warn">
-            Terrain clearance is enforced; canopy is only scored. A line with a high
-            &ldquo;blocked&rdquo; figure runs through the trees and is not walkable as-is.
-          </div>
-
-          <div className="listing">
-            <div className="count">
-              {visible.length} of {rescored.length} shown
-            </div>
-            {visible.map((c) => (
-              <div
-                key={c.id}
-                className="card"
-                data-sel={c.id === selectedId}
-                style={{ ['--sc' as string]: scoreColor(c.score) }}
-                onClick={() => setSelectedId(c.id === selectedId ? null : c.id)}
-              >
-                <div className="top">
-                  <span className="score" style={{ color: scoreColor(c.score) }}>
-                    {c.score.toFixed(0)}
-                  </span>
-                  <span className="len">{c.length.toFixed(0)} m &middot; {c.bearing.toFixed(0)}&deg;</span>
-                </div>
-                <div className="bar">
-                  <span><b>{c.exposure.toFixed(0)} m</b> air</span>
-                  <span><b>{c.offLevel.toFixed(1)} m</b> offlevel</span>
-                  <span><b>{(c.canopyBlockedFraction * 100).toFixed(0)}%</b> blocked</span>
-                </div>
-              </div>
-            ))}
-            {!visible.length && <div className="count">Nothing matches these filters.</div>}
-          </div>
-        </aside>
-
         <div className="mapwrap">
+          <div className="controls">
           <div className="basemaps">
             <input
               type="range"
@@ -325,19 +242,63 @@ export function App() {
             </div>
           </div>
 
-          <CacheBadge />
+          <div className="toggles">
+            <button data-active={showLines} onClick={() => setShowLines(!showLines)}>
+              {visible.length} lines
+            </button>
+            <button data-active={!!anchorDump} onClick={toggleAnchors}>
+              {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
+            </button>
+            <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
+              filters
+            </button>
+          </div>
+          {anchorError && <div className="togglenote">{anchorError}</div>}
 
-          {planError && <div className="planerror">{planError}</div>}
+          {showFilters && (
+            <div className="filters">
+              <h2>Rigging</h2>
+              <Slider
+                label="Midspan sag"
+                value={sagPct}
+                min={sagFloor}
+                max={10}
+                step={0.5}
+                unit=" % of span"
+                format={(v) => v.toFixed(1)}
+                onChange={setSagPct}
+              />
+              <div className="note">
+                {rescored.length} of {data.candidates.length} lines still clear the terrain at{' '}
+                {sagPct.toFixed(1)} %. Cannot go below {sagFloor.toFixed(1)} % &mdash; the dataset
+                was generated there, so looser lines were never evaluated.
+              </div>
 
-          {import.meta.env.DEV && (
-            <div className="debugbar">
-              <button data-active={!!anchorDump} onClick={toggleAnchors}>
-                {anchorDump ? 'hide' : 'show'} anchors
-              </button>
-              {anchorDump && <span>{anchorDump.lat.length.toLocaleString()} points</span>}
-              {anchorError && <span className="err">{anchorError}</span>}
+              <h2 style={{ marginTop: 14 }}>Filters</h2>
+              <Slider label="Min score" value={Math.min(minScore, maxScore)} min={0} max={maxScore} step={1} unit="" onChange={setMinScore} />
+              <Slider label="Min length" value={minLength} min={0} max={maxLen} step={10} unit=" m" onChange={setMinLength} />
+              <Slider label="Min exposure (air below)" value={minExposure} min={0} max={maxExp} step={1} unit=" m" onChange={setMinExposure} />
+              <Slider label="Max canopy blocked" value={maxCanopy} min={0} max={100} step={1} unit=" %" onChange={setMaxCanopy} />
+              <Slider
+                label="Max offlevel"
+                value={Math.min(maxOffLevel, offLevelCap)}
+                min={0}
+                max={offLevelCap}
+                step={0.1}
+                unit=" % of span"
+                onChange={setMaxOffLevel}
+              />
+              <div className="note" style={{ marginBottom: 0 }}>
+                Terrain clearance is enforced; canopy is only scored. A line with a high
+                &ldquo;blocked&rdquo; figure runs through the trees and is not walkable as-is.
+              </div>
             </div>
           )}
+
+          <CacheBadge />
+        </div>
+
+        {planError && <div className="planerror">{planError}</div>}
 
           <MapView
             data={data}
@@ -347,6 +308,7 @@ export function App() {
             anchorDump={anchorDump}
             custom={custom}
             customLine={planned?.candidate ?? null}
+            showLines={showLines}
             onSelect={setSelectedId}
             onSetCustom={setCustomPoint}
           />
