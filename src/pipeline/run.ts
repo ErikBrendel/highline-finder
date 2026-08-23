@@ -55,13 +55,17 @@ async function main() {
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
   console.log('\n[2/5] openness scan')
-  const { anchors, scanned } = scanAnchors(ground, p)
+  const { anchors, scanned, passedDropTest } = scanAnchors(ground, p)
   const meanOpen = anchors.length
     ? anchors.reduce((s, a) => s + a.openCount, 0) / anchors.length
     : 0
+  const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
+  console.log(`  ${scanned} points scanned @${p.anchorStep}m`)
   console.log(
-    `  ${scanned} points scanned @${p.anchorStep}m -> ${anchors.length} anchors kept ` +
-      `(${((anchors.length / Math.max(scanned, 1)) * 100).toFixed(1)}%), ` +
+    `  drop within ${p.dropSearchRadius}m       ${passedDropTest}  (${pctOf(passedDropTest, scanned)})`,
+  )
+  console.log(
+    `  any direction falls away  ${anchors.length}  (${pctOf(anchors.length, passedDropTest)} of those), ` +
       `mean ${meanOpen.toFixed(1)}/${p.sectorCount} open sectors`,
   )
 
@@ -140,6 +144,7 @@ async function main() {
     aFrameMin: p.aFrameMin,
     aFrameMax: p.aFrameMax,
     anchorStep: p.anchorStep,
+    nearProbeLength: p.nearProbeLength,
     lat: [],
     lon: [],
     ground: [],

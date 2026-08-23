@@ -86,6 +86,8 @@ function toGeoJson(cs: Candidate[]): GeoJSON.FeatureCollection {
   }
 }
 
+const emptyCollection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
+
 /** Sectors open in this anchor's mask, as compass bearings in degrees. */
 function openBearings(mask: string, sectorCount: number): number[] {
   const out: number[] = []
@@ -118,6 +120,59 @@ function bearingRanges(bearings: number[], sectorCount: number): string {
     }
   }
   return groups.map(([a, b]) => `${a.toFixed(0)}–${b.toFixed(0)}°`).join(', ')
+}
+
+/**
+ * Open sectors of one anchor, drawn as wedges radiating from it.
+ *
+ * Contiguous open sectors are merged into a single wedge rather than drawn individually, so a
+ * 20-sector arc reads as one lobe of openness instead of 20 slivers -- which is the thing worth
+ * seeing, since openness is usually a couple of broad lobes with blocked ground between them.
+ */
+function sectorWedges(
+  lat: number,
+  lon: number,
+  mask: string,
+  sectorCount: number,
+  metres: number,
+): GeoJSON.FeatureCollection {
+  const open = (s: number) =>
+    ((parseInt(mask[((s % sectorCount) + sectorCount) % sectorCount >> 2] ?? '0', 16) >>
+      (((s % sectorCount) + sectorCount) % sectorCount & 3)) &
+      1) === 1
+
+  // One degree of latitude is ~111.32 km; longitude shrinks with the cosine of latitude.
+  const dLat = metres / 111320
+  const dLon = metres / (111320 * Math.cos((lat * Math.PI) / 180))
+  const edge = (bearingDeg: number): [number, number] => {
+    const r = (bearingDeg * Math.PI) / 180
+    return [lon + Math.sin(r) * dLon, lat + Math.cos(r) * dLat]
+  }
+
+  const runs: [number, number][] = []
+  for (let s = 0; s < sectorCount; s++) {
+    if (!open(s) || open(s - 1)) continue
+    let end = s
+    while (end - s < sectorCount && open(end + 1)) end++
+    runs.push([s, end])
+  }
+  // Open in every direction: no run has a closed sector before it, so emit the full disc.
+  if (!runs.length && open(0)) runs.push([0, sectorCount - 1])
+
+  const width = 360 / sectorCount
+  return {
+    type: 'FeatureCollection',
+    features: runs.map(([from, to]) => {
+      const ring: [number, number][] = [[lon, lat]]
+      for (let s = from; s <= to + 1; s++) ring.push(edge(s * width))
+      ring.push([lon, lat])
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Polygon', coordinates: [ring] },
+      }
+    }),
+  }
 }
 
 function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection {
@@ -153,6 +208,8 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
   // Read inside map event handlers, which are registered once and outlive any single render.
   const sectorCount = useRef(64)
   const anchorRange = useRef<[number, number]>([0, 1.5])
+  // How far the hover wedges reach; the scan's own near-field probe distance.
+  const wedgeMetres = useRef(40)
   const ready = useRef(false)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -208,6 +265,20 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
         type: 'line',
         source: 'aoi',
         paint: { 'line-color': '#38bdf8', 'line-width': 1, 'line-dasharray': [3, 3], 'line-opacity': 0.5 },
+      })
+
+      m.addSource('anchorWedge', { type: 'geojson', data: emptyCollection })
+      m.addLayer({
+        id: 'anchorWedgeFill',
+        type: 'fill',
+        source: 'anchorWedge',
+        paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.22 },
+      })
+      m.addLayer({
+        id: 'anchorWedgeEdge',
+        type: 'line',
+        source: 'anchorWedge',
+        paint: { 'line-color': '#38bdf8', 'line-width': 1, 'line-opacity': 0.8 },
       })
 
       m.addSource('anchorDump', { type: 'geojson', data: anchorPointsGeoJson(null) })
@@ -270,6 +341,7 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
       m.on('mousemove', 'anchorDump', (e) => {
         const f = e.features?.[0]
         if (!f || !popup.current) return
+        const wedgeSrc = m.getSource('anchorWedge') as maplibregl.GeoJSONSource | undefined
         const { ground, open, openCount } = f.properties as {
           ground: number; open: string; openCount: number
         }
@@ -284,8 +356,13 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
               `<span class="dirs">${bearingRanges(openBearings(open, sectorCount.current), sectorCount.current)}</span>`,
           )
           .addTo(m)
+        wedgeSrc?.setData(sectorWedges(lat, lon, open, sectorCount.current, wedgeMetres.current))
       })
-      m.on('mouseleave', 'anchorDump', () => popup.current?.remove())
+      m.on('mouseleave', 'anchorDump', () => {
+        popup.current?.remove()
+        const wedgeSrc = m.getSource('anchorWedge') as maplibregl.GeoJSONSource | undefined
+        wedgeSrc?.setData(emptyCollection)
+      })
 
       ready.current = true
     })
@@ -331,8 +408,11 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
     if (anchorDump) {
       sectorCount.current = anchorDump.sectorCount
       anchorRange.current = [anchorDump.aFrameMin, anchorDump.aFrameMax]
+      wedgeMetres.current = anchorDump.nearProbeLength
     } else {
       popup.current?.remove()
+      const wedgeSrc = m.getSource('anchorWedge') as maplibregl.GeoJSONSource | undefined
+      wedgeSrc?.setData(emptyCollection)
     }
     const src = m.getSource('anchorDump') as maplibregl.GeoJSONSource | undefined
     src?.setData(anchorPointsGeoJson(anchorDump))

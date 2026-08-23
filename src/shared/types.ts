@@ -47,14 +47,35 @@ export interface Params {
   anchorStep: number
   /** Number of angular sectors in the openness bitmask. */
   sectorCount: number
-  /** How far out the openness probe checks for obstructions. */
-  blockProbeLength: number
-  /** How far out the openness probe looks for a drop. */
-  dropProbeLength: number
-  /** Terrain must fall at least this far below anchor height within `dropProbeLength`. */
-  minProbeDrop: number
-  /** Steepest upward line slope the openness probe stays admissible for. See openness.ts. */
-  maxUpSlope: number
+  /**
+   * Omnidirectional prefilter: the terrain must fall this far below the line's attachment point
+   * somewhere within `dropSearchRadius`. Every highline needs air under it at some point, and a
+   * point with nothing deep enough anywhere nearby cannot produce one in any direction.
+   */
+  minDropDepth: number
+  /**
+   * Radius searched for that drop. Half of `minLength` is the natural choice: for a span of length
+   * L the deepest point is at most L/2 from the nearer anchor, so at the shortest allowed length
+   * this is exactly what one end must see. Requiring it of *both* ends is the deliberate lossy part
+   * -- it drops lines whose only air sits close to one anchor.
+   */
+  dropSearchRadius: number
+  /** How far out the per-direction scan checks before leaving the rest to the full profile test. */
+  nearProbeLength: number
+  /**
+   * Minimum rate at which terrain must fall away in a usable direction.
+   *
+   * A line leaves its anchor descending: for a level span of length L at sag ratio r its height at
+   * distance d is `anchorH - 4*r*d*(1 - d/L)`, so the initial descent is between 2*r (when d is
+   * near midspan) and 4*r (for a span much longer than d). 2*sagRatio is the middle of that, and
+   * raising it toward 4*sagRatio makes the scan stricter, faster and lossier.
+   *
+   * Note this interacts with `minDropDepth`: requiring 8 m of drop within a 25 m radius already
+   * implies a ~32% local slope, far steeper than this envelope, so for smoothly falling terrain the
+   * drop test binds first. What this test actually earns its keep on is obstructions -- a berm or
+   * spoil heap between the anchor and the drop, which no slope or depth test can see.
+   */
+  minFallSlope: number
   /** Spacing of samples along a candidate line. */
   profileStep: number
   /**
@@ -170,6 +191,7 @@ export interface AnchorDump {
   aFrameMin: number
   aFrameMax: number
   anchorStep: number
+  nearProbeLength: number
   lat: number[]
   lon: number[]
   ground: number[]

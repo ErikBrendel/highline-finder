@@ -50,17 +50,20 @@ export const DEFAULT_PARAMS: Params = {
   // away from the one reported.
   anchorStep: 5,
 
-  // 64 sectors = 5.625 deg each. At 500 m a sector is ~49 m wide, which is why the pair test
-  // is a prefilter and the full profile check still runs afterwards.
+  // 64 sectors = 5.625 deg each. At 500 m a sector is ~49 m wide, which is why the pair test is a
+  // prefilter and the full profile check still runs afterwards.
   sectorCount: 64,
 
-  blockProbeLength: 30,
-  dropProbeLength: 120,
-  minProbeDrop: 5.0,
+  // Every highline has air under it somewhere. 8 m is about the least that makes a line worth
+  // rigging at all, measured from the attachment point rather than the ground -- so the terrain
+  // itself only has to fall minDropDepth - aFrameMax.
+  minDropDepth: 8,
+  // minLength / 2, see the note on the field.
+  dropSearchRadius: 25,
 
-  // Completeness bound of the openness prefilter, see openness.ts. A line rising steeper than
-  // 25% out of an anchor may be missed.
-  maxUpSlope: 0.25,
+  nearProbeLength: 40,
+  // 2 * sagRatio, the middle of the range a line's initial descent can take.
+  minFallSlope: 0.1,
 
   profileStep: 2,
   dedupRadius: 25,
