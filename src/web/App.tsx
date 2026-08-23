@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { BASEMAPS, MIX_MAX, MapView, type CustomPoints } from './MapView.js'
 import { toUtm33 } from '../shared/geo.js'
-import { planLine, type PlannedLine } from '../shared/plan.js'
+import { PLANNED_ID, planLine, type PlannedLine } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
 import { ProfileChart } from './ProfileChart.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -75,8 +75,11 @@ export function App() {
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [custom, setCustom] = useState<CustomPoints>({ a: null, b: null })
-  const [planned, setPlanned] = useState<PlannedLine | null>(null)
-  const [planError, setPlanError] = useState<string | null>(null)
+  // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
+  // depends on. Keeping it a counter rather than storing the measurement means the planned line is
+  // computed, not held in state, so no effect has to write it.
+  const [terrainVersion, setTerrainVersion] = useState(0)
+  const [terrainFailed, setTerrainFailed] = useState(false)
   const [anchorError, setAnchorError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -103,61 +106,69 @@ export function App() {
       .filter((c): c is Candidate => c !== null)
   }, [data, sagPct])
 
-  /**
-   * Measures the user-placed line whenever either end moves.
-   *
-   * Terrain arrives from the WCS a window at a time, so this runs twice: once immediately against
-   * whatever is already cached, giving instant feedback while dragging, and again once the missing
-   * windows have landed. The stale guard matters because dragging fires far faster than the network.
-   */
+  const customUtm = useMemo(() => {
+    if (!custom.a || !custom.b) return null
+    const [ae, an] = toUtm33(custom.a.lat, custom.a.lon)
+    const [be, bn] = toUtm33(custom.b.lat, custom.b.lon)
+    return { a: { e: ae, n: an }, b: { e: be, n: bn } }
+  }, [custom])
+
+  // The only job of this effect is fetching. It deliberately does not compute or store the
+  // measurement: an effect that writes what another effect reads is how this file previously
+  // managed to feed itself.
   useEffect(() => {
-    if (!data || !custom.a || !custom.b) {
-      setPlanned(null)
-      setPlanError(null)
-      return
-    }
-    const a = { e: 0, n: 0 }
-    const b = { e: 0, n: 0 }
-    ;[a.e, a.n] = toUtm33(custom.a.lat, custom.a.lon)
-    ;[b.e, b.n] = toUtm33(custom.b.lat, custom.b.lon)
-
-    const p = data.meta.params
-    const sag = (sagPct ?? p.sagRatio * 100) / 100
-    const attempt = () => planLine(a, b, groundSampler, surfaceSampler, sag, p)
-
+    if (!customUtm) return
     let stale = false
-    const immediate = attempt()
-    if (immediate) {
-      setPlanned(immediate)
-      setPlanError(null)
-    }
-    ensureTerrain(a, b)
-      .then(() => {
-        if (stale) return
-        const result = attempt()
-        setPlanned(result)
-        setPlanError(result ? null : 'no elevation data here')
+    ensureTerrain(customUtm.a, customUtm.b)
+      .then((arrived) => {
+        if (!stale && arrived) setTerrainVersion((v) => v + 1)
       })
       .catch(() => {
-        if (!stale) setPlanError('could not load elevation for this area')
+        if (!stale) setTerrainFailed(true)
       })
     return () => {
       stale = true
     }
-  }, [data, custom, sagPct])
+  }, [customUtm])
 
-  const setCustomPoint = (which: 'a' | 'b', at: { lat: number; lon: number } | null) =>
+  /**
+   * The planned line, measured by the same code the search uses.
+   *
+   * Derived rather than stored, so dragging an anchor cannot start a render loop: the two anchor
+   * positions and the sag setting fully determine it, and `terrainVersion` only changes when a
+   * fetch delivers a window that was genuinely missing.
+   */
+  const planned: PlannedLine | null = useMemo(() => {
+    if (!data || !customUtm || sagPct === null) return null
+    void terrainVersion
+    return planLine(
+      customUtm.a,
+      customUtm.b,
+      groundSampler,
+      surfaceSampler,
+      sagPct / 100,
+      data.meta.params,
+    )
+  }, [data, customUtm, sagPct, terrainVersion])
+
+  const planError =
+    customUtm && !planned
+      ? terrainFailed
+        ? 'could not load elevation for this area'
+        : 'no elevation data here yet'
+      : null
+
+  /**
+   * Moving or placing an anchor. Selection happens here rather than in an effect: it is a
+   * consequence of the click, and an effect that both reads and writes the selection is exactly
+   * what produced a maximum-update-depth loop before.
+   */
+  const setCustomPoint = (which: 'a' | 'b', at: { lat: number; lon: number } | null) => {
     setCustom((prev) => ({ ...prev, [which]: at }))
-
-  // Placing the second point opens the panel on it, rather than making the user hunt for the line
-  // and click it. Only on the transition, so selecting a found line afterwards is not overridden.
-  const hadBothPoints = useRef(false)
-  useEffect(() => {
-    const both = !!(custom.a && custom.b)
-    if (both && !hadBothPoints.current) setSelectedId('custom')
-    if (!both && hadBothPoints.current && selectedId === 'custom') setSelectedId(null)
-    hadBothPoints.current = both
-  }, [custom, selectedId])
+    const other = which === 'a' ? custom.b : custom.a
+    if (at && other) setSelectedId(PLANNED_ID)
+    if (!at) setSelectedId((cur) => (cur === PLANNED_ID ? null : cur))
+  }
 
   /**
    * Debug overlay of every anchor the openness scan kept. Development only: anchors.json is
@@ -193,8 +204,9 @@ export function App() {
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
     () =>
-      (selectedId === 'custom' ? planned?.candidate : visible.find((c) => c.id === selectedId)) ??
-      null,
+      (selectedId === PLANNED_ID
+        ? planned?.candidate
+        : visible.find((c) => c.id === selectedId)) ?? null,
     [visible, selectedId, planned],
   )
 
@@ -326,9 +338,9 @@ export function App() {
             <div className="details">
               <div className="head">
                 <strong
-                  style={{ color: selected.id === 'custom' ? '#22c55e' : scoreColor(selected.score) }}
+                  style={{ color: selected.id === PLANNED_ID ? '#22c55e' : scoreColor(selected.score) }}
                 >
-                  {selected.id === 'custom' ? 'Planned line · ' : ''}Score {selected.score.toFixed(1)}
+                  {selected.id === PLANNED_ID ? 'Planned line · ' : ''}Score {selected.score.toFixed(1)}
                 </strong>
                 <span className="sub">
                   {selected.length.toFixed(0)} m &middot; bearing {selected.bearing.toFixed(0)}&deg;
@@ -382,7 +394,7 @@ export function App() {
                 </dl>
               </div>
 
-              {selected.id === 'custom' && planned && planned.violations.length > 0 && (
+              {selected.id === PLANNED_ID && planned && planned.violations.length > 0 && (
                 <div className="violations">
                   <b>Would not qualify as a candidate:</b>
                   <ul>
@@ -392,7 +404,7 @@ export function App() {
                   </ul>
                 </div>
               )}
-              {selected.id === 'custom' && planned && planned.violations.length === 0 && (
+              {selected.id === PLANNED_ID && planned && planned.violations.length === 0 && (
                 <div className="note" style={{ margin: '8px 0 0' }}>
                   Meets every hard constraint — the search would have accepted this line.
                 </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
+import { PLANNED_ID } from '../shared/plan.js'
 
 /**
  * Basemaps come straight from the LGB WMS endpoints, which serve EPSG:3857 -- so MapLibre's
@@ -359,7 +360,7 @@ export function MapView({
         paint: { 'line-color': '#22c55e', 'line-width': 3.5 },
       })
       for (const id of ['custom', 'customCasing']) {
-        m.on('click', id, () => onSelectRef.current('custom'))
+        m.on('click', id, () => onSelectRef.current(PLANNED_ID))
         m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer' })
         m.on('mouseleave', id, () => { m.getCanvas().style.cursor = '' })
       }
@@ -456,15 +457,19 @@ export function MapView({
     const index = selected ? visible.findIndex((c) => c.id === selected.id) : -1
     if (index >= 0) m.setFeatureState({ source: 'lines', id: index }, { sel: true })
 
+    // Only for a *found* line. The planned line already has its own draggable markers, and drawing
+    // these on top of them meant the user was grabbing an undraggable marker and nothing happened.
+    // The two sets can now never occupy the same coordinates.
     markers.current.forEach((mk) => mk.remove())
-    markers.current = selected
-      ? ([['A', selected.a], ['B', selected.b]] as const).map(([label, pt]) => {
-          const node = document.createElement('div')
-          node.className = 'anchor-marker'
-          node.textContent = label
-          return new maplibregl.Marker({ element: node }).setLngLat([pt.lon, pt.lat]).addTo(m)
-        })
-      : []
+    markers.current =
+      selected && selected.id !== PLANNED_ID
+        ? ([['A', selected.a], ['B', selected.b]] as const).map(([label, pt]) => {
+            const node = document.createElement('div')
+            node.className = 'anchor-marker'
+            node.textContent = label
+            return new maplibregl.Marker({ element: node }).setLngLat([pt.lon, pt.lat]).addTo(m)
+          })
+        : []
   }, [selected, visible])
 
   useEffect(() => {

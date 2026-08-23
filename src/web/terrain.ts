@@ -79,12 +79,19 @@ function windowsFor(a: Pos, b: Pos, margin = TILE): [number, number][] {
   return out
 }
 
-/** Fetches whatever is still missing around these points. Resolves once everything is in memory. */
-export async function ensureTerrain(a: Pos, b: Pos): Promise<void> {
+/**
+ * Fetches whatever is still missing around these points.
+ *
+ * Resolves to true only if something new arrived, so callers can re-measure on a real change
+ * instead of on every call. Dragging an anchor asks for terrain many times a second and almost
+ * always already has it; without this the answer would be indistinguishable from a fresh load.
+ */
+export async function ensureTerrain(a: Pos, b: Pos): Promise<boolean> {
+  const missing = windowsFor(a, b).filter(([tx, ty]) => !loaded.has(keyOf(tx, ty)))
+  if (!missing.length) return false
   await Promise.all(
-    windowsFor(a, b).map(([tx, ty]) => {
+    missing.map(([tx, ty]) => {
       const key = keyOf(tx, ty)
-      if (loaded.has(key)) return undefined
       let job = inFlight.get(key)
       if (!job) {
         job = loadWindow(tx, ty).finally(() => inFlight.delete(key))
@@ -93,6 +100,7 @@ export async function ensureTerrain(a: Pos, b: Pos): Promise<void> {
       return job
     }),
   )
+  return true
 }
 
 function cellOf(layer: Layer, e: number, n: number): number {

@@ -10,6 +10,9 @@ import {
 import type { Candidate, Params } from './types.js'
 import { toWgs84 } from './geo.js'
 
+/** Id a planned line carries, so callers can distinguish it from a found candidate. */
+export const PLANNED_ID = 'custom'
+
 export interface PlannedLine {
   candidate: Candidate
   /** Hard constraints this line fails. Empty means the search would have accepted it. */
@@ -65,7 +68,7 @@ export function planLine(
   const wb = toWgs84(b.e, b.n)
   return {
     candidate: {
-      id: 'custom',
+      id: PLANNED_ID,
       a: { ...wa, e: a.e, n: a.n, ground: r2(gA), anchor: r2(h.hA), aFrame: r2(h.hA - gA) },
       b: { ...wb, e: b.e, n: b.n, ground: r2(gB), anchor: r2(h.hB), aFrame: r2(h.hB - gB) },
       length: Math.round(length * 10) / 10,
