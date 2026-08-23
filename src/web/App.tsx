@@ -252,7 +252,7 @@ export function App() {
               type="range"
               min={0}
               max={MIX_MAX}
-              step={0.02}
+              step={0.1}
               value={basemapMix}
               aria-label="basemap blend"
               onChange={(e) => setBasemapMix(Number(e.target.value))}
@@ -261,7 +261,7 @@ export function App() {
               {BASEMAPS.map((b, i) => (
                 <button
                   key={b.id}
-                  data-active={Math.abs(basemapMix - i) < 0.02}
+                  data-active={Math.abs(basemapMix - i) < 0.05}
                   onClick={() => setBasemapMix(i)}
                 >
                   {b.label}

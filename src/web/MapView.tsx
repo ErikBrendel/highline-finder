@@ -20,6 +20,9 @@ const wms = (path: string, layer: string) =>
  * Ordered bottom to top. All three are stacked as raster layers and cross-faded with
  * raster-opacity, rather than swapped: that lets the GPU blend them for free, where combining tile
  * images ourselves would mean decoding, blending and re-encoding every PNG.
+ *
+ * The blend steps in tenths rather than continuously, so a position is reproducible and the tile
+ * cache sees a small fixed set of blends instead of a new one per pixel of slider travel.
  */
 export const BASEMAPS = [
   { id: 'ortho', label: 'Ortho', tiles: wms('dop20c', 'bebb_dop20c'), attribution: LGB_ATTR },
