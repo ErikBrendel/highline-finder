@@ -73,7 +73,11 @@ describe('directional scan', () => {
   })
 
   it('keeps a steadily descending ramp open', () => {
-    const ramp = gridFrom(400, 400, (e) => (e < 200 ? 50 : 50 - (e - 200) * 0.3))
+    const slope = 0.5
+    // The ramp has to out-fall the drop prefilter, or the point never reaches the directional scan
+    // at all and this would be testing nothing.
+    expect(slope).toBeGreaterThan((p.minDropDepth - p.aFrameMax) / p.dropSearchRadius)
+    const ramp = gridFrom(400, 400, (e) => (e < 200 ? 50 : 50 - (e - 200) * slope))
     expect(anchorAt(scanAnchors(ramp, p).anchors, 202.5, 200)!.open[EAST]).toBe(1)
   })
 })

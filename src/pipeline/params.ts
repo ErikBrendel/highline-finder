@@ -54,10 +54,11 @@ export const DEFAULT_PARAMS: Params = {
   // prefilter and the full profile check still runs afterwards.
   sectorCount: 64,
 
-  // Every highline has air under it somewhere. 8 m is about the least that makes a line worth
-  // rigging at all, measured from the attachment point rather than the ground -- so the terrain
+  // Every highline has air under it somewhere, so this mirrors minExposure: a line has to reach
+  // that much clearance to count, and it can only do so where the ground is at least that far
+  // below the attachment point. Measured from the attachment rather than the ground, so the terrain
   // itself only has to fall minDropDepth - aFrameMax.
-  minDropDepth: 8,
+  minDropDepth: 10,
   // minLength / 2, see the note on the field.
   dropSearchRadius: 25,
 
