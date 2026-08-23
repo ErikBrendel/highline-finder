@@ -21,18 +21,25 @@ function scoreColor(score: number): string {
   return '#64748b'
 }
 
+/**
+ * `derived` marks a slider whose value is being computed rather than chosen, so it can move on its
+ * own -- which looks like a glitch unless the readout says so. Touching it takes over.
+ */
 function Slider({
-  label, value, min, max, step, unit, format, onChange,
+  label, value, min, max, step, unit, format, derived, onChange,
 }: {
   label: string; value: number; min: number; max: number; step: number; unit: string
   format?: (v: number) => string
+  derived?: boolean
   onChange: (v: number) => void
 }) {
   return (
     <div className="filter">
       <label>
         <span>{label}</span>
-        <span>{format ? format(value) : value}{unit}</span>
+        <span className={derived ? 'derived' : undefined}>
+          {format ? format(value) : value}{unit}{derived ? ' auto' : ''}
+        </span>
       </label>
       <input
         type="range" min={min} max={max} step={step} value={value}
@@ -440,6 +447,7 @@ export function App() {
                       step={0.1}
                       unit=" m"
                       format={(v) => v.toFixed(1)}
+                      derived={rig === null}
                       onChange={(v) =>
                         setRig(
                           which === 'a'
@@ -456,6 +464,13 @@ export function App() {
                   >
                     auto
                   </button>
+                </div>
+              )}
+              {selected.id === PLANNED_ID && rig === null && (
+                <div className="note" style={{ margin: '4px 0 0' }}>
+                  Rigged as level as the ground allows, then as high &mdash; the same choice the
+                  search makes, so both heights follow the terrain as you drag an anchor. Move a
+                  slider to set them yourself.
                 </div>
               )}
 

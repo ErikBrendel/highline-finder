@@ -327,3 +327,4 @@ header .spacer { flex: 1; }
 .rig button:disabled { opacity: 0.4; cursor: default; }
 .anchor-marker { cursor: grab; }
 .anchor-marker:active { cursor: grabbing; }
+.filter label span.derived { color: var(--muted); font-weight: 400; }
