@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
-import type { Candidate, Dataset } from '../shared/types.js'
+import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
 
 /**
@@ -53,18 +53,73 @@ function toGeoJson(cs: Candidate[]): GeoJSON.FeatureCollection {
   }
 }
 
+/** Sectors open in this anchor's mask, as compass bearings in degrees. */
+function openBearings(mask: string, sectorCount: number): number[] {
+  const out: number[] = []
+  for (let s = 0; s < sectorCount; s++) {
+    const nibble = parseInt(mask[s >> 2] ?? '0', 16)
+    if (nibble & (1 << (s & 3))) out.push(((s + 0.5) / sectorCount) * 360)
+  }
+  return out
+}
+
+/** Collapses a list of open bearings into compass ranges, wrapping past north. */
+function bearingRanges(bearings: number[], sectorCount: number): string {
+  if (!bearings.length) return 'none'
+  if (bearings.length === sectorCount) return 'all round'
+  const width = 360 / sectorCount
+  const groups: [number, number][] = []
+  for (const b of bearings) {
+    const last = groups[groups.length - 1]
+    if (last && Math.abs(b - last[1]) < width * 1.5) last[1] = b
+    else groups.push([b, b])
+  }
+  // A run touching both ends of the circle is one range through north.
+  if (groups.length > 1) {
+    const first = groups[0]!
+    const last = groups[groups.length - 1]!
+    if (first[0] < width && last[1] > 360 - width * 1.5) {
+      groups.pop()
+      first[0] = last[0]
+      groups[0] = [last[0], first[1]]
+    }
+  }
+  return groups.map(([a, b]) => `${a.toFixed(0)}–${b.toFixed(0)}°`).join(', ')
+}
+
+function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection {
+  if (!dump) return { type: 'FeatureCollection', features: [] }
+  return {
+    type: 'FeatureCollection',
+    features: dump.lat.map((lat, i) => ({
+      type: 'Feature',
+      properties: {
+        ground: dump.ground[i]!,
+        open: dump.open[i]!,
+        openCount: openBearings(dump.open[i]!, dump.sectorCount).length,
+      },
+      geometry: { type: 'Point', coordinates: [dump.lon[i]!, lat] },
+    })),
+  }
+}
+
 interface Props {
   data: Dataset
   visible: Candidate[]
   selected: Candidate | null
   basemap: BasemapKey
+  anchorDump: AnchorDump | null
   onSelect: (id: string | null) => void
 }
 
-export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
+export function MapView({ data, visible, selected, basemap, anchorDump, onSelect }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
   const markers = useRef<maplibregl.Marker[]>([])
+  const popup = useRef<maplibregl.Popup | null>(null)
+  // Read inside map event handlers, which are registered once and outlive any single render.
+  const sectorCount = useRef(64)
+  const anchorRange = useRef<[number, number]>([0, 1.5])
   const ready = useRef(false)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -114,6 +169,25 @@ export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
         paint: { 'line-color': '#38bdf8', 'line-width': 1, 'line-dasharray': [3, 3], 'line-opacity': 0.5 },
       })
 
+      m.addSource('anchorDump', { type: 'geojson', data: anchorPointsGeoJson(null) })
+      m.addLayer({
+        id: 'anchorDump',
+        type: 'circle',
+        source: 'anchorDump',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 1.5, 16, 2.5, 19, 5],
+          // How many directions a line could actually leave in: the whole point of the scan.
+          'circle-color': [
+            'interpolate', ['linear'], ['get', 'openCount'],
+            1, '#7c3aed',
+            16, '#2563eb',
+            32, '#0891b2',
+            48, '#10b981',
+          ],
+          'circle-opacity': 0.75,
+        },
+      })
+
       m.addSource('lines', { type: 'geojson', data: toGeoJson(visible) })
       m.addLayer({
         id: 'lines-hit',
@@ -146,9 +220,36 @@ export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
       m.on('mouseenter', 'lines-hit', () => { m.getCanvas().style.cursor = 'pointer' })
       m.on('mouseleave', 'lines-hit', () => { m.getCanvas().style.cursor = '' })
 
+      popup.current = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        className: 'anchor-popup',
+        offset: 8,
+      })
+      m.on('mousemove', 'anchorDump', (e) => {
+        const f = e.features?.[0]
+        if (!f || !popup.current) return
+        const { ground, open, openCount } = f.properties as {
+          ground: number; open: string; openCount: number
+        }
+        const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number]
+        popup.current
+          .setLngLat(e.lngLat)
+          .setHTML(
+            `<b>anchor</b><br>${lat.toFixed(6)}, ${lon.toFixed(6)}<br>` +
+              `ground ${ground.toFixed(1)} m<br>` +
+              `rig ${(ground + anchorRange.current[0]).toFixed(1)}–${(ground + anchorRange.current[1]).toFixed(1)} m<br>` +
+              `${openCount}/${sectorCount.current} sectors open<br>` +
+              `<span class="dirs">${bearingRanges(openBearings(open, sectorCount.current), sectorCount.current)}</span>`,
+          )
+          .addTo(m)
+      })
+      m.on('mouseleave', 'anchorDump', () => popup.current?.remove())
+
       ready.current = true
     })
     return () => {
+      popup.current?.remove()
       markers.current.forEach((mk) => mk.remove())
       markers.current = []
       m.remove()
@@ -182,6 +283,19 @@ export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
         })
       : []
   }, [selected, visible])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready.current) return
+    if (anchorDump) {
+      sectorCount.current = anchorDump.sectorCount
+      anchorRange.current = [anchorDump.aFrameMin, anchorDump.aFrameMax]
+    } else {
+      popup.current?.remove()
+    }
+    const src = m.getSource('anchorDump') as maplibregl.GeoJSONSource | undefined
+    src?.setData(anchorPointsGeoJson(anchorDump))
+  }, [anchorDump])
 
   useEffect(() => {
     const m = map.current

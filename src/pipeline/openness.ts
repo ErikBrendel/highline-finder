@@ -125,3 +125,17 @@ export function scanAnchors(
   }
   return { anchors, scanned }
 }
+
+/**
+ * Packs an anchor's open sectors into a compact hex string: one hex digit per four sectors, least
+ * significant bit first within each digit.
+ */
+export function packSectors(open: Uint8Array): string {
+  let out = ''
+  for (let i = 0; i < open.length; i += 4) {
+    let nibble = 0
+    for (let b = 0; b < 4; b++) if (open[i + b]) nibble |= 1 << b
+    out += nibble.toString(16)
+  }
+  return out
+}

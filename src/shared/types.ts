@@ -160,6 +160,23 @@ export interface DatasetMeta {
   }
 }
 
+/**
+ * Every anchor the openness scan kept, for the debug overlay. Columnar rather than an array of
+ * objects because at ~25k points the repeated JSON keys would cost more than the data, and served
+ * as a separate file so it is only fetched when the overlay is switched on.
+ */
+export interface AnchorDump {
+  sectorCount: number
+  aFrameMin: number
+  aFrameMax: number
+  anchorStep: number
+  lat: number[]
+  lon: number[]
+  ground: number[]
+  /** Open-sector bitmask, one hex digit per 4 sectors, least significant bit first. */
+  open: string[]
+}
+
 export interface Dataset {
   meta: DatasetMeta
   candidates: Candidate[]

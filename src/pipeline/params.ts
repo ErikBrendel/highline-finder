@@ -33,10 +33,18 @@ export const DEFAULT_PARAMS: Params = {
   minLength: 50,
   maxLength: 500,
 
-  // Midspan sag as a fraction of span. A flat 4% stand-in for a real tension model: a 100 m
-  // line sags 4 m, a 500 m line 20 m. Roughly right for a loaded highline, but it is a
-  // constant, not physics, and it does not respond to webbing, tension or walker mass.
-  sagRatio: 0.04,
+  // Midspan sag as a fraction of span, used to generate the dataset. This is a *floor*, not a
+  // prediction: the web app lets the user raise sag and re-derives every clearance from the stored
+  // profile, but it can only tighten, because candidates rejected here are never written out. So
+  // generate at the most permissive sag anyone might rig at.
+  //
+  // Community practice is 5-10% of span, and Balance Community's own
+  // tension relation S = W*L/(4*T) gives ~7.9% for 100 m at 2.5 kN and ~6.5% for 275 m at 3 kN with
+  // an 80 kg walker. 5% is the bottom of that band, so the dataset covers anyone rigging tighter
+  // than average and the UI spans the rest of it. Raising this number is destructive (124 candidates
+  // at 4%, 65 at 5%, 31 at 6%, 16 at 7% on the default AOI); tightening in the UI is not. A real
+  // tension model is in ROADMAP.
+  sagRatio: 0.05,
 
   // 5 m quantisation of anchor positions. The true best anchor can therefore sit up to ~3.5 m
   // away from the one reported.
@@ -63,7 +71,10 @@ export const DEFAULT_PARAMS: Params = {
   refineStep: 1,
   refineIterations: 8,
   maxCandidates: 300,
-  profilePoints: 80,
+  // The web app re-derives clearances from this profile rather than the raster, so its resolution
+  // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m
+  // sampling, against the 2 m the pipeline itself walks.
+  profilePoints: 120,
 }
 
 /**

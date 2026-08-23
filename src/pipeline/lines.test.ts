@@ -32,6 +32,9 @@ const canyon = (floor: number) =>
 
 const rimsOf = (g: Grid) => [anchor(40, 200, g), anchor(260, 200, g)]
 
+/** Midspan sag the pipeline will apply to a span of this length. */
+const sagOf = (length: number) => p.sagRatio * length
+
 describe('findLines', () => {
   it('finds a line across a canyon and sags it by sagRatio at midspan', () => {
     const g = canyon(20)
@@ -39,11 +42,11 @@ describe('findLines', () => {
     expect(candidates).toHaveLength(1)
     const c = candidates[0]!
     expect(c.length).toBeCloseTo(220, 0)
-    expect(c.sag).toBeCloseTo(8.8, 2)
+    expect(c.sag).toBeCloseTo(sagOf(220), 2)
     expect(c.offLevel).toBe(0)
 
     const mid = c.profile.reduce((a, s) => (Math.abs(s.d - 110) < Math.abs(a.d - 110) ? s : a))
-    expect(mid.line).toBeCloseTo(50 + p.aFrameMax - 8.8, 1)
+    expect(mid.line).toBeCloseTo(50 + p.aFrameMax - sagOf(220), 1)
     expect(c.canopyBlockedFraction).toBe(0)
   })
 
@@ -54,7 +57,7 @@ describe('findLines', () => {
     const c = findLines(rimsOf(g), g, g, p).candidates[0]!
     const gaps = c.profile.map((s) => s.line - s.ground)
     expect(c.exposure).toBeCloseTo(Math.max(...gaps), 0)
-    expect(Math.max(...gaps)).toBeGreaterThan(50 + p.aFrameMax - 8.8 - 20)
+    expect(Math.max(...gaps)).toBeGreaterThan(50 + p.aFrameMax - sagOf(220) - 20)
   })
 
   it('accepts a line even though clearance at the anchor is below minClearance', () => {

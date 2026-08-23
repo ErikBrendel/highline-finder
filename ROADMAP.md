@@ -28,9 +28,18 @@ anchors only, one AOI, static viewer.
 
 ## Physics
 
-- **Real sag.** Replace the flat 4 %-of-span constant with a catenary under tension, parameterised
-  by webbing, pretension and walker mass, and evaluate the worst load case rather than assuming
-  midspan. The current model is good enough to rank candidates and not good enough to rig from.
+- **Real sag.** Replace the flat fraction-of-span constant with a catenary under tension,
+  parameterised by webbing, pretension and walker mass, and evaluate the worst load case rather
+  than assuming midspan. Balance Community's relation `S = W·L/(4·T)` gives ~7.9 % for 100 m at
+  2.5 kN and ~6.5 % for 275 m at 3 kN with an 80 kg walker, so a constant fraction is the wrong
+  *shape*, not just the wrong number — a real model would let sag fall with length at constant
+  tension, and expose tension rather than sag as the control.
+  <https://www.balancecommunity.com/pages/tension-calculator>
+- **The "low highline" backup check.** ISA 2017 requires that where height is less than length —
+  which is every candidate this tool finds — the backup be tensioned enough that a mainline failure
+  does not put the walker on the ground. That is computable from span, height and backup slack, and
+  would turn the honest-but-useless "all of these are low highlines" into a per-candidate figure
+  for how much backup tension a site demands.
 - **Anchor loads.** Report the tension a candidate implies, which is what decides whether the
   anchors are adequate.
 

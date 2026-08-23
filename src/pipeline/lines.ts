@@ -1,7 +1,8 @@
 import { Grid } from './raster.js'
 import { bearingOf, oppositeBearing, sectorOf, toWgs84 } from '../shared/geo.js'
 import type { Anchor } from './openness.js'
-import type { AnchorOut, Candidate, Params, ProfileSample, ScoreParts } from '../shared/types.js'
+import type { AnchorOut, Candidate, Params, ProfileSample } from '../shared/types.js'
+import { lineHeightAt, rescoreAtSag } from '../shared/scoring.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -82,113 +83,50 @@ export function chooseHeights(
     : { hA: hiA, hB: loB, offLevel }
 }
 
-interface Metrics {
-  clearanceMin: number
-  exposure: number
-  canopyClearanceMin: number
-  canopyBlockedFraction: number
-}
-
-function lineHeight(hA: number, hB: number, sag: number, t: number): number {
-  return hA + (hB - hA) * t - 4 * sag * t * (1 - t)
-}
-
 /**
- * Walks the span and returns clearance metrics, or null as soon as the terrain requirement is
- * violated. Returning early matters: most pairs fail, and the midspan check alone kills the bulk
- * of them before any real work happens.
+ * Cheap gate used during the pair search: does the line clear the terrain at all, and does it get
+ * far enough off the ground to count?
+ *
+ * Walks the raster directly at `profileStep`, which is finer than the emitted profile, and bails
+ * the instant the terrain requirement is violated. That early exit is what makes the search
+ * affordable -- the overwhelming majority of pairs die at the midspan check, before any profile is
+ * built. The authoritative metrics are recomputed afterwards from the emitted profile, so this only
+ * has to be a filter, not a measurement.
  */
-function measure(
+function clearsTerrain(
   a: Pos,
   b: Pos,
   hA: number,
   hB: number,
   length: number,
   ground: Grid,
-  surface: Grid,
   p: Params,
-): Metrics | null {
+): boolean {
   const sag = p.sagRatio * length
   const de = (b.e - a.e) / length
   const dn = (b.n - a.n) / length
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
-  if (inner1 <= inner0) return null
+  if (inner1 <= inner0) return false
 
-  // Cheap reject first: the deepest sag sits at midspan, so that is where a line most often
-  // meets the ground.
+  // The deepest sag sits at midspan, so that is where a line most often meets the ground.
   const mid = length / 2
-  if (lineHeight(hA, hB, sag, 0.5) - ground.sample(a.e + de * mid, a.n + dn * mid) < p.minClearance) {
-    return null
+  if (
+    lineHeightAt(hA, hB, sag, 0.5) - ground.sample(a.e + de * mid, a.n + dn * mid) <
+    p.minClearance
+  ) {
+    return false
   }
 
-  let clearanceMin = Infinity
   let exposure = -Infinity
-  let canopyClearanceMin = Infinity
-  let blocked = 0
-  let samples = 0
-
   for (let d = 0; d <= length; d += p.profileStep) {
-    const e = a.e + de * d
-    const n = a.n + dn * d
-    const g = ground.sample(e, n)
-    if (Number.isNaN(g)) return null
-    const h = lineHeight(hA, hB, sag, d / length)
-    const clear = h - g
+    const g = ground.sample(a.e + de * d, a.n + dn * d)
+    if (Number.isNaN(g)) return false
+    const clear = lineHeightAt(hA, hB, sag, d / length) - g
     if (clear > exposure) exposure = clear
-
-    if (d < inner0 || d > inner1) continue
-    if (clear < p.minClearance) return null
-    if (clear < clearanceMin) clearanceMin = clear
-
-    const s = Math.max(g, surface.sample(e, n) || g)
-    const canopyClear = h - s
-    if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
-    if (canopyClear < 0) blocked++
-    samples++
+    if (d >= inner0 && d <= inner1 && clear < p.minClearance) return false
   }
-
-  if (samples === 0 || exposure < p.minExposure) return null
-  return {
-    clearanceMin,
-    exposure,
-    canopyClearanceMin,
-    canopyBlockedFraction: blocked / samples,
-  }
-}
-
-/**
- * 0-100. Weights are a judgement call, not a derivation, so the components are stored on every
- * candidate for the UI to show.
- *
- * Exposure is scaled logarithmically between 5 m and 200 m. Linear scaling would pin every
- * genuinely big line at maximum and lose the difference between 40 m and 400 m of air, and there
- * is deliberately no upper cut-off -- a deeper gap is simply better.
- *
- * Levelness is scored as well as constrained: everything reaching this point is already within
- * the offlevel budget, but a dead-level line is still nicer than one at the limit.
- */
-function scoreOf(length: number, offLevel: number, m: Metrics, p: Params): {
-  score: number
-  parts: ScoreParts
-} {
-  const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
-  const budget = p.maxOffLevelRatio * length
-  const parts: ScoreParts = {
-    exposure: clamp01(Math.log10(Math.max(m.exposure, 1) / 5) / Math.log10(200 / 5)),
-    length: clamp01(length / p.maxLength),
-    canopy: 1 - m.canopyBlockedFraction,
-    margin: clamp01((m.clearanceMin - p.minClearance) / 10),
-    level: budget > 0 ? clamp01(1 - offLevel / budget) : 1,
-  }
-  const score =
-    100 *
-    (0.3 * parts.exposure +
-      0.15 * parts.length +
-      0.35 * parts.canopy +
-      0.05 * parts.margin +
-      0.15 * parts.level)
-  return { score, parts }
+  return exposure >= p.minExposure
 }
 
 function buildProfile(
@@ -217,7 +155,7 @@ function buildProfile(
       d: r2(d),
       ground: r2(g),
       surface: r2(Math.max(g, surface.sample(e, n) || g)),
-      line: r2(lineHeight(hA, hB, sag, t)),
+      line: r2(lineHeightAt(hA, hB, sag, t)),
     })
   }
   return out
@@ -271,31 +209,41 @@ export function evaluateLine(
   )
   if (!h) return null
 
-  const m = measure(a, b, h.hA, h.hB, length, ground, surface, p)
-  if (!m) return null
+  if (!clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) return null
 
+  // Round the scalars before anything is measured from them. The web app re-derives every
+  // clearance from these serialised values, so measuring from the full-precision ones would let
+  // the dataset contain candidates the UI immediately rejects -- a line whose clearance is exactly
+  // at minClearance flips either side of the boundary on the last decimal.
   const r2 = (v: number) => Math.round(v * 100) / 100
-  const { score, parts } = scoreOf(length, h.offLevel, m, p)
+  const roundedLength = Math.round(length * 10) / 10
+  const hA = r2(h.hA)
+  const hB = r2(h.hB)
   const bearing = bearingOf(dE, dN)
   const wa = toWgs84(a.e, a.n)
   const wb = toWgs84(b.e, b.n)
-  return {
+
+  const provisional: Candidate = {
     id: `${a.e.toFixed(1)}_${a.n.toFixed(1)}__${b.e.toFixed(1)}_${b.n.toFixed(1)}`,
-    a: { ...wa, e: a.e, n: a.n, ground: r2(gA), anchor: r2(h.hA), aFrame: r2(h.hA - gA) },
-    b: { ...wb, e: b.e, n: b.n, ground: r2(gB), anchor: r2(h.hB), aFrame: r2(h.hB - gB) },
-    length: Math.round(length * 10) / 10,
+    a: { ...wa, e: a.e, n: a.n, ground: r2(gA), anchor: hA, aFrame: r2(hA - gA) },
+    b: { ...wb, e: b.e, n: b.n, ground: r2(gB), anchor: hB, aFrame: r2(hB - gB) },
+    length: roundedLength,
     bearing: Math.round(((bearing * 180) / Math.PI) * 10) / 10,
-    sag: r2(p.sagRatio * length),
+    sag: 0,
     offLevel: r2(h.offLevel),
-    offLevelRatio: Math.round((h.offLevel / length) * 10000) / 10000,
-    clearanceMin: r2(m.clearanceMin),
-    exposure: r2(m.exposure),
-    canopyClearanceMin: r2(m.canopyClearanceMin),
-    canopyBlockedFraction: Math.round(m.canopyBlockedFraction * 1000) / 1000,
-    score: Math.round(score * 10) / 10,
-    scoreParts: parts,
-    profile: buildProfile(a, b, h.hA, h.hB, length, ground, surface, p),
+    offLevelRatio: Math.round((h.offLevel / roundedLength) * 10000) / 10000,
+    clearanceMin: 0,
+    exposure: 0,
+    canopyClearanceMin: 0,
+    canopyBlockedFraction: 0,
+    score: 0,
+    scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
+    profile: buildProfile(a, b, hA, hB, roundedLength, ground, surface, p),
   }
+
+  // Every measured field is filled in by the same function the web app uses, so the two cannot
+  // disagree. Returns null if the line fails a hard constraint at the generation sag.
+  return rescoreAtSag(provisional, p.sagRatio, p)
 }
 
 export function findLines(

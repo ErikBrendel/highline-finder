@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { toUtm33 } from '../shared/geo.js'
+import { toUtm33, toWgs84 } from '../shared/geo.js'
 import { loadProduct } from './raster.js'
-import { scanAnchors } from './openness.js'
+import { packSectors, scanAnchors } from './openness.js'
 import { dedupe, findLines, refine } from './lines.js'
 import { DEFAULT_AOI, DEFAULT_PARAMS } from './params.js'
-import type { Dataset } from '../shared/types.js'
+import type { AnchorDump, Dataset } from '../shared/types.js'
 
 /**
  * CLI entry point. Writes src/web/public/candidates.json, which is the only artefact the web app
@@ -14,6 +14,7 @@ import type { Dataset } from '../shared/types.js'
  */
 
 const OUT = new URL('../web/public/candidates.json', import.meta.url).pathname
+const ANCHORS_OUT = new URL('../web/public/anchors.json', import.meta.url).pathname
 
 async function main() {
   const started = Date.now()
@@ -132,8 +133,32 @@ async function main() {
 
   await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
   await writeFile(OUT, JSON.stringify(dataset))
+
+  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+  const dump: AnchorDump = {
+    sectorCount: p.sectorCount,
+    aFrameMin: p.aFrameMin,
+    aFrameMax: p.aFrameMax,
+    anchorStep: p.anchorStep,
+    lat: [],
+    lon: [],
+    ground: [],
+    open: [],
+  }
+  for (const a of anchors) {
+    const { lat, lon } = toWgs84(a.e, a.n)
+    dump.lat.push(r6(lat))
+    dump.lon.push(r6(lon))
+    dump.ground.push(Math.round(a.ground * 10) / 10)
+    dump.open.push(packSectors(a.open))
+  }
+  await writeFile(ANCHORS_OUT, JSON.stringify(dump))
+  const anchorKb = (JSON.stringify(dump).length / 1024).toFixed(0)
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
-  console.log(`\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB)`)
+  console.log(
+    `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB), ` +
+      `anchors.json (${anchorKb} KB, ${anchors.length} points)`,
+  )
 
   if (finalCandidates.length) {
     console.log('\ntop 10:')

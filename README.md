@@ -33,6 +33,11 @@ npm test              # unit + integration tests
 npm run build         # static bundle in dist/, deployable as-is
 ```
 
+The pipeline also writes `anchors.json`, a dump of every anchor the openness scan kept. It powers a
+development-only overlay (bottom right of the map under `npm run dev`) that draws all of them,
+coloured by how many directions are open, with per-point detail on hover. It is gitignored and
+never deployed — it is diagnostics for the scan, not a feature.
+
 ## The three height layers
 
 | Layer | Product | Resolution | Role |
@@ -84,6 +89,24 @@ Details, parameters and known limitations are documented in the module that owns
 **Terrain clearance is enforced; canopy is only scored.** In closed forest most candidates will
 have a high "canopy blocked" figure and are not walkable as they stand. That column is the real
 filter, not the score. Sort by it.
+
+**Sag is yours to choose.** The dataset is generated at 5 % of span, the tight end of what people
+actually rig, and the sag slider re-derives every clearance and score up to 10 % from the stored
+profile. It only tightens: candidates rejected during generation are not in the file, so a looser
+setting than 5 % would present an incomplete result as a complete one. Sag is the single most
+sensitive parameter in the whole tool — on the default AOI the candidate count runs 124 at 4 %,
+65 at 5 %, 31 at 6 % and 16 at 7 %.
+
+**What the ISA says about height.** The 2015 guidance required a highline be rigged at least
+`length/3 + 3 m` above the ground, so that a fall caught by the backup alone would not reach the
+ground. Nothing in Brandenburg satisfies that — with 38 m of relief the best candidate here is
+short by 22 m — but that rule was **dropped** in the 2017 revision, which instead treats any line
+whose height is less than its length as a "low highline" needing a backup tensioned enough that a
+mainline failure does not become a ground fall. Every candidate this tool produces is a low
+highline in that sense. That is a rigging requirement, and no terrain analysis can discharge it.
+
+- ISA, *Highlining — 10 points*, v3 2015: <https://slackline.us/wp-content/uploads/2015/03/Highlining-10pointsENv3layout.pdf>
+- ISA, *Highline — The most important points*, v4 2017: <https://slacklineinternational.org/wp-content/uploads/2017/03/Highline-Important-Points-EN-v4.pdf>
 
 A candidate is a geometric possibility, nothing more. The sag model is a flat 4 % of span, not a
 tension calculation. There is no check for anchor strength, land ownership, access, nature

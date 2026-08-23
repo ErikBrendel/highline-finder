@@ -1,0 +1,146 @@
+import type { Candidate, Params, ProfileSample, ScoreParts } from './types.js'
+
+/**
+ * Sag geometry, clearance metrics and scoring, shared by the pipeline and the web app.
+ *
+ * This lives in shared/ because the web app re-derives all of it at a user-chosen sag. Everything
+ * needed is already in the stored profile: `ground` and `surface` per sample, plus the two
+ * attachment heights, which give the chord. So the line at any sag is recoverable without the
+ * raster, and no extra data has to be serialised for the sag control to work.
+ *
+ * The pipeline reports metrics computed by these same functions over the profile it emits, rather
+ * than from its own finer raster walk. That costs a little resolution and buys exact agreement
+ * between what the pipeline wrote and what the UI recomputes -- without it the two disagree by a
+ * sample's worth of terrain and the numbers beside the chart contradict the chart.
+ */
+
+export interface Metrics {
+  clearanceMin: number
+  exposure: number
+  canopyClearanceMin: number
+  canopyBlockedFraction: number
+}
+
+export function lineHeightAt(hA: number, hB: number, sag: number, t: number): number {
+  return hA + (hB - hA) * t - 4 * sag * t * (1 - t)
+}
+
+/** Line height at every profile sample, for a given sag as a fraction of span. */
+export function lineOverProfile(
+  profile: ProfileSample[],
+  length: number,
+  hA: number,
+  hB: number,
+  sagRatio: number,
+): number[] {
+  const sag = sagRatio * length
+  return profile.map((s) => lineHeightAt(hA, hB, sag, length > 0 ? s.d / length : 0))
+}
+
+/**
+ * Clearance metrics over a profile, or null when the line fails a hard constraint.
+ *
+ * Clearance is only required on the interior of the span, outside `anchorZone` at each end. At an
+ * anchor the line may sit at ground level, so a whole-span requirement would reject everything.
+ * The ISA's own guidance points the same way: mount a few metres in from the edge rather than
+ * walking straight off it.
+ */
+export function metricsOf(
+  profile: ProfileSample[],
+  line: number[],
+  length: number,
+  p: Params,
+): Metrics | null {
+  const inner0 = p.anchorZone
+  const inner1 = length - p.anchorZone
+  let clearanceMin = Infinity
+  let exposure = -Infinity
+  let canopyClearanceMin = Infinity
+  let blocked = 0
+  let samples = 0
+
+  for (let i = 0; i < profile.length; i++) {
+    const s = profile[i]!
+    const clear = line[i]! - s.ground
+    if (clear > exposure) exposure = clear
+    if (s.d < inner0 || s.d > inner1) continue
+
+    if (clear < clearanceMin) clearanceMin = clear
+    const canopyClear = line[i]! - s.surface
+    if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
+    if (canopyClear < 0) blocked++
+    samples++
+  }
+
+  if (samples === 0 || clearanceMin < p.minClearance || exposure < p.minExposure) return null
+  return {
+    clearanceMin,
+    exposure,
+    canopyClearanceMin,
+    canopyBlockedFraction: blocked / samples,
+  }
+}
+
+/**
+ * 0-100. Weights are a judgement call, not a derivation, so the components are stored on every
+ * candidate for the UI to show.
+ *
+ * Exposure is scaled logarithmically between 5 m and 200 m. Linear scaling would pin every
+ * genuinely big line at maximum and lose the difference between 40 m and 400 m of air, and there
+ * is deliberately no upper cut-off -- a deeper gap is simply better.
+ *
+ * Levelness is scored as well as constrained: everything reaching this point is already within the
+ * offlevel budget, but a dead-level line is still nicer than one at the limit.
+ */
+export function scoreOf(
+  length: number,
+  offLevel: number,
+  m: Metrics,
+  p: Params,
+): { score: number; parts: ScoreParts } {
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
+  const budget = p.maxOffLevelRatio * length
+  const parts: ScoreParts = {
+    exposure: clamp01(Math.log10(Math.max(m.exposure, 1) / 5) / Math.log10(200 / 5)),
+    length: clamp01(length / p.maxLength),
+    canopy: 1 - m.canopyBlockedFraction,
+    margin: clamp01((m.clearanceMin - p.minClearance) / 10),
+    level: budget > 0 ? clamp01(1 - offLevel / budget) : 1,
+  }
+  const score =
+    100 *
+    (0.3 * parts.exposure +
+      0.15 * parts.length +
+      0.35 * parts.canopy +
+      0.05 * parts.margin +
+      0.15 * parts.level)
+  return { score, parts }
+}
+
+const r2 = (v: number) => Math.round(v * 100) / 100
+
+/**
+ * Re-derives a candidate at a different sag, or null if it stops being feasible.
+ *
+ * Only tightening is meaningful. Candidates the pipeline rejected are not in the dataset at all,
+ * so lowering the sag below the one used for generation cannot bring them back, and would report
+ * an incomplete result as if it were complete.
+ */
+export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candidate | null {
+  const line = lineOverProfile(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio)
+  const m = metricsOf(c.profile, line, c.length, p)
+  if (!m) return null
+
+  const { score, parts } = scoreOf(c.length, c.offLevel, m, p)
+  return {
+    ...c,
+    sag: r2(sagRatio * c.length),
+    clearanceMin: r2(m.clearanceMin),
+    exposure: r2(m.exposure),
+    canopyClearanceMin: r2(m.canopyClearanceMin),
+    canopyBlockedFraction: Math.round(m.canopyBlockedFraction * 1000) / 1000,
+    score: Math.round(score * 10) / 10,
+    scoreParts: parts,
+    profile: c.profile.map((s, i) => ({ ...s, line: r2(line[i]!) })),
+  }
+}

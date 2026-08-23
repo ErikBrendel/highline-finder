@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { toUtm33 } from '../shared/geo.js'
+import { rescoreAtSag } from '../shared/scoring.js'
 import type { Dataset } from '../shared/types.js'
 
 /**
@@ -66,6 +67,26 @@ describe.skipIf(!present)('generated candidates.json', () => {
       expect(last.line).toBeCloseTo(c.b.anchor, 0)
       for (const s of c.profile) expect(s.surface).toBeGreaterThanOrEqual(s.ground)
     }
+  })
+
+  it('survives rescoring at its own generation sag without drift', () => {
+    // The web app re-derives every clearance from the serialised profile. If the pipeline measured
+    // from full-precision values while the app measures from rounded ones, candidates on a
+    // constraint boundary vanish the moment the page loads.
+    for (const c of data.candidates) {
+      const same = rescoreAtSag(c, params.sagRatio, params)
+      expect(same, `candidate ${c.id} rejected at its own sag`).not.toBeNull()
+      expect(same!.score).toBe(c.score)
+      expect(same!.clearanceMin).toBe(c.clearanceMin)
+      expect(same!.exposure).toBe(c.exposure)
+    }
+  })
+
+  it('only loses candidates as sag increases', () => {
+    const alive = (pct: number) =>
+      data.candidates.filter((c) => rescoreAtSag(c, pct, params) !== null).length
+    expect(alive(params.sagRatio)).toBe(data.candidates.length)
+    expect(alive(params.sagRatio * 1.4)).toBeLessThanOrEqual(alive(params.sagRatio))
   })
 
   it('is sorted by score and stays within the output cap', () => {

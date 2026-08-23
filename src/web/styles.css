@@ -61,6 +61,13 @@ aside {
 .filter label span:last-child { color: var(--accent); font-variant-numeric: tabular-nums; }
 .filter input[type=range] { width: 100%; accent-color: var(--accent); }
 
+.note {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: -4px 0 12px;
+}
+
 .sortrow { display: flex; gap: 6px; }
 .sortrow button {
   flex: 1; padding: 5px 0; font-size: 11px; cursor: pointer;
@@ -139,6 +146,48 @@ aside {
   border: 1px solid var(--border);
 }
 .cachebadge button:hover { color: var(--text); }
+
+.debugbar {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 4px;
+  font-size: 10px;
+  color: var(--muted);
+  background: rgba(15, 17, 21, 0.88);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.debugbar button {
+  padding: 3px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.debugbar button[data-active='true'] { color: var(--text); border-color: var(--accent); }
+.debugbar .err { color: #fb7185; }
+
+.anchor-popup .maplibregl-popup-content {
+  background: rgba(15, 17, 21, 0.95);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 10px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+.anchor-popup .maplibregl-popup-tip { display: none; }
+.anchor-popup .dirs { color: var(--accent); }
 
 .details {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
