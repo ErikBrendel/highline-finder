@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planLine } from './plan.js'
+import { PLANNED_RIG_MAX, planLine } from './plan.js'
 import { Grid } from './grid.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
@@ -83,7 +83,7 @@ describe('planLine', () => {
 
   it('flags a rig height no A-frame reaches', () => {
     const { ground, surface } = terrain(15)
-    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: 4, b: 4 })!
+    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: PLANNED_RIG_MAX, b: PLANNED_RIG_MAX })!
     expect(r.violations.join(' ')).toMatch(/over the 1.5 m an A-frame reaches/)
     expect(r.candidate.clearanceMin).toBeGreaterThan(0)
   })

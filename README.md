@@ -100,7 +100,7 @@ sensitive parameter in the whole tool — on the default AOI the candidate count
 **Planning your own line.** Right-click the map to set a custom point A and B, then drag either
 anchor to adjust. Dragging an anchor of a *found* line forks it into the planned line, which is the
 quick way to try variations on a candidate without losing it. Rig height at each end is a slider
-(0-5 m, above the 1.5 m an A-frame reaches, so a tree or a structure can be modelled by hand);
+(0-2 m, a little past the 1.5 m an A-frame reaches, so a taller frame can be tried by hand);
 `auto` goes back to the level-first choice the search makes. The line is measured live by the same
 code the search uses, so its numbers are directly comparable to a found candidate's. It is deliberately exempt from every filter and from
 the validity checks — instead of disappearing, an unworkable line tells you *why* it does not

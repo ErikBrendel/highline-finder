@@ -14,14 +14,13 @@ import { toWgs84 } from './geo.js'
 export const PLANNED_ID = 'custom'
 
 /**
- * Highest rig height the planner offers, deliberately above what the search allows.
+ * Highest rig height the planner offers, a little above what the search allows.
  *
- * The search only ever rigs off the ground with an A-frame, but "what if I could get 4 m up here"
- * is the question the planner exists to answer -- tree-trunk and structure anchors are a roadmap
- * item, and this is how you check by hand whether one would be worth the trouble. Anything over
+ * The search rigs off the ground with an A-frame, capped at `aFrameMax`. The planner reaches
+ * slightly past that so a taller frame or a low anchor point can be tried by hand; anything over
  * `aFrameMax` is reported as a violation rather than silently accepted.
  */
-export const PLANNED_RIG_MAX = 5
+export const PLANNED_RIG_MAX = 2
 
 /** Attachment heights above ground at each end, when the user sets them by hand. */
 export interface RigHeights {
