@@ -204,7 +204,6 @@ interface Props {
   basemapMix: number
   anchorDump: AnchorDump | null
   custom: CustomPoints
-  customLine: Candidate | null
   showLines: boolean
   onSelect: (id: string | null) => void
   onSetCustom: (which: 'a' | 'b', at: { lat: number; lon: number } | null) => void
@@ -217,7 +216,6 @@ export function MapView({
   basemapMix,
   anchorDump,
   custom,
-  customLine,
   showLines,
   onSelect,
   onSetCustom,
@@ -233,7 +231,8 @@ export function MapView({
   // How far the hover wedges reach; the scan's own near-field probe distance.
   const wedgeMetres = useRef(40)
   const dropRadius = useRef(25)
-  const customMarkers = useRef<maplibregl.Marker[]>([])
+  const customMarkers = useRef<Partial<Record<'a' | 'b', maplibregl.Marker>>>({})
+  const dragging = useRef<'a' | 'b' | null>(null)
   const onSetCustomRef = useRef(onSetCustom)
   onSetCustomRef.current = onSetCustom
   const ready = useRef(false)
@@ -344,8 +343,27 @@ export function MapView({
         },
       })
 
-      // Anchors are DOM markers rather than a symbol layer: labelled text would need a `glyphs`
-      // source in the style, and there is no reason to fetch a font for two letters.
+      // The planned line sits above the found ones: it is never filtered out, so it must never be
+      // hidden behind them either.
+      m.addSource('custom', { type: 'geojson', data: emptyCollection })
+      m.addLayer({
+        id: 'customCasing',
+        type: 'line',
+        source: 'custom',
+        paint: { 'line-color': '#052e16', 'line-width': 8, 'line-opacity': 0.75 },
+      })
+      m.addLayer({
+        id: 'custom',
+        type: 'line',
+        source: 'custom',
+        paint: { 'line-color': '#22c55e', 'line-width': 3.5 },
+      })
+      m.on('click', 'custom', () => onSelectRef.current('custom'))
+      m.on('mouseenter', 'custom', () => { m.getCanvas().style.cursor = 'pointer' })
+      m.on('mouseleave', 'custom', () => { m.getCanvas().style.cursor = '' })
+
+      // Anchor labels are DOM markers rather than a symbol layer: labelled text would need a
+      // `glyphs` source in the style, and there is no reason to fetch a font for two letters.
       m.on('click', 'lines-hit', (e) => {
         const f = e.features?.[0]
         if (f) onSelectRef.current(String(f.properties!.cid))
@@ -401,8 +419,8 @@ export function MapView({
     })
     return () => {
       popup.current?.remove()
-      customMarkers.current.forEach((mk) => mk.remove())
-      customMarkers.current = []
+      Object.values(customMarkers.current).forEach((mk) => mk?.remove())
+      customMarkers.current = {}
       markers.current.forEach((mk) => mk.remove())
       markers.current = []
       m.remove()
@@ -487,27 +505,45 @@ export function MapView({
         : emptyCollection,
     )
 
-    // Rebuilt rather than repositioned: there are at most two, and this keeps the drag handlers
-    // bound to the correct end without tracking marker identity across renders.
-    customMarkers.current.forEach((mk) => mk.remove())
-    customMarkers.current = (['a', 'b'] as const)
-      .filter((which) => custom[which])
-      .map((which) => {
-        const at = custom[which]!
-        const node = document.createElement('div')
-        node.className = 'custom-marker'
-        node.textContent = which.toUpperCase()
-        const marker = new maplibregl.Marker({ element: node, draggable: true })
-          .setLngLat([at.lon, at.lat])
-          .addTo(m)
-        const push = () => {
-          const { lat, lng } = marker.getLngLat()
-          onSetCustomRef.current(which, { lat, lon: lng })
-        }
-        marker.on('drag', push)
-        marker.on('dragend', push)
-        return marker
+    // Markers are created once and then only repositioned. Recreating them on every state change
+    // destroys the DOM element the browser is tracking the gesture on, which turns a smooth drag
+    // into a series of jumps -- and the drag handler updates state on every pointer move, so it was
+    // tearing down the very element being dragged.
+    for (const which of ['a', 'b'] as const) {
+      const at = custom[which]
+      const existing = customMarkers.current[which]
+
+      if (!at) {
+        existing?.remove()
+        delete customMarkers.current[which]
+        continue
+      }
+      if (existing) {
+        // Never fight the pointer: while this end is being dragged the marker is authoritative.
+        if (dragging.current !== which) existing.setLngLat([at.lon, at.lat])
+        continue
+      }
+
+      const node = document.createElement('div')
+      node.className = 'custom-marker'
+      node.textContent = which.toUpperCase()
+      const marker = new maplibregl.Marker({ element: node, draggable: true })
+        .setLngLat([at.lon, at.lat])
+        .addTo(m)
+      marker.on('dragstart', () => {
+        dragging.current = which
       })
+      marker.on('drag', () => {
+        const { lat, lng } = marker.getLngLat()
+        onSetCustomRef.current(which, { lat, lon: lng })
+      })
+      marker.on('dragend', () => {
+        dragging.current = null
+        const { lat, lng } = marker.getLngLat()
+        onSetCustomRef.current(which, { lat, lon: lng })
+      })
+      customMarkers.current[which] = marker
+    }
   }, [custom])
 
   useEffect(() => {

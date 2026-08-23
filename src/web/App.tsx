@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { BASEMAPS, MIX_MAX, MapView, type CustomPoints } from './MapView.js'
@@ -148,6 +148,16 @@ export function App() {
 
   const setCustomPoint = (which: 'a' | 'b', at: { lat: number; lon: number } | null) =>
     setCustom((prev) => ({ ...prev, [which]: at }))
+
+  // Placing the second point opens the panel on it, rather than making the user hunt for the line
+  // and click it. Only on the transition, so selecting a found line afterwards is not overridden.
+  const hadBothPoints = useRef(false)
+  useEffect(() => {
+    const both = !!(custom.a && custom.b)
+    if (both && !hadBothPoints.current) setSelectedId('custom')
+    if (!both && hadBothPoints.current && selectedId === 'custom') setSelectedId(null)
+    hadBothPoints.current = both
+  }, [custom, selectedId])
 
   /**
    * Debug overlay of every anchor the openness scan kept. Development only: anchors.json is
@@ -307,7 +317,6 @@ export function App() {
             basemapMix={basemapMix}
             anchorDump={anchorDump}
             custom={custom}
-            customLine={planned?.candidate ?? null}
             showLines={showLines}
             onSelect={setSelectedId}
             onSetCustom={setCustomPoint}
