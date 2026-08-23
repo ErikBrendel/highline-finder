@@ -358,9 +358,11 @@ export function MapView({
         source: 'custom',
         paint: { 'line-color': '#22c55e', 'line-width': 3.5 },
       })
-      m.on('click', 'custom', () => onSelectRef.current('custom'))
-      m.on('mouseenter', 'custom', () => { m.getCanvas().style.cursor = 'pointer' })
-      m.on('mouseleave', 'custom', () => { m.getCanvas().style.cursor = '' })
+      for (const id of ['custom', 'customCasing']) {
+        m.on('click', id, () => onSelectRef.current('custom'))
+        m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer' })
+        m.on('mouseleave', id, () => { m.getCanvas().style.cursor = '' })
+      }
 
       // Anchor labels are DOM markers rather than a symbol layer: labelled text would need a
       // `glyphs` source in the style, and there is no reason to fetch a font for two letters.
@@ -369,9 +371,12 @@ export function MapView({
         if (f) onSelectRef.current(String(f.properties!.cid))
       })
       m.on('click', (e) => {
-        if (!m.queryRenderedFeatures(e.point, { layers: ['lines-hit'] }).length) {
-          onSelectRef.current(null)
-        }
+        // Must include every selectable layer, or clicking one of them selects and then this
+        // immediately deselects it again -- both handlers fire, and this one runs last.
+        const hit = m.queryRenderedFeatures(e.point, {
+          layers: ['lines-hit', 'custom', 'customCasing'].filter((id) => m.getLayer(id)),
+        })
+        if (!hit.length) onSelectRef.current(null)
       })
       m.on('contextmenu', (e) => {
         setMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lon: e.lngLat.lng })
