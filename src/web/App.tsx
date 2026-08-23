@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { BASEMAPS, MapView, type BasemapKey } from './MapView.js'
+import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
 import { ProfileChart } from './ProfileChart.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 
@@ -70,7 +70,7 @@ export function App() {
   const [maxOffLevel, setMaxOffLevel] = useState(100)
   const [sort, setSort] = useState<SortKey>('score')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [basemap, setBasemap] = useState<BasemapKey>('ortho')
+  const [basemapMix, setBasemapMix] = useState(0)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [anchorError, setAnchorError] = useState<string | null>(null)
 
@@ -248,11 +248,26 @@ export function App() {
 
         <div className="mapwrap">
           <div className="basemaps">
-            {(Object.keys(BASEMAPS) as BasemapKey[]).map((k) => (
-              <button key={k} data-active={basemap === k} onClick={() => setBasemap(k)}>
-                {BASEMAPS[k].label}
-              </button>
-            ))}
+            <input
+              type="range"
+              min={0}
+              max={MIX_MAX}
+              step={0.02}
+              value={basemapMix}
+              aria-label="basemap blend"
+              onChange={(e) => setBasemapMix(Number(e.target.value))}
+            />
+            <div className="ticks">
+              {BASEMAPS.map((b, i) => (
+                <button
+                  key={b.id}
+                  data-active={Math.abs(basemapMix - i) < 0.02}
+                  onClick={() => setBasemapMix(i)}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <CacheBadge />
@@ -271,7 +286,7 @@ export function App() {
             data={data}
             visible={visible}
             selected={selected}
-            basemap={basemap}
+            basemapMix={basemapMix}
             anchorDump={anchorDump}
             onSelect={setSelectedId}
           />

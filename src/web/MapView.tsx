@@ -16,17 +16,47 @@ const wms = (path: string, layer: string) =>
       `&FORMAT=image/png&TRANSPARENT=false&BBOX={bbox-epsg-3857}`,
   )
 
-export const BASEMAPS = {
-  ortho: { label: 'Orthophoto', tiles: wms('dop20c', 'bebb_dop20c'), attribution: LGB_ATTR },
-  hillshade: { label: 'Hillshade', tiles: wms('dgm', 'dgmshade'), attribution: LGB_ATTR },
-  osm: {
+/**
+ * Ordered bottom to top. All three are stacked as raster layers and cross-faded with
+ * raster-opacity, rather than swapped: that lets the GPU blend them for free, where combining tile
+ * images ourselves would mean decoding, blending and re-encoding every PNG.
+ */
+export const BASEMAPS = [
+  { id: 'ortho', label: 'Ortho', tiles: wms('dop20c', 'bebb_dop20c'), attribution: LGB_ATTR },
+  { id: 'hillshade', label: 'Hillshade', tiles: wms('dgm', 'dgmshade'), attribution: LGB_ATTR },
+  {
+    id: 'osm',
     label: 'OSM',
     tiles: cachedUrl('https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
     attribution: '&copy; OpenStreetMap contributors',
   },
-} as const
+] as const
 
-export type BasemapKey = keyof typeof BASEMAPS
+/** Highest mix value, one per gap between adjacent basemaps. */
+export const MIX_MAX = BASEMAPS.length - 1
+
+/**
+ * Opacity of basemap `index` at mix position `mix`, where whole numbers are a pure basemap and
+ * fractions cross-fade to the next one up. The bottom layer stays fully opaque so there is never
+ * bare background showing through.
+ */
+export function basemapOpacity(index: number, mix: number): number {
+  if (index === 0) return 1
+  return Math.min(1, Math.max(0, mix - (index - 1)))
+}
+
+/**
+ * Whether a layer needs to be rendered at all. A layer that is transparent, or completely hidden
+ * behind an opaque layer above it, is switched off entirely -- MapLibre skips tile requests for a
+ * hidden layer, so this is what stops all three basemaps downloading at once.
+ */
+export function basemapVisible(index: number, mix: number, count: number): boolean {
+  if (basemapOpacity(index, mix) <= 0) return false
+  for (let above = index + 1; above < count; above++) {
+    if (basemapOpacity(above, mix) >= 1) return false
+  }
+  return true
+}
 
 const SCORE_COLOR: maplibregl.ExpressionSpecification = [
   'interpolate', ['linear'], ['get', 'score'],
@@ -107,12 +137,12 @@ interface Props {
   data: Dataset
   visible: Candidate[]
   selected: Candidate | null
-  basemap: BasemapKey
+  basemapMix: number
   anchorDump: AnchorDump | null
   onSelect: (id: string | null) => void
 }
 
-export function MapView({ data, visible, selected, basemap, anchorDump, onSelect }: Props) {
+export function MapView({ data, visible, selected, basemapMix, anchorDump, onSelect }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
   const markers = useRef<maplibregl.Marker[]>([])
@@ -127,17 +157,25 @@ export function MapView({ data, visible, selected, basemap, anchorDump, onSelect
   useEffect(() => {
     if (!el.current || map.current) return
     const { aoi } = data.meta
-    const bm = BASEMAPS[basemap]
     const m = new maplibregl.Map({
       container: el.current,
       style: {
         version: 8,
-        sources: {
-          base: { type: 'raster', tiles: [bm.tiles], tileSize: 256, attribution: bm.attribution },
-        },
+        sources: Object.fromEntries(
+          BASEMAPS.map((b, i) => [
+            `base${i}`,
+            { type: 'raster', tiles: [b.tiles], tileSize: 256, attribution: b.attribution },
+          ]),
+        ),
         layers: [
           { id: 'bg', type: 'background', paint: { 'background-color': '#0f1115' } },
-          { id: 'base', type: 'raster', source: 'base' },
+          ...BASEMAPS.map((_, i) => ({
+            id: `base${i}`,
+            type: 'raster' as const,
+            source: `base${i}`,
+            layout: { visibility: basemapVisible(i, basemapMix, BASEMAPS.length) ? 'visible' as const : 'none' as const },
+            paint: { 'raster-opacity': basemapOpacity(i, basemapMix) },
+          })),
         ],
       },
       bounds: [[aoi.west, aoi.south], [aoi.east, aoi.north]],
@@ -300,10 +338,13 @@ export function MapView({ data, visible, selected, basemap, anchorDump, onSelect
   useEffect(() => {
     const m = map.current
     if (!m || !ready.current) return
-    const bm = BASEMAPS[basemap]
-    const src = m.getSource('base') as maplibregl.RasterTileSource | undefined
-    src?.setTiles([bm.tiles])
-  }, [basemap])
+    BASEMAPS.forEach((_, i) => {
+      const id = `base${i}`
+      const visible = basemapVisible(i, basemapMix, BASEMAPS.length)
+      m.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none')
+      if (visible) m.setPaintProperty(id, 'raster-opacity', basemapOpacity(i, basemapMix))
+    })
+  }, [basemapMix])
 
   return <div id="map" ref={el} />
 }
