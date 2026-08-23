@@ -3,51 +3,11 @@ import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { BASEMAPS, MIX_MAX, MapView, type CustomPoints, type LatLon } from './MapView.js'
 import { toUtm33 } from '../shared/geo.js'
-import {
-  PLANNED_ID,
-  PLANNED_RIG_MAX,
-  planLine,
-  type PlannedLine,
-  type RigHeights,
-} from '../shared/plan.js'
+import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
-import { ProfileChart } from './ProfileChart.js'
+import { Details } from './Details.js'
+import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
-
-function scoreColor(score: number): string {
-  if (score >= 70) return '#22c55e'
-  if (score >= 60) return '#a3e635'
-  if (score >= 50) return '#f59e0b'
-  return '#64748b'
-}
-
-/**
- * `derived` marks a slider whose value is being computed rather than chosen, so it can move on its
- * own -- which looks like a glitch unless the readout says so. Touching it takes over.
- */
-function Slider({
-  label, value, min, max, step, unit, format, derived, onChange,
-}: {
-  label: string; value: number; min: number; max: number; step: number; unit: string
-  format?: (v: number) => string
-  derived?: boolean
-  onChange: (v: number) => void
-}) {
-  return (
-    <div className="filter">
-      <label>
-        <span>{label}</span>
-        <span className={derived ? 'derived' : undefined}>
-          {format ? format(value) : value}{unit}{derived ? ' auto' : ''}
-        </span>
-      </label>
-      <input
-        type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-    </div>
-  )
-}
 
 /**
  * Basemap tiles are served with `no-cache`, so they are cached in IndexedDB instead. Showing the
@@ -136,7 +96,9 @@ export function App() {
     let stale = false
     ensureTerrain(customUtm.a, customUtm.b)
       .then((arrived) => {
-        if (!stale && arrived) setTerrainVersion((v) => v + 1)
+        if (stale) return
+        setTerrainFailed(false)
+        if (arrived) setTerrainVersion((v) => v + 1)
       })
       .catch(() => {
         if (!stale) setTerrainFailed(true)
@@ -167,12 +129,11 @@ export function App() {
     )
   }, [data, customUtm, sagPct, terrainVersion, rig])
 
-  const planError =
-    customUtm && !planned
-      ? terrainFailed
-        ? 'could not load elevation for this area'
-        : 'no elevation data here yet'
-      : null
+  /**
+   * A placed line with no measurement yet. The details panel renders regardless, blank and with a
+   * placeholder chart, so placing a line always produces the panel it is going to fill.
+   */
+  const planPending = selectedId === PLANNED_ID && !!custom.a && !!custom.b && !planned
 
   /**
    * Moving or placing an anchor. Selection happens here rather than in an effect: it is a
@@ -356,8 +317,6 @@ export function App() {
           <CacheBadge />
         </div>
 
-        {planError && <div className="planerror">{planError}</div>}
-
           <MapView
             data={data}
             visible={visible}
@@ -371,136 +330,16 @@ export function App() {
             onMoveAnchor={moveAnchor}
           />
 
-          {selected && (
-            <div className="details">
-              <div className="head">
-                <strong
-                  style={{ color: selected.id === PLANNED_ID ? '#22c55e' : scoreColor(selected.score) }}
-                >
-                  {selected.id === PLANNED_ID ? 'Planned line · ' : ''}Score {selected.score.toFixed(1)}
-                </strong>
-                <span className="sub">
-                  {selected.length.toFixed(0)} m &middot; bearing {selected.bearing.toFixed(0)}&deg;
-                  &middot; midspan sag {selected.sag.toFixed(1)} m
-                  &middot; offlevel {selected.offLevel.toFixed(1)} m (
-                  {(selected.offLevelRatio * 100).toFixed(2)} %)
-                </span>
-                <button className="close" onClick={() => setSelectedId(null)}>close</button>
-              </div>
-
-              <div className="cols">
-                <div className="chart">
-                  <ProfileChart c={selected} />
-                  <div className="legend">
-                    <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m)</span>
-                    <span><i style={{ background: 'var(--canopy)' }} />canopy / structures (bDOM)</span>
-                    <span><i style={{ background: 'var(--line)' }} />line with sag</span>
-                  </div>
-                </div>
-
-                <dl className="stats">
-                  <dt>Exposure (max air)</dt>
-                  <dd>{selected.exposure.toFixed(1)} m</dd>
-                  <dt>Min terrain clearance</dt>
-                  <dd>{selected.clearanceMin.toFixed(1)} m</dd>
-                  <dt>Min canopy clearance</dt>
-                  <dd className={selected.canopyClearanceMin < 0 ? 'neg' : ''}>
-                    {selected.canopyClearanceMin.toFixed(1)} m
-                  </dd>
-                  <dt>Canopy blocked</dt>
-                  <dd className={selected.canopyBlockedFraction > 0 ? 'neg' : ''}>
-                    {(selected.canopyBlockedFraction * 100).toFixed(0)} %
-                  </dd>
-                  <dt>Offlevel</dt>
-                  <dd>
-                    {selected.offLevel.toFixed(2)} m &middot;{' '}
-                    {(selected.offLevelRatio * 100).toFixed(2)} %
-                  </dd>
-                  <dt>Ground A / B</dt>
-                  <dd>{selected.a.ground.toFixed(1)} / {selected.b.ground.toFixed(1)} m</dd>
-                  {selected.id !== PLANNED_ID && (
-                    <>
-                      <dt>Rig height A / B</dt>
-                      <dd>+{selected.a.aFrame.toFixed(2)} / +{selected.b.aFrame.toFixed(2)} m</dd>
-                    </>
-                  )}
-                  <dt>Score: exp / len / canopy / margin / level</dt>
-                  <dd>
-                    {(selected.scoreParts.exposure * 100).toFixed(0)}/
-                    {(selected.scoreParts.length * 100).toFixed(0)}/
-                    {(selected.scoreParts.canopy * 100).toFixed(0)}/
-                    {(selected.scoreParts.margin * 100).toFixed(0)}/
-                    {(selected.scoreParts.level * 100).toFixed(0)}
-                  </dd>
-                </dl>
-              </div>
-
-              {selected.id === PLANNED_ID && (
-                <div className="rig">
-                  {(['a', 'b'] as const).map((which) => (
-                    <Slider
-                      key={which}
-                      label={`Rig ${which.toUpperCase()}`}
-                      value={selected[which].aFrame}
-                      min={0}
-                      max={PLANNED_RIG_MAX}
-                      step={0.1}
-                      unit=" m"
-                      format={(v) => v.toFixed(1)}
-                      derived={rig === null}
-                      onChange={(v) =>
-                        setRig(
-                          which === 'a'
-                            ? { a: v, b: selected.b.aFrame }
-                            : { a: selected.a.aFrame, b: v },
-                        )
-                      }
-                    />
-                  ))}
-                  <button
-                    disabled={rig === null}
-                    onClick={() => setRig(null)}
-                    title="Rig as level and as high as the ground allows, like the search does"
-                  >
-                    auto
-                  </button>
-                </div>
-              )}
-              {selected.id === PLANNED_ID && rig === null && (
-                <div className="note" style={{ margin: '4px 0 0' }}>
-                  Rigged as level as the ground allows, then as high &mdash; the same choice the
-                  search makes, so both heights follow the terrain as you drag an anchor. Move a
-                  slider to set them yourself.
-                </div>
-              )}
-
-              {selected.id === PLANNED_ID && planned && planned.violations.length > 0 && (
-                <div className="violations">
-                  <b>Would not qualify as a candidate:</b>
-                  <ul>
-                    {planned.violations.map((v) => (
-                      <li key={v}>{v}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {selected.id === PLANNED_ID && planned && planned.violations.length === 0 && (
-                <div className="note" style={{ margin: '8px 0 0' }}>
-                  Meets every hard constraint — the search would have accepted this line.
-                </div>
-              )}
-
-              <div className="anchors">
-                A{' '}
-                <a href={`geo:${selected.a.lat},${selected.a.lon}`}>
-                  {selected.a.lat.toFixed(6)}, {selected.a.lon.toFixed(6)}
-                </a>
-                {'  —  B '}
-                <a href={`geo:${selected.b.lat},${selected.b.lon}`}>
-                  {selected.b.lat.toFixed(6)}, {selected.b.lon.toFixed(6)}
-                </a>
-              </div>
-            </div>
+          {(selected || planPending) && (
+            <Details
+              c={selected}
+              planned={planned}
+              at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
+              failed={terrainFailed}
+              rig={rig}
+              onRig={setRig}
+              onClose={() => setSelectedId(null)}
+            />
           )}
         </div>
       </div>
