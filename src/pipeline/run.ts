@@ -145,9 +145,12 @@ async function main() {
     aFrameMax: p.aFrameMax,
     anchorStep: p.anchorStep,
     nearProbeLength: p.nearProbeLength,
+    minDropDepth: p.minDropDepth,
+    dropSearchRadius: p.dropSearchRadius,
     lat: [],
     lon: [],
     ground: [],
+    drop: [],
     open: [],
   }
   for (const a of anchors) {
@@ -155,6 +158,7 @@ async function main() {
     dump.lat.push(r6(lat))
     dump.lon.push(r6(lon))
     dump.ground.push(Math.round(a.ground * 10) / 10)
+    dump.drop.push(Math.round(a.dropDepth * 10) / 10)
     dump.open.push(packSectors(a.open))
   }
   await writeFile(ANCHORS_OUT, JSON.stringify(dump))

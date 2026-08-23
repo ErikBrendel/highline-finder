@@ -183,6 +183,7 @@ function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection
       type: 'Feature',
       properties: {
         ground: dump.ground[i]!,
+        drop: dump.drop[i]!,
         open: dump.open[i]!,
         openCount: openBearings(dump.open[i]!, dump.sectorCount).length,
       },
@@ -210,6 +211,7 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
   const anchorRange = useRef<[number, number]>([0, 1.5])
   // How far the hover wedges reach; the scan's own near-field probe distance.
   const wedgeMetres = useRef(40)
+  const dropRadius = useRef(25)
   const ready = useRef(false)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -342,8 +344,8 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
         const f = e.features?.[0]
         if (!f || !popup.current) return
         const wedgeSrc = m.getSource('anchorWedge') as maplibregl.GeoJSONSource | undefined
-        const { ground, open, openCount } = f.properties as {
-          ground: number; open: string; openCount: number
+        const { ground, drop, open, openCount } = f.properties as {
+          ground: number; drop: number; open: string; openCount: number
         }
         const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates as [number, number]
         popup.current
@@ -352,6 +354,7 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
             `<b>anchor</b><br>${lat.toFixed(6)}, ${lon.toFixed(6)}<br>` +
               `ground ${ground.toFixed(1)} m<br>` +
               `rig ${(ground + anchorRange.current[0]).toFixed(1)}–${(ground + anchorRange.current[1]).toFixed(1)} m<br>` +
+              `drops <b>${drop.toFixed(1)} m</b> within ${dropRadius.current} m<br>` +
               `${openCount}/${sectorCount.current} sectors open<br>` +
               `<span class="dirs">${bearingRanges(openBearings(open, sectorCount.current), sectorCount.current)}</span>`,
           )
@@ -409,6 +412,7 @@ export function MapView({ data, visible, selected, basemapMix, anchorDump, onSel
       sectorCount.current = anchorDump.sectorCount
       anchorRange.current = [anchorDump.aFrameMin, anchorDump.aFrameMax]
       wedgeMetres.current = anchorDump.nearProbeLength
+      dropRadius.current = anchorDump.dropSearchRadius
     } else {
       popup.current?.remove()
       const wedgeSrc = m.getSource('anchorWedge') as maplibregl.GeoJSONSource | undefined

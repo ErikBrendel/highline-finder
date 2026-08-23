@@ -23,6 +23,8 @@ function anchor(e: number, n: number, g: Grid): Anchor {
     anchorMax: ground + p.aFrameMax,
     open: new Uint8Array(p.sectorCount).fill(1),
     openCount: p.sectorCount,
+    // lines.ts never reads this; only the openness scan and the debug dump use it.
+    dropDepth: p.minDropDepth,
   }
 }
 

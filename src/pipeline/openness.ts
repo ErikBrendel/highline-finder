@@ -18,8 +18,13 @@ import type { Params } from '../shared/types.js'
  *
  *   A. Is there air anywhere near? The terrain must fall `minDropDepth` below the attachment point
  *      somewhere within `dropSearchRadius`. Every highline has air under it at some point, so a
- *      point with nothing deep enough nearby cannot produce one in any direction. Answered by a
- *      single lookup into a precomputed sliding-window minimum of the terrain.
+ *      point with nothing deep enough nearby cannot produce one in any direction.
+ *
+ *      Two steps, because the cheap one is not exact: a lookup into a precomputed sliding-window
+ *      minimum rejects most points outright, but that window is a square and so reaches
+ *      `dropSearchRadius * sqrt(2)` into the corners. Whatever survives is confirmed against a true
+ *      disc. Skipping the confirmation let 7 % of anchors through on a drop that was further away
+ *      than the radius claims.
  *
  *   B. Does the ground fall away in this direction? Walking out from `anchorZone`, the terrain must
  *      stay below `anchorH - minFallSlope * d - minClearance` as far as `nearProbeLength`. A line
@@ -55,6 +60,8 @@ export interface Anchor {
   open: Uint8Array
   /** Number of open sectors, kept for reporting. */
   openCount: number
+  /** How far the terrain falls below the attachment point within `dropSearchRadius`. */
+  dropDepth: number
 }
 
 export interface ScanResult {
@@ -62,6 +69,20 @@ export interface ScanResult {
   scanned: number
   /** Points that passed the omnidirectional drop test, before any direction was considered. */
   passedDropTest: number
+}
+
+/** Lowest terrain within a true disc of `radius`, or NaN if the disc holds no data. */
+function lowestInDisc(ground: Grid, e: number, n: number, radius: number): number {
+  const step = ground.res
+  let lo = NaN
+  for (let dn = -radius; dn <= radius; dn += step) {
+    const across = Math.sqrt(Math.max(0, radius * radius - dn * dn))
+    for (let de = -across; de <= across; de += step) {
+      const g = ground.nearest(e + de, n + dn)
+      if (g < lo || Number.isNaN(lo)) lo = g
+    }
+  }
+  return lo
 }
 
 export function scanAnchors(ground: Grid, p: Params): ScanResult {
@@ -91,10 +112,13 @@ export function scanAnchors(ground: Grid, p: Params): ScanResult {
       if (Number.isNaN(g)) continue
       scanned++
 
-      // Test A. Measured from the highest attachment, the most permissive case.
+      // Test A, measured from the highest attachment because that is the most permissive case.
+      // The square window first, then the disc it is only an approximation of.
       const anchorH = g + p.aFrameMax
-      const lowest = lowestNearby.nearest(e, n)
-      if (Number.isNaN(lowest) || lowest > anchorH - p.minDropDepth) continue
+      const deepEnough = anchorH - p.minDropDepth
+      if (!(lowestNearby.nearest(e, n) <= deepEnough)) continue
+      const lowest = lowestInDisc(ground, e, n, p.dropSearchRadius)
+      if (!(lowest <= deepEnough)) continue
       passedDropTest++
 
       const open = new Uint8Array(sectorCount)
@@ -124,6 +148,7 @@ export function scanAnchors(ground: Grid, p: Params): ScanResult {
           anchorMax: anchorH,
           open,
           openCount,
+          dropDepth: anchorH - lowest,
         })
       }
     }

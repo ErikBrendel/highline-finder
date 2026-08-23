@@ -192,9 +192,13 @@ export interface AnchorDump {
   aFrameMax: number
   anchorStep: number
   nearProbeLength: number
+  minDropDepth: number
+  dropSearchRadius: number
   lat: number[]
   lon: number[]
   ground: number[]
+  /** Metres the terrain falls below the attachment point within `dropSearchRadius`. */
+  drop: number[]
   /** Open-sector bitmask, one hex digit per 4 sectors, least significant bit first. */
   open: string[]
 }

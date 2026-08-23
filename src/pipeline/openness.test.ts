@@ -91,3 +91,29 @@ describe('packSectors', () => {
     for (let i = 0; i < open.length; i++) expect(decode(hex, i)).toBe(open[i])
   })
 })
+
+describe('disc confirmation', () => {
+  it('rejects a drop that only the square min window could reach', () => {
+    // A pit placed diagonally, just past dropSearchRadius but inside the square window's corner.
+    const r = p.dropSearchRadius
+    const diag = Math.round(r * 0.8)
+    const pit = gridFrom(300, 300, (e, n) =>
+      e >= 150 + diag && n >= 150 + diag ? 30 : 50,
+    )
+    const corner = Math.hypot(diag, diag)
+    expect(corner).toBeGreaterThan(r)
+    expect(corner).toBeLessThan(r * Math.SQRT2)
+
+    // The point at (150,150) sees the pit only in the square window's corner, not within the disc.
+    const at150 = scanAnchors(pit, p).anchors.find(
+      (a) => Math.abs(a.e - 152.5) <= 2.5 && Math.abs(a.n - 152.5) <= 2.5,
+    )
+    expect(at150).toBeUndefined()
+  })
+
+  it('records how far the terrain actually falls', () => {
+    const rim = scanAnchors(cliff(20), p).anchors.find((a) => Math.abs(a.e - 197.5) <= 2.5)!
+    // Attachment is aFrameMax above 50 m ground, floor at 30 m.
+    expect(rim.dropDepth).toBeCloseTo(50 + p.aFrameMax - 30, 1)
+  })
+})
