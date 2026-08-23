@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Candidate, Dataset } from '../shared/types.js'
 import { BASEMAPS, MapView, type BasemapKey } from './MapView.js'
 import { ProfileChart } from './ProfileChart.js'
+import { cacheStats, clearTileCache } from './tileCache.js'
 
 type SortKey = 'score' | 'length' | 'exposure' | 'offlevel'
 
@@ -32,9 +33,33 @@ function Slider({
   )
 }
 
+/**
+ * Basemap tiles are served with `no-cache`, so they are cached in IndexedDB instead. Showing the
+ * size makes that visible rather than mysterious, and gives a way out if it ever misbehaves.
+ */
+function CacheBadge() {
+  const [stats, setStats] = useState(cacheStats())
+  useEffect(() => {
+    // Reads an in-memory index, so polling costs nothing and keeps the figure live as tiles load.
+    const t = setInterval(() => setStats(cacheStats()), 2000)
+    return () => clearInterval(t)
+  }, [])
+  return (
+    <div className="cachebadge">
+      <span>
+        {stats.count} tiles &middot; {(stats.bytes / 1048576).toFixed(0)} MB cached
+      </span>
+      <button onClick={() => void clearTileCache().then(() => setStats(cacheStats()))}>
+        clear
+      </button>
+    </div>
+  )
+}
+
 export function App() {
   const [data, setData] = useState<Dataset | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [minScore, setMinScore] = useState(0)
   const [minLength, setMinLength] = useState(0)
   const [minExposure, setMinExposure] = useState(0)
   const [maxCanopy, setMaxCanopy] = useState(100)
@@ -54,6 +79,7 @@ export function App() {
     if (!data) return []
     const out = data.candidates.filter(
       (c) =>
+        c.score >= minScore &&
         c.length >= minLength &&
         c.exposure >= minExposure &&
         c.canopyBlockedFraction * 100 <= maxCanopy &&
@@ -67,7 +93,7 @@ export function App() {
       offlevel: (c) => -c.offLevelRatio,
     }
     return out.sort((a, b) => key[sort](b) - key[sort](a))
-  }, [data, minLength, minExposure, maxCanopy, maxOffLevel, sort])
+  }, [data, minScore, minLength, minExposure, maxCanopy, maxOffLevel, sort])
 
   const selected = useMemo(
     () => visible.find((c) => c.id === selectedId) ?? null,
@@ -78,6 +104,7 @@ export function App() {
   if (!data) return <div className="loading">Loading&hellip;</div>
 
   const { stats, aoi } = data.meta
+  const maxScore = Math.ceil(Math.max(...data.candidates.map((c) => c.score), 1))
   const maxLen = Math.ceil(Math.max(...data.candidates.map((c) => c.length), 100))
   const maxExp = Math.ceil(Math.max(...data.candidates.map((c) => c.exposure), 10))
   // The pipeline already caps offlevel, so the slider only needs to reach that cap.
@@ -104,6 +131,7 @@ export function App() {
         <aside>
           <div className="filters">
             <h2>Filters</h2>
+            <Slider label="Min score" value={Math.min(minScore, maxScore)} min={0} max={maxScore} step={1} unit="" onChange={setMinScore} />
             <Slider label="Min length" value={minLength} min={0} max={maxLen} step={10} unit=" m" onChange={setMinLength} />
             <Slider label="Min exposure (air below)" value={minExposure} min={0} max={maxExp} step={1} unit=" m" onChange={setMinExposure} />
             <Slider label="Max canopy blocked" value={maxCanopy} min={0} max={100} step={1} unit=" %" onChange={setMaxCanopy} />
@@ -168,6 +196,8 @@ export function App() {
               </button>
             ))}
           </div>
+
+          <CacheBadge />
 
           <MapView
             data={data}

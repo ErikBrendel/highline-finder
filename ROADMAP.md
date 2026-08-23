@@ -36,8 +36,12 @@ anchors only, one AOI, static viewer.
 
 ## Search quality
 
-- **Sub-grid endpoint refinement.** Anchors are quantised to 5 m, so the reported point can sit up
-  to ~3.5 m from the real optimum. Refine each surviving candidate at 1 m locally.
+- **Better refinement.** The local hill-climb is coordinate descent over a small neighbourhood, so
+  it only reaches a local optimum, and it only runs on candidates that survived deduplication.
+  Two real improvements: refine before dedup instead of after (roughly a hundred times the work,
+  but nothing good gets discarded first), and escape local optima — levelling one end often has to
+  make the score temporarily worse before the other end catches up, which coordinate descent
+  cannot see past.
 - **Tighten the openness prefilter.** It currently only removes ~80 % of in-range pairs in high
   relief terrain, because a 5 m drop within 120 m is easy to satisfy where there is 38 m of relief.
   Scaling `minProbeDrop` to local relief would sharpen it.

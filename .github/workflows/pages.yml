@@ -5,32 +5,50 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege by default; the deploy job widens this for itself only.
 permissions:
   contents: read
-  pages: write
-  id-token: write
+
+# Never run two deploys at once, and let a running deploy finish rather than cancelling it
+# halfway through publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          # Active LTS, and the same major used for local development.
+          node-version: 24
           cache: npm
+
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      # The pipeline is not run here: it would download ~70 MB of rasters on every push. The
+      # committed candidates.json is the deployed dataset, regenerated locally when parameters
+      # change.
       - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
+
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

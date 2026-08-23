@@ -9,11 +9,11 @@ import type { Aoi, Params } from '../shared/types.js'
  */
 export const DEFAULT_PARAMS: Params = {
   // Attachment height range for a ground anchor. 0 is reachable at a clean edge, where the line
-  // runs straight out over the void from bolts in the rock; 2 m is about the tallest practical
-  // A-frame. v1 has no tree or building anchors, so this range is the only freedom the search has
-  // to level a line out.
+  // runs straight out over the void from bolts in the rock; 1.5 m is about the tallest A-frame
+  // worth carrying in. v1 has no tree or building anchors, so this range is the only freedom the
+  // search has to level a line out, and narrowing it directly costs candidates.
   aFrameMin: 0,
-  aFrameMax: 2.0,
+  aFrameMax: 1.5,
 
   // 1 m of offlevel on a 50 m line, scaling linearly to 10 m at 500 m.
   maxOffLevelRatio: 0.02,
@@ -55,7 +55,13 @@ export const DEFAULT_PARAMS: Params = {
   maxUpSlope: 0.25,
 
   profileStep: 2,
-  dedupCell: 25,
+  dedupRadius: 25,
+
+  // Local hill-climb of each anchor after dedup. 3 m comfortably exceeds half of anchorStep, so
+  // the 5 m lattice stops being the limiting factor on where an anchor is reported. 0 disables.
+  refineRadius: 3,
+  refineStep: 1,
+  refineIterations: 8,
   maxCandidates: 300,
   profilePoints: 80,
 }

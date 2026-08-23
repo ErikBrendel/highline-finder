@@ -43,10 +43,11 @@ describe('scanAnchors', () => {
   })
 
   it('measures the required drop from anchor height, not from the ground', () => {
-    // minProbeDrop is 5 m below the attachment point, which the probe puts aFrameMax (2 m) up.
-    // So a 3 m step in the terrain already qualifies, while a 1 m step does not.
+    // The probe sits aFrameMax above the terrain, so the ground only has to fall
+    // minProbeDrop - aFrameMax for the drop condition to be met.
+    const needed = p.minProbeDrop - p.aFrameMax
     const step = (drop: number) => gridFrom(400, 400, (e) => (e < 200 ? 50 : 50 - drop))
-    expect(anchorAt(scanAnchors(step(1), p).anchors, 197.5, 200)?.open[EAST] ?? 0).toBe(0)
-    expect(anchorAt(scanAnchors(step(3), p).anchors, 197.5, 200)!.open[EAST]).toBe(1)
+    expect(anchorAt(scanAnchors(step(needed - 1), p).anchors, 197.5, 200)?.open[EAST] ?? 0).toBe(0)
+    expect(anchorAt(scanAnchors(step(needed + 1), p).anchors, 197.5, 200)!.open[EAST]).toBe(1)
   })
 })

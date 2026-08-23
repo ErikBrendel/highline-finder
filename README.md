@@ -59,7 +59,13 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
    as possible and then as high as possible. Height difference is hard-capped at 2 % of span — 1 m
    over 50 m, 10 m over 500 m. This is what stops the finder proposing badly tilted lines.
 5. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain and to canopy.
-6. **Score** — filter, rank, collapse near-duplicates, write `candidates.json`.
+6. **Score and dedup** — filter, rank, then collapse near-duplicates: two lines are the same when
+   *both* endpoints are within `dedupRadius`, so lines sharing one anchor survive as the different
+   lines they are.
+7. **Refine** — hill-climb both anchors of each surviving candidate to a local score maximum,
+   moving each end up to `refineRadius` from where the lattice put it. This is what stops the 5 m
+   anchor grid being the limiting factor on where an anchor is reported, and it mostly pays off by
+   finding a position where the two ends level out exactly.
 
 The naive search is every pair of cells: ~3.7 × 10¹¹ for 1 km². Stages 2–4 bring that to
 something that runs in half a minute. Each stage logs how many pairs it eliminated, so the

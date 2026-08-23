@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { toUtm33 } from '../shared/geo.js'
 import { loadProduct } from './raster.js'
 import { scanAnchors } from './openness.js'
-import { findLines } from './lines.js'
+import { dedupe, findLines, refine } from './lines.js'
 import { DEFAULT_AOI, DEFAULT_PARAMS } from './params.js'
 import type { Dataset } from '../shared/types.js'
 
@@ -64,7 +64,7 @@ async function main() {
       `mean ${meanOpen.toFixed(1)}/${p.sectorCount} open sectors`,
   )
 
-  console.log('\n[3/5] pairing  [4/5] profiles  [5/5] score')
+  console.log('\n[3/6] pairing  [4/6] profiles  [5/6] score')
   const r = findLines(anchors, ground, surface, p)
   const pct = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : 'n/a')
   console.log(`  pairs in length range      ${r.pairsInRange}`)
@@ -78,7 +78,17 @@ async function main() {
     `  feasible after profile     ${r.pairsFeasible}  (${pct(r.pairsFeasible, r.pairsLevelEnough)} of those tested)`,
   )
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
-  console.log(`  written                    ${r.candidates.length}`)
+
+  console.log('\n[6/6] local refinement')
+  const ref = refine(r.candidates, ground, surface, p)
+  const meanGain = ref.improved ? ref.totalGain / ref.improved : 0
+  console.log(
+    `  ${ref.improved}/${r.candidates.length} improved from ${ref.evaluations} evaluations, ` +
+      `mean +${meanGain.toFixed(2)} score`,
+  )
+  // Refined anchors can converge on the same optimum, so collapse again before capping.
+  const finalCandidates = dedupe(ref.candidates, p.dedupRadius).slice(0, p.maxCandidates)
+  console.log(`  ${finalCandidates.length} after re-dedup and cap`)
 
   const dataset: Dataset = {
     meta: {
@@ -112,10 +122,12 @@ async function main() {
         pairsLevelEnough: r.pairsLevelEnough,
         pairsFeasible: r.pairsFeasible,
         candidatesAfterDedup: r.candidatesAfterDedup,
+        refinedCount: ref.improved,
+        refineMeanGain: Math.round(meanGain * 100) / 100,
         runtimeMs: Date.now() - started,
       },
     },
-    candidates: r.candidates,
+    candidates: finalCandidates,
   }
 
   await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
@@ -123,10 +135,10 @@ async function main() {
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
   console.log(`\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB)`)
 
-  if (r.candidates.length) {
+  if (finalCandidates.length) {
     console.log('\ntop 10:')
     console.log('  score  len    exposure  clear  offlevel  canopyMin  blocked')
-    for (const c of r.candidates.slice(0, 10)) {
+    for (const c of finalCandidates.slice(0, 10)) {
       console.log(
         `  ${c.score.toFixed(1).padStart(5)}  ${c.length.toFixed(0).padStart(4)}m  ` +
           `${c.exposure.toFixed(1).padStart(7)}m  ${c.clearanceMin.toFixed(1).padStart(5)}m  ` +

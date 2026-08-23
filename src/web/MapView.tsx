@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
 import type { Candidate, Dataset } from '../shared/types.js'
+import { cachedUrl } from './tileCache.js'
 
 /**
  * Basemaps come straight from the LGB WMS endpoints, which serve EPSG:3857 -- so MapLibre's
@@ -9,16 +10,18 @@ import type { Candidate, Dataset } from '../shared/types.js'
  */
 const LGB_ATTR = '&copy; GeoBasis-DE/LGB (dl-de/by-2.0)'
 const wms = (path: string, layer: string) =>
-  `https://isk.geobasis-bb.de/mapproxy/${path}/service/wms?SERVICE=WMS&VERSION=1.3.0` +
-  `&REQUEST=GetMap&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
-  `&FORMAT=image/png&TRANSPARENT=false&BBOX={bbox-epsg-3857}`
+  cachedUrl(
+    `https://isk.geobasis-bb.de/mapproxy/${path}/service/wms?SERVICE=WMS&VERSION=1.3.0` +
+      `&REQUEST=GetMap&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
+      `&FORMAT=image/png&TRANSPARENT=false&BBOX={bbox-epsg-3857}`,
+  )
 
 export const BASEMAPS = {
   ortho: { label: 'Orthophoto', tiles: wms('dop20c', 'bebb_dop20c'), attribution: LGB_ATTR },
   hillshade: { label: 'Hillshade', tiles: wms('dgm', 'dgmshade'), attribution: LGB_ATTR },
   osm: {
     label: 'OSM',
-    tiles: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    tiles: cachedUrl('https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
     attribution: '&copy; OpenStreetMap contributors',
   },
 } as const
@@ -33,26 +36,19 @@ const SCORE_COLOR: maplibregl.ExpressionSpecification = [
   70, '#22c55e',
 ]
 
+/**
+ * Feature ids must be numeric: MapLibre cannot use a non-numeric string id with feature-state, and
+ * a paint expression that reads feature-state on such a source silently fails to render. So the id
+ * is the array index and the candidate's own id travels in `properties.cid`.
+ */
 function toGeoJson(cs: Candidate[]): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: cs.map((c) => ({
+    features: cs.map((c, i) => ({
       type: 'Feature',
-      id: c.id,
-      properties: { id: c.id, score: c.score, length: c.length },
+      id: i,
+      properties: { cid: c.id, score: c.score, length: c.length },
       geometry: { type: 'LineString', coordinates: [[c.a.lon, c.a.lat], [c.b.lon, c.b.lat]] },
-    })),
-  }
-}
-
-function anchorGeoJson(c: Candidate | null): GeoJSON.FeatureCollection {
-  if (!c) return { type: 'FeatureCollection', features: [] }
-  return {
-    type: 'FeatureCollection',
-    features: [c.a, c.b].map((p, i) => ({
-      type: 'Feature',
-      properties: { label: i === 0 ? 'A' : 'B' },
-      geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
     })),
   }
 }
@@ -68,6 +64,7 @@ interface Props {
 export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
+  const markers = useRef<maplibregl.Marker[]>([])
   const ready = useRef(false)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -135,29 +132,11 @@ export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
         },
       })
 
-      m.addSource('anchors', { type: 'geojson', data: anchorGeoJson(null) })
-      m.addLayer({
-        id: 'anchors',
-        type: 'circle',
-        source: 'anchors',
-        paint: {
-          'circle-radius': 6,
-          'circle-color': '#f43f5e',
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#fff',
-        },
-      })
-      m.addLayer({
-        id: 'anchor-labels',
-        type: 'symbol',
-        source: 'anchors',
-        layout: { 'text-field': ['get', 'label'], 'text-offset': [0, -1.4], 'text-size': 12 },
-        paint: { 'text-color': '#fff', 'text-halo-color': '#000', 'text-halo-width': 1.5 },
-      })
-
+      // Anchors are DOM markers rather than a symbol layer: labelled text would need a `glyphs`
+      // source in the style, and there is no reason to fetch a font for two letters.
       m.on('click', 'lines-hit', (e) => {
         const f = e.features?.[0]
-        if (f) onSelectRef.current(String(f.properties!.id))
+        if (f) onSelectRef.current(String(f.properties!.cid))
       })
       m.on('click', (e) => {
         if (!m.queryRenderedFeatures(e.point, { layers: ['lines-hit'] }).length) {
@@ -169,7 +148,13 @@ export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
 
       ready.current = true
     })
-    return () => { m.remove(); map.current = null; ready.current = false }
+    return () => {
+      markers.current.forEach((mk) => mk.remove())
+      markers.current = []
+      m.remove()
+      map.current = null
+      ready.current = false
+    }
   }, [data])
 
   useEffect(() => {
@@ -182,11 +167,21 @@ export function MapView({ data, visible, selected, basemap, onSelect }: Props) {
   useEffect(() => {
     const m = map.current
     if (!m || !ready.current) return
+
     m.removeFeatureState({ source: 'lines' })
-    if (selected) m.setFeatureState({ source: 'lines', id: selected.id }, { sel: true })
-    const src = m.getSource('anchors') as maplibregl.GeoJSONSource | undefined
-    src?.setData(anchorGeoJson(selected))
-  }, [selected])
+    const index = selected ? visible.findIndex((c) => c.id === selected.id) : -1
+    if (index >= 0) m.setFeatureState({ source: 'lines', id: index }, { sel: true })
+
+    markers.current.forEach((mk) => mk.remove())
+    markers.current = selected
+      ? ([['A', selected.a], ['B', selected.b]] as const).map(([label, pt]) => {
+          const node = document.createElement('div')
+          node.className = 'anchor-marker'
+          node.textContent = label
+          return new maplibregl.Marker({ element: node }).setLngLat([pt.lon, pt.lat]).addTo(m)
+        })
+      : []
+  }, [selected, visible])
 
   useEffect(() => {
     const m = map.current

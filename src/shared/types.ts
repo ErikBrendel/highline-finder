@@ -57,8 +57,19 @@ export interface Params {
   maxUpSlope: number
   /** Spacing of samples along a candidate line. */
   profileStep: number
-  /** Endpoint quantisation used to collapse near-duplicate lines. */
-  dedupCell: number
+  /**
+   * Two lines count as the same when both endpoints are within this distance. Must be a
+   * multiple of `anchorStep` to have any thinning effect.
+   */
+  dedupRadius: number
+  /**
+   * Local refinement of anchor positions after deduplication. Each end may move up to
+   * `refineRadius` from where the lattice put it, searched on a `refineStep` grid, for at most
+   * `refineIterations` coordinate-descent passes. 0 disables refinement.
+   */
+  refineRadius: number
+  refineStep: number
+  refineIterations: number
   maxCandidates: number
   /** Samples kept in the serialised profile, to bound output size. */
   profilePoints: number
@@ -143,6 +154,8 @@ export interface DatasetMeta {
     pairsLevelEnough: number
     pairsFeasible: number
     candidatesAfterDedup: number
+    refinedCount: number
+    refineMeanGain: number
     runtimeMs: number
   }
 }
