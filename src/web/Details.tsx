@@ -2,7 +2,7 @@ import type { Candidate } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
-import type { LatLon } from './planPoints.js'
+import { spanGeometry, type LatLon } from './planPoints.js'
 
 function scoreColor(score: number): string {
   if (score >= 70) return '#22c55e'
@@ -33,6 +33,8 @@ export function Details({ c, planned, at, failed, rig, onRig, onClose }: Props) 
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
   const ends = c ? { a: c.a, b: c.b } : at
+  // Length and bearing need no elevation, so they are shown before the measurement lands.
+  const geom = c ?? (ends && spanGeometry(ends.a, ends.b))
   const stat = (fn: (c: Candidate) => string) => (c ? fn(c) : DASH)
   const pct = (v: number) => (v * 100).toFixed(0)
 
@@ -74,11 +76,16 @@ export function Details({ c, planned, at, failed, rig, onRig, onClose }: Props) 
           {isPlanned && 'Planned line · '}
           {c ? `Score ${c.score.toFixed(1)}` : failed ? 'no elevation data here' : 'measuring…'}
         </strong>
-        {c && (
+        {geom && (
           <span className="sub">
-            {c.length.toFixed(0)} m &middot; bearing {c.bearing.toFixed(0)}&deg;
-            &middot; midspan sag {c.sag.toFixed(1)} m
-            &middot; offlevel {c.offLevel.toFixed(1)} m ({(c.offLevelRatio * 100).toFixed(2)} %)
+            {geom.length.toFixed(0)} m &middot; bearing {geom.bearing.toFixed(0)}&deg;
+            {c && (
+              <>
+                {' '}&middot; midspan sag {c.sag.toFixed(1)} m
+                &middot; offlevel {c.offLevel.toFixed(1)} m (
+                {(c.offLevelRatio * 100).toFixed(2)} %)
+              </>
+            )}
           </span>
         )}
         <button className="close" onClick={onClose}>close</button>

@@ -44,7 +44,8 @@ export function App() {
   const [maxCanopy, setMaxCanopy] = useState(100)
   const [maxOffLevel, setMaxOffLevel] = useState(100)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [basemapMix, setBasemapMix] = useState(0)
+  // OSM: paths, roads and place names are what orient you before you know where you are looking.
+  const [basemapMix, setBasemapMix] = useState(MIX_MAX)
   const [showLines, setShowLines] = useState(true)
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
@@ -298,9 +299,13 @@ export function App() {
             <button data-active={!!hotspots} onClick={toggleHotspots}>
               {hotspots ? `${hotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
             </button>
-            <button data-active={!!anchorDump} onClick={toggleAnchors}>
-              {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
-            </button>
+            {/* anchors.json is gitignored, so this only exists where the pipeline has run.
+                Vite folds the constant away, dropping the button from the bundle entirely. */}
+            {import.meta.env.DEV && (
+              <button data-active={!!anchorDump} onClick={toggleAnchors}>
+                {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
+              </button>
+            )}
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>

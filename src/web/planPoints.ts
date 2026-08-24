@@ -28,10 +28,24 @@ export interface CustomPoints {
  */
 export const PLANNED_MAX_SPAN = 4000
 
-export function spanMetres(a: LatLon, b: LatLon): number {
+/**
+ * Ground distance and bearing between two placed points -- the part of a planned line that needs no
+ * elevation at all, so it can be shown while the raster is still on its way.
+ *
+ * Deliberately the same projection and the same expressions the pipeline uses, so the figures do
+ * not shift when the real measurement arrives.
+ */
+export function spanGeometry(a: LatLon, b: LatLon): { length: number; bearing: number } {
   const [ae, an] = toUtm33(a.lat, a.lon)
   const [be, bn] = toUtm33(b.lat, b.lon)
-  return Math.hypot(be - ae, bn - an)
+  return {
+    length: Math.hypot(be - ae, bn - an),
+    bearing: Math.round((Math.atan2(be - ae, bn - an) * 180) / Math.PI + 360) % 360,
+  }
+}
+
+export function spanMetres(a: LatLon, b: LatLon): number {
+  return spanGeometry(a, b).length
 }
 
 /** Puts one end of the planned line, dropping the far end if the span would be beyond the cap. */
