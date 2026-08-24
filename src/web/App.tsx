@@ -14,8 +14,8 @@ import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
-import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
-import { coverAlong, ensureLandcover } from './landcover.js'
+import { ensureTerrain, groundSampler, onBuilding, surfaceSampler } from './terrain.js'
+import { coverAlong, ensureWater } from './landcover.js'
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -498,23 +498,20 @@ export function App() {
   )
 
   /**
-   * Land cover along whatever line is on screen, for the chart only.
+   * Water along whatever line is on screen, purely so the chart can draw it.
    *
-   * Debounced because dragging an anchor moves the line many times a second and one of the two
-   * sources is a public Overpass instance; the elevation behind it is cached per 256 m window and
-   * survives a drag, but a fresh query per frame would not be a polite thing to do. Everything here
-   * fails soft -- no cover means the chart draws exactly as it did before.
+   * Debounced, because dragging an anchor moves the line many times a second and this is a public
+   * Overpass instance. Buildings need no equivalent: they arrive with the elevation, since they
+   * are part of the measurement rather than an annotation on it.
    */
-  const [coverVersion, setCoverVersion] = useState(0)
+  const [waterVersion, setWaterVersion] = useState(0)
   useEffect(() => {
     if (!shownEnds) return
     let stale = false
     const timer = setTimeout(() => {
-      ensureLandcover(shownEnds.a, shownEnds.b)
-        .then((arrived) => {
-          if (!stale && arrived) setCoverVersion((v) => v + 1)
-        })
-        .catch(() => undefined)
+      ensureWater(shownEnds.a, shownEnds.b).then((arrived) => {
+        if (!stale && arrived) setWaterVersion((v) => v + 1)
+      })
     }, 300)
     return () => {
       stale = true
@@ -524,9 +521,19 @@ export function App() {
 
   const cover = useMemo(() => {
     if (!shownEnds || !shownProfile) return null
-    void coverVersion
+    void waterVersion
     return coverAlong(shownEnds.a, shownEnds.b, shownProfile.length)
-  }, [shownEnds, shownProfile, coverVersion])
+  }, [shownEnds, shownProfile, waterVersion])
+
+  /** Which ends stand on a roof rather than on the ground, so the panel can say so. */
+  const onRoof = useMemo(
+    () =>
+      shownEnds && {
+        a: onBuilding(shownEnds.a.e, shownEnds.a.n),
+        b: onBuilding(shownEnds.b.e, shownEnds.b.n),
+      },
+    [shownEnds],
+  )
 
   /**
    * The URL, rewritten in place as the view changes.
@@ -737,6 +744,7 @@ export function App() {
               c={detailed}
               profile={shownProfile}
               cover={cover}
+              onRoof={onRoof}
               optimizing={optimizing}
               onOptimize={() => setOptimizing(!optimizing)}
               planned={planned}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { windowsFor } from './terrain.js'
+import { standingGround, windowsFor } from './terrain.js'
+import { Grid } from '../shared/grid.js'
 
 const TILE = 256
 const windowOf = (e: number, n: number) => `${Math.floor(e / TILE)}_${Math.floor(n / TILE)}`
@@ -25,5 +26,32 @@ describe('windowsFor', () => {
   it('covers a single point and its neighbours, for dragging', () => {
     const a = { e: 400_100, n: 5_785_100 }
     expect(windowsFor(a, a)).toHaveLength(9)
+  })
+})
+
+describe('standingGround', () => {
+  /** Four metres of flat terrain, a 9 m roof on the right half, and the mask agreeing with it. */
+  const win = (() => {
+    const make = (fill: (col: number) => number) => {
+      const g = Grid.filled(4, 1, 1000, 5_000_001, 1)
+      for (let col = 0; col < 4; col++) g.data[col] = fill(col)
+      return g
+    }
+    return {
+      ground: make(() => 4),
+      surface: make((col) => (col >= 2 ? 9 : 4)),
+      building: make((col) => (col >= 2 ? 1 : 0)),
+    }
+  })()
+
+  it('reads the roof where there is a building and the terrain where there is not', () => {
+    expect(standingGround(win, 1000.5, 5_000_000.5)).toBe(4)
+    expect(standingGround(win, 1002.5, 5_000_000.5)).toBe(9)
+  })
+
+  it('keeps the terrain when the surface model is stale and sits below it', () => {
+    const demolished = { ...win, surface: Grid.filled(4, 1, 1000, 5_000_001, 1) }
+    demolished.surface.data.fill(2)
+    expect(standingGround(demolished, 1002.5, 5_000_000.5)).toBe(4)
   })
 })

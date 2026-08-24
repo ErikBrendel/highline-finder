@@ -27,6 +27,8 @@ interface Props {
   profile: ProfileSample[] | null
   /** Land cover per profile sample, or null when it is still loading or unavailable. */
   cover: Uint8Array | null
+  /** Which ends stand on a building rather than on terrain. */
+  onRoof: { a: boolean; b: boolean } | null
   planned: PlannedLine | null
   /** Endpoints to fall back on before there is a measurement to read them from. */
   at: { a: LatLon; b: LatLon } | null
@@ -39,7 +41,7 @@ interface Props {
 }
 
 export function Details({
-  c, profile, cover, planned, at, failed, optimizing, onOptimize, rig, onRig, onClose,
+  c, profile, cover, onRoof, planned, at, failed, optimizing, onOptimize, rig, onRig, onClose,
 }: Props) {
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
@@ -66,7 +68,14 @@ export function Details({
       label: 'Offlevel',
       value: stat((c) => `${c.offLevel.toFixed(1)} m · ${(c.offLevelRatio * 100).toFixed(1)} %`),
     },
-    { label: 'Ground A / B', value: stat((c) => `${c.a.ground.toFixed(1)} / ${c.b.ground.toFixed(1)} m`) },
+    {
+      // A roof counts as ground, so this figure is the roof where an end stands on a building.
+      label: 'Ground A / B',
+      value: stat((c) => {
+        const end = (v: number, roof: boolean) => `${v.toFixed(1)}${roof ? ' (roof)' : ''}`
+        return `${end(c.a.ground, !!onRoof?.a)} / ${end(c.b.ground, !!onRoof?.b)} m`
+      }),
+    },
     // The planned line has sliders for these instead.
     ...(isPlanned
       ? []
@@ -135,7 +144,7 @@ export function Details({
           <div className="legend">
             <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m)</span>
             <span><i style={{ background: 'var(--canopy)' }} />canopy (bDOM)</span>
-            <span><i style={{ background: 'var(--building)' }} />building (ALKIS, Brandenburg only)</span>
+            <span><i style={{ background: 'var(--building)' }} />building, counted as ground (ALKIS, Brandenburg only)</span>
             <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
             <span><i style={{ background: 'var(--line)' }} />line with sag</span>
           </div>

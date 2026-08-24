@@ -1,97 +1,45 @@
 import type { Pos } from '../shared/grid.js'
 import { toWgs84 } from '../shared/geo.js'
-import { fetchCached } from './tileCache.js'
-import { windowsFor, WINDOW } from './terrain.js'
+import { onBuilding } from './terrain.js'
 
 /**
- * What a profile sample is standing on, beyond bare height.
+ * What a profile sample is standing on, for the chart to draw.
  *
- * The elevation pair the rest of the app runs on cannot answer this. The bDOM is one number per
- * cell -- the top of whatever is there -- so a 22 m pine and a 22 m grain silo are the same
- * measurement, and the app has been calling both "canopy". Separating them needs a second source
- * that says where the built-up footprints are, and neither of the two elevation products carries
- * one.
+ * The bDOM is one number per cell -- the top of whatever is there -- so a 22 m pine and a 22 m
+ * grain silo are the same measurement, and without a second source the app has to call both
+ * "canopy". Two sources fix that, and they live in different places for a reason:
  *
- * Two sources, because no single one covers both questions:
+ *   buildings -- ALKIS, the cadastre. Loaded with the elevation in terrain.ts, because a roof is
+ *     not decoration: it is what an anchor stands on and what a line has to clear. This module
+ *     only reads the result back for drawing.
  *
- *   buildings -- ALKIS (the cadastre) via the LGB WMS, requested as a transparent PNG over the
- *     same 256 m window grid the elevation uses. Any non-transparent pixel is inside a building
- *     footprint. Authoritative and pixel-exact at 1 m, but Brandenburg only: the Mueggelberge AOI
- *     is Berlin and comes back empty, which is a coverage gap and not an absence of buildings.
+ *   water -- OpenStreetMap via Overpass, here. It genuinely is decoration: a lake changes nothing
+ *     about a line over it, it just makes the picture legible. The survey has no usable source --
+ *     `adv_alkis_gewaesser` renders bank lines and labels, not filled polygons, so the middle of
+ *     a lake comes back blank. Checked, not assumed. OSM also covers Berlin, where ALKIS
+ *     Brandenburg does not.
  *
- *   water -- OpenStreetMap via Overpass. The LGB has no usable source here: `adv_alkis_gewaesser`
- *     renders bank lines and labels, not filled polygons, so the middle of a lake comes back
- *     blank. Checked, not assumed. OSM covers Berlin as well.
- *
- * Nothing here feeds the score. It is drawn on the profile so the picture says what the line
- * crosses, and both halves fail soft: a dead service means the chart looks exactly as it did
- * before.
+ * The water half fails soft: a dead Overpass means the chart looks exactly as it did before.
  */
 
 export const COVER_NONE = 0
 export const COVER_BUILDING = 1
 export const COVER_WATER = 2
 
-const ALKIS_WMS = 'https://isk.geobasis-bb.de/ows/alkis_wms'
 const OVERPASS = 'https://overpass-api.de/api/interpreter'
-
-/**
- * Buildings, as a bitmask per 256 m window at 1 m.
- *
- * EPSG:25833 is an easting/northing axis-order CRS, so WMS 1.3.0 wants BBOX in that order despite
- * 1.3.0's reputation -- the reversed form silently returns a blank tile rather than an error.
- */
-const buildings = new Map<string, Uint8Array>()
-const inFlight = new Map<string, Promise<unknown>>()
-
-const keyOf = (tx: number, ty: number) => `${tx}_${ty}`
-
-function buildingUrl(e0: number, n0: number): string {
-  return (
-    `${ALKIS_WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=adv_alkis_gebaeude&STYLES=` +
-    `&CRS=EPSG:25833&BBOX=${e0},${n0},${e0 + WINDOW},${n0 + WINDOW}` +
-    `&WIDTH=${WINDOW}&HEIGHT=${WINDOW}&FORMAT=image/png&TRANSPARENT=TRUE`
-  )
-}
-
-async function loadBuildings(tx: number, ty: number): Promise<void> {
-  const bytes = await fetchCached(buildingUrl(tx * WINDOW, ty * WINDOW))
-  const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
-  const canvas = new OffscreenCanvas(WINDOW, WINDOW)
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(bitmap, 0, 0)
-  bitmap.close()
-  const { data } = ctx.getImageData(0, 0, WINDOW, WINDOW)
-  const mask = new Uint8Array(WINDOW * WINDOW)
-  // Alpha alone, not colour: the cadastre draws footprints filled but in several greys, and the
-  // only thing that matters here is covered versus not.
-  for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3]! > 64 ? 1 : 0
-  buildings.set(keyOf(tx, ty), mask)
-}
-
-function buildingAt(e: number, n: number): boolean {
-  const tx = Math.floor(e / WINDOW)
-  const ty = Math.floor(n / WINDOW)
-  const mask = buildings.get(keyOf(tx, ty))
-  if (!mask) return false
-  const col = Math.floor(e - tx * WINDOW)
-  const row = WINDOW - 1 - Math.floor(n - ty * WINDOW)
-  return mask[row * WINDOW + col] === 1
-}
 
 /**
  * Water, as WGS84 rings.
  *
- * Only outer rings, and only the ones Overpass returns geometry for directly. A lake with a hole
- * in it draws as solid, which is wrong by a few square metres of island and right about the
- * question being asked -- is the line over water.
+ * Only outer rings. A lake with an island draws as solid, which is wrong by a few square metres
+ * and right about the question being asked -- is the line over water.
  */
 type Ring = { lat: number; lon: number }[]
 
 const waterCache = new Map<string, Ring[]>()
+const inFlight = new Map<string, Promise<unknown>>()
 
 interface OverpassElement {
-  type: string
   geometry?: { lat: number; lon: number }[]
   members?: { role?: string; geometry?: { lat: number; lon: number }[] }[]
 }
@@ -117,14 +65,12 @@ function waterKeyFor(a: Pos, b: Pos): string {
 }
 
 async function loadWater(key: string): Promise<void> {
-  const [s, w, n, e] = key.split(',')
-  const box = `${s},${w},${n},${e}`
   const query =
     `[out:json][timeout:25];(` +
-    `way["natural"="water"](${box});` +
-    `way["waterway"="riverbank"](${box});` +
-    `way["landuse"~"reservoir|basin"](${box});` +
-    `relation["natural"="water"](${box});` +
+    `way["natural"="water"](${key});` +
+    `way["waterway"="riverbank"](${key});` +
+    `way["landuse"~"reservoir|basin"](${key});` +
+    `relation["natural"="water"](${key});` +
     `);out geom;`
   // GET rather than POST: a string body would go out as text/plain, which Overpass reads as the
   // query itself rather than as a form field, and the encoded `data=` prefix would land in it.
@@ -155,34 +101,16 @@ export function inRing(ring: Ring, lat: number, lon: number): boolean {
   return inside
 }
 
-function once(key: string, build: () => Promise<void>): Promise<unknown> {
+/** Fetches the water in the corridor, if this box has not been asked for already. */
+export async function ensureWater(a: Pos, b: Pos): Promise<boolean> {
+  const key = waterKeyFor(a, b)
+  if (waterCache.has(key)) return false
   let job = inFlight.get(key)
   if (!job) {
-    job = build().finally(() => inFlight.delete(key))
+    job = loadWater(key).finally(() => inFlight.delete(key))
     inFlight.set(key, job)
   }
-  return job
-}
-
-/**
- * Fetches whatever the corridor between two points still needs.
- *
- * Resolves to true only when something new arrived, matching `ensureTerrain`, so a caller can
- * re-measure on a real change rather than on every drag frame. Each half is caught separately:
- * losing water must not cost buildings.
- */
-export async function ensureLandcover(a: Pos, b: Pos): Promise<boolean> {
-  const tiles = windowsFor(a, b, 0).filter(([tx, ty]) => !buildings.has(keyOf(tx, ty)))
-  const key = waterKeyFor(a, b)
-  const needWater = !waterCache.has(key)
-  if (!tiles.length && !needWater) return false
-
-  await Promise.all([
-    ...tiles.map(([tx, ty]) =>
-      once(`b${keyOf(tx, ty)}`, () => loadBuildings(tx, ty)).catch(() => undefined),
-    ),
-    needWater ? once(`w${key}`, () => loadWater(key)).catch(() => undefined) : null,
-  ])
+  await job.catch(() => undefined)
   return true
 }
 
@@ -201,7 +129,7 @@ export function coverAlong(a: Pos, b: Pos, count: number): Uint8Array {
     const t = last > 0 ? i / last : 0
     const e = a.e + (b.e - a.e) * t
     const n = a.n + (b.n - a.n) * t
-    if (buildingAt(e, n)) {
+    if (onBuilding(e, n)) {
       out[i] = COVER_BUILDING
       continue
     }

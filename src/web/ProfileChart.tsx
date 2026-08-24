@@ -6,9 +6,9 @@ import { COVER_BUILDING, coverRuns } from './landcover.js'
  * Side elevation of one candidate: terrain, canopy band, and the sagging line.
  *
  * The surface model does not know what it measured, so the band above ground is drawn as canopy
- * until a second source says otherwise -- see landcover.ts. Where it does, the same band is
- * restated as a building and the ground under a lake is restated as water. Both are annotation
- * over the unchanged geometry: nothing here moves a line or changes a number.
+ * unless a second source says otherwise -- see landcover.ts. Over a building the ground series is
+ * already the roof, because terrain.ts treats a roof as ground, so the building is drawn as the
+ * solid column it is rather than as a band; water is drawn the same way, as a section through it.
  *
  * Marker positions come from the resampled profile, but their labels come from the candidate's
  * stored metrics, which were measured on a finer step. Labelling from the profile instead would
@@ -53,26 +53,19 @@ export function ProfileChart({ c, profile, cover }: Props) {
     .join('')}Z`
 
   /**
-   * One filled shape per stretch of a single cover class. A building is the band between ground
-   * and surface, exactly the strip the canopy fill would otherwise claim; water is the ground
-   * itself, filled down to the axis so a crossing reads as a section through the lake.
+   * One filled shape per stretch of a single cover class: the ground series over that stretch,
+   * closed down to the axis. Both classes are solid from below -- a building is a column standing
+   * on the terrain, water is a section through the body -- so they share a shape and differ only
+   * in colour. Drawn over the ground fill, so they replace the brown rather than tint it.
    */
   const runs = cover && cover.length === p.length ? coverRuns(cover) : []
-  const coverFill = (from: number, to: number, kind: number) => {
+  const coverFill = (from: number, to: number) => {
     const span = p.slice(from, to + 1)
-    const top = kind === COVER_BUILDING ? 'surface' : 'ground'
-    const forward = span
-      .map((s, i) => `${i ? 'L' : 'M'}${x(s.d).toFixed(1)},${y(s[top]).toFixed(1)}`)
-      .join('')
-    if (kind === COVER_BUILDING) {
-      return `${forward}${span
-        .slice()
-        .reverse()
-        .map((s) => `L${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
-        .join('')}Z`
-    }
     const base = PAD.top + ih
-    return `${forward}L${x(span[span.length - 1]!.d).toFixed(1)},${base}L${x(span[0]!.d).toFixed(1)},${base}Z`
+    const top = span
+      .map((s, i) => `${i ? 'L' : 'M'}${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
+      .join('')
+    return `${top}L${x(span[span.length - 1]!.d).toFixed(1)},${base}L${x(span[0]!.d).toFixed(1)},${base}Z`
   }
 
   // Mark the two numbers the score actually turns on.
@@ -125,9 +118,9 @@ export function ProfileChart({ c, profile, cover }: Props) {
       {runs.map((r) => (
         <path
           key={`${r.kind}-${r.from}`}
-          d={coverFill(r.from, r.to, r.kind)}
+          d={coverFill(r.from, r.to)}
           fill={r.kind === COVER_BUILDING ? 'var(--building)' : 'var(--water)'}
-          opacity={r.kind === COVER_BUILDING ? 0.85 : 0.65}
+          opacity="0.9"
         />
       ))}
       <path d={path('ground')} stroke="#a08a72" strokeWidth="1.25" fill="none" />

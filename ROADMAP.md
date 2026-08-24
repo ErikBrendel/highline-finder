@@ -16,16 +16,18 @@ anchors only, one AOI, static viewer.
   bulk of the span. Model as a tolerance window of `max(5 m, 2 % of length)` at each end, inside
   which canopy is ignored, and enforce canopy clearance as a hard constraint outside it. This is
   what turns the canopy column from a score into a real filter.
-- **Buildings as anchors.** `3d_gebaeude` LoD1/LoD2 CityGML gives per-building geometry and
-  heights. Opens up urban highlines and is the point of extending to Berlin. The viewer already
-  tells a building apart from a tree — ALKIS footprints, see `src/web/landcover.ts` — but only in
-  the profile chart; the search still treats both as canopy, and treats a building as an obstacle
-  rather than as somewhere to rig.
-- **Land cover in the pipeline.** The viewer fetches footprints and water per line. The pipeline
-  cannot: it would be a WMS request per corridor. The bulk equivalents are
-  `alkis/Vektordaten/shape/` (80–100 MB per Landkreis, both buildings and water as polygons) and
-  the ALKIS NAS files. Rasterising those once per AOI to a 1 m mask would give the search the same
-  distinction for free — and would let canopy blockage stop counting roofs as forest.
+- **Buildings in the pipeline.** The viewer treats a roof as ground — ALKIS footprints fetched per
+  256 m window, see `src/web/terrain.ts` — so an anchor dropped on a building stands on it and a
+  line has to clear one it crosses. The search still does not: it runs its lines through houses and
+  counts roofs as forest. Per-corridor WMS requests are the wrong shape for a pipeline; the bulk
+  equivalent is `alkis/Vektordaten/shape/` (80–100 MB per Landkreis, buildings and water as
+  polygons), rasterised once per AOI to a 1 m mask.
+- **Anchoring to the side of a building, not just the top.** A parapet, a balcony, a beam through a
+  window: in practice urban lines are rigged off the structure, not off the roof surface, and the
+  usable attachment point is often several metres below the roof and horizontally outside the
+  footprint. The footprint mask cannot express that — it is 2D. `3d_gebaeude` LoD2 CityGML carries
+  per-building wall and roof geometry with eave and ridge heights, which is what a real façade
+  anchor model would need, and is also the point of extending properly to Berlin.
 - **Anchor quality.** Rock vs. sand vs. loose spoil changes whether a ground anchor is riggable at
   all. Partly derivable from `alkis` land cover and geological maps.
 - **Terrain-dependent attachment range.** Every ground anchor currently gets the same 0–2 m range.
