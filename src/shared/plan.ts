@@ -1,8 +1,9 @@
 import type { Pos, Sampler } from './grid.js'
-import { buildProfile } from './profile.js'
+import { buildProfile, packProfile } from './profile.js'
 import {
   chooseHeights,
   lineOverProfile,
+  maxFeasibleSag,
   rawMetrics,
   scoreOf,
   violationsOf,
@@ -83,6 +84,7 @@ export function planLine(
   if (!m) return null
 
   const r2 = (v: number) => Math.round(v * 100) / 100
+  const stored = packProfile(profile)
   const { score, parts } = scoreOf(length, h.offLevel, m, p)
   const wa = toWgs84(a.e, a.n)
   const wb = toWgs84(b.e, b.n)
@@ -102,7 +104,8 @@ export function planLine(
       canopyBlockedFraction: Math.round(m.canopyBlockedFraction * 1000) / 1000,
       score: Math.round(score * 10) / 10,
       scoreParts: parts,
-      profile: profile.map((s, i) => ({ ...s, line: r2(line[i]!) })),
+      maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p),
+      profile: stored,
     },
     violations: [...violationsOf(m, length, h.offLevel, p), ...rigViolations(h, gA, gB, p)],
   }

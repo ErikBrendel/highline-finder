@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { lineHeightAt, lineOverProfile, metricsOf, rescoreAtSag, scoreOf } from './scoring.js'
+import {
+  lineHeightAt,
+  lineOverProfile,
+  maxFeasibleSag,
+  metricsOf,
+  rescoreAtSag,
+  scoreOf,
+} from './scoring.js'
+import { packProfile, unpackProfile } from './profile.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 import type { Candidate, ProfileSample } from './types.js'
 
@@ -100,7 +108,14 @@ describe('rescoreAtSag', () => {
     canopyBlockedFraction: m.canopyBlockedFraction,
     score: scoreOf(200, 0, m, p).score,
     scoreParts: scoreOf(200, 0, m, p).parts,
-    profile: profile.map((s, i) => ({ ...s, line: line[i]! })),
+    maxSagRatio: maxFeasibleSag(packProfile(profile), 200, 52, 52, p),
+    profile: packProfile(profile),
+  }
+
+  /** The line height at midspan, as the browser derives it. */
+  const midLine = (c: Candidate, sagRatio: number) => {
+    const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, sagRatio)
+    return samples[Math.floor(samples.length / 2)]!.line
   }
 
   it('reproduces the original metrics at the sag it was generated with', () => {
@@ -113,8 +128,19 @@ describe('rescoreAtSag', () => {
     const looser = rescoreAtSag(candidate, 0.08, p)!
     expect(looser.clearanceMin).toBeLessThan(candidate.clearanceMin)
     expect(looser.sag).toBeGreaterThan(candidate.sag)
-    const mid = looser.profile[Math.floor(looser.profile.length / 2)]!
-    expect(mid.line).toBeLessThan(candidate.profile[Math.floor(candidate.profile.length / 2)]!.line)
+    expect(midLine(looser, 0.08)).toBeLessThan(midLine(candidate, 0.05))
+  })
+
+  it('reports the loosest sag it still clears at', () => {
+    expect(candidate.maxSagRatio).toBeGreaterThan(0.05)
+    expect(rescoreAtSag(candidate, candidate.maxSagRatio - 0.001, p)).not.toBeNull()
+    expect(rescoreAtSag(candidate, candidate.maxSagRatio + 0.005, p)).toBeNull()
+  })
+
+  it('answers the validity question from maxSagRatio alone when no profile is stored', () => {
+    const { profile: _stored, ...bare } = candidate
+    expect(rescoreAtSag(bare, candidate.maxSagRatio, p)).not.toBeNull()
+    expect(rescoreAtSag(bare, candidate.maxSagRatio + 0.01, p)).toBeNull()
   })
 
   it('drops the candidate once sag makes it infeasible', () => {

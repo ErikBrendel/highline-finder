@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AnchorDump, Candidate, Dataset, Hotspots } from '../shared/types.js'
+import type { AnchorDump, Candidate, Dataset, Hotspots, StoredProfile } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
+import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
 import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
@@ -73,6 +74,9 @@ export function App() {
   // computed, not held in state, so no effect has to write it.
   const [terrainVersion, setTerrainVersion] = useState(0)
   const [terrainFailed, setTerrainFailed] = useState(false)
+  const [fetchedProfile, setFetchedProfile] = useState<{ id: string; profile: StoredProfile } | null>(
+    null,
+  )
   const [layerError, setLayerError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -257,6 +261,56 @@ export function App() {
   )
 
   /**
+   * A profile for the selected line, when the dataset does not carry one.
+   *
+   * This is the other half of `storeProfiles: false` -- the chart and the exact metrics still exist,
+   * they are just built for the one line being looked at instead of all of them up front, from the
+   * same elevation service and the same buildProfile the planner uses.
+   */
+  useEffect(() => {
+    if (!data || !selected || selected.profile) return
+    const a = { e: selected.a.e, n: selected.a.n }
+    const b = { e: selected.b.e, n: selected.b.n }
+    let stale = false
+    ensureTerrain(a, b)
+      .then(() => {
+        if (stale) return
+        const built = buildProfile(
+          a, b, selected.a.anchor, selected.b.anchor, selected.length,
+          groundSampler, surfaceSampler, data.meta.params,
+        )
+        if (built.some((s) => Number.isNaN(s.ground))) return
+        setFetchedProfile({ id: selected.id, profile: packProfile(built) })
+      })
+      .catch(() => undefined)
+    return () => {
+      stale = true
+    }
+  }, [data, selected])
+
+  /** The selected line with its stored profile, or the fetched one, or neither yet. */
+  const detailed = useMemo(() => {
+    if (!selected || !data || sagPct === null) return selected
+    if (selected.profile) return selected
+    const profile = fetchedProfile?.id === selected.id ? fetchedProfile.profile : null
+    if (!profile) return selected
+    // Now that a profile exists, the figures can be recomputed at the chosen sag rather than
+    // staying at the one they were generated with.
+    return rescoreAtSag({ ...selected, profile }, sagPct / 100, data.meta.params) ?? selected
+  }, [selected, data, sagPct, fetchedProfile])
+
+  const shownProfile = useMemo(() => {
+    if (!detailed?.profile || sagPct === null) return null
+    return unpackProfile(
+      detailed.profile,
+      detailed.length,
+      detailed.a.anchor,
+      detailed.b.anchor,
+      sagPct / 100,
+    )
+  }, [detailed, sagPct])
+
+  /**
    * The URL, rewritten in place as the view changes.
    *
    * A selected candidate also carries the geometry needed to rebuild it, so the link survives the
@@ -428,7 +482,8 @@ export function App() {
 
           {(selected || planPending) && (
             <Details
-              c={selected}
+              c={detailed}
+              profile={shownProfile}
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
               failed={terrainFailed}

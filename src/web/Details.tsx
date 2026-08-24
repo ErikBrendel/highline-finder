@@ -1,4 +1,4 @@
-import type { Candidate } from '../shared/types.js'
+import type { Candidate, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
@@ -20,6 +20,11 @@ interface Props {
    * instead of a warning banner somewhere else on the page.
    */
   c: Candidate | null
+  /**
+   * Null while it is still being built. A candidate from a dataset generated without stored
+   * profiles has its figures immediately but its chart a moment later.
+   */
+  profile: ProfileSample[] | null
   planned: PlannedLine | null
   /** Endpoints to fall back on before there is a measurement to read them from. */
   at: { a: LatLon; b: LatLon } | null
@@ -29,7 +34,7 @@ interface Props {
   onClose: () => void
 }
 
-export function Details({ c, planned, at, failed, rig, onRig, onClose }: Props) {
+export function Details({ c, profile, planned, at, failed, rig, onRig, onClose }: Props) {
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
   const ends = c ? { a: c.a, b: c.b } : at
@@ -93,8 +98,8 @@ export function Details({ c, planned, at, failed, rig, onRig, onClose }: Props) 
 
       <div className="cols">
         <div className="chart">
-          {c ? (
-            <ProfileChart c={c} />
+          {c && profile ? (
+            <ProfileChart c={c} profile={profile} />
           ) : (
             <div className="chartwait">
               {failed ? (

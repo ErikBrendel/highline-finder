@@ -1,6 +1,6 @@
 import type { Pos, Sampler } from './grid.js'
 import { lineHeightAt } from './scoring.js'
-import type { Params, ProfileSample } from './types.js'
+import type { Params, ProfileSample, StoredProfile } from './types.js'
 
 /**
  * Samples terrain and surface along a span, with the line at the given sag.
@@ -38,4 +38,38 @@ export function buildProfile(
     })
   }
   return out
+}
+
+/**
+ * Drops everything about a profile that can be recomputed, for storage.
+ *
+ * `d` is `i/(n-1) * length` and `line` follows from the two attachment heights and the sag, both
+ * already on the candidate -- so storing them is pure duplication, and they were more than half the
+ * bytes of the largest field in the dataset. Parallel arrays rather than an array of objects for
+ * the same reason: two key names per line instead of two per sample.
+ */
+export function packProfile(p: ProfileSample[]): StoredProfile {
+  return { ground: p.map((s) => s.ground), surface: p.map((s) => s.surface) }
+}
+
+/** Rebuilds the full profile, with the line placed at `sagRatio`. Exact, not an approximation. */
+export function unpackProfile(
+  sp: StoredProfile,
+  length: number,
+  hA: number,
+  hB: number,
+  sagRatio: number,
+): ProfileSample[] {
+  const last = sp.ground.length - 1
+  const sag = sagRatio * length
+  const r2 = (v: number) => Math.round(v * 100) / 100
+  return sp.ground.map((ground, i) => {
+    const t = last > 0 ? i / last : 0
+    return {
+      d: r2(t * length),
+      ground,
+      surface: sp.surface[i] ?? ground,
+      line: r2(lineHeightAt(hA, hB, sag, t)),
+    }
+  })
 }

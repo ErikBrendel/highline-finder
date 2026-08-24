@@ -91,7 +91,15 @@ export interface Params {
   refineRadius: number
   refineStep: number
   refineIterations: number
-  maxCandidates: number
+  /**
+   * Whether to store an elevation profile per line.
+   *
+   * Profiles are ~85% of the dataset, and every one of them is recoverable from the elevation
+   * service the interactive planner already uses. Off, the file scales to far more lines and the
+   * chart for a line costs a couple of 256 m windows when it is opened; on, everything is instant
+   * and offline but the file grows by ~2.5 KB per line.
+   */
+  storeProfiles: boolean
   /** Samples kept in the serialised profile, to bound output size. */
   profilePoints: number
 }
@@ -108,6 +116,18 @@ export interface AnchorOut {
   anchor: number
   /** How far the attachment sits above the terrain: `anchor - ground`. */
   aFrame: number
+}
+
+/**
+ * A stored profile: only the two measured series, as parallel arrays.
+ *
+ * Sample spacing and line height are derived on load, so they are not stored -- see packProfile.
+ * Samples are evenly spaced from anchor A to anchor B inclusive.
+ */
+export interface StoredProfile {
+  ground: number[]
+  /** Top of vegetation / structures (bDOM), clamped to never fall below `ground`. */
+  surface: number[]
 }
 
 export interface ProfileSample {
@@ -153,7 +173,18 @@ export interface Candidate {
   /** 0-100, see scoreCandidate in lines.ts. */
   score: number
   scoreParts: ScoreParts
-  profile: ProfileSample[]
+  /**
+   * Loosest sag at which this line still clears the terrain, as a fraction of span.
+   *
+   * Stored because it is the one thing the profile was needed for that applies to every line at
+   * once: it lets the sag control filter the whole dataset exactly, without a profile per line.
+   */
+  maxSagRatio: number
+  /**
+   * Absent when the pipeline ran with `storeProfiles: false`, in which case the browser rebuilds it
+   * from the elevation service for whichever line is actually opened.
+   */
+  profile?: StoredProfile
 }
 
 /**

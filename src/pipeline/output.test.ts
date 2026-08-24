@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { toUtm33 } from '../shared/geo.js'
 import { rescoreAtSag } from '../shared/scoring.js'
+import { unpackProfile } from '../shared/profile.js'
 import type { Dataset } from '../shared/types.js'
 
 /**
@@ -64,17 +65,21 @@ describe.skipIf(!present)('generated candidates.json', () => {
     }
   })
 
-  it('has profiles that start at A, end at B, and never dip below the terrain', () => {
-    for (const c of data.candidates.slice(0, 40)) {
-      const first = c.profile[0]!
-      const last = c.profile[c.profile.length - 1]!
-      expect(first.d).toBe(0)
-      expect(last.d).toBeCloseTo(c.length, 0)
-      expect(first.line).toBeCloseTo(c.a.anchor, 0)
-      expect(last.line).toBeCloseTo(c.b.anchor, 0)
-      for (const s of c.profile) expect(s.surface).toBeGreaterThanOrEqual(s.ground)
-    }
-  })
+  it.skipIf(!params.storeProfiles)(
+    'has profiles that start at A, end at B, and never dip below the terrain',
+    () => {
+      for (const c of data.candidates.slice(0, 40)) {
+        const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, params.sagRatio)
+        const first = samples[0]!
+        const last = samples[samples.length - 1]!
+        expect(first.d).toBe(0)
+        expect(last.d).toBeCloseTo(c.length, 0)
+        expect(first.line).toBeCloseTo(c.a.anchor, 0)
+        expect(last.line).toBeCloseTo(c.b.anchor, 0)
+        for (const s of samples) expect(s.surface).toBeGreaterThanOrEqual(s.ground)
+      }
+    },
+  )
 
   it('survives rescoring at its own generation sag without drift', () => {
     // The web app re-derives every clearance from the serialised profile. If the pipeline measured
@@ -89,6 +94,14 @@ describe.skipIf(!present)('generated candidates.json', () => {
     }
   })
 
+  it('reports a max feasible sag consistent with its own validity', () => {
+    for (const c of data.candidates) {
+      expect(c.maxSagRatio).toBeGreaterThanOrEqual(params.sagRatio)
+      // Just past that sag the line no longer clears, which is what the sag filter relies on.
+      if (c.profile) expect(rescoreAtSag(c, c.maxSagRatio + 0.005, params)).toBeNull()
+    }
+  })
+
   it('only loses candidates as sag increases', () => {
     const alive = (pct: number) =>
       data.candidates.filter((c) => rescoreAtSag(c, pct, params) !== null).length
@@ -96,9 +109,8 @@ describe.skipIf(!present)('generated candidates.json', () => {
     expect(alive(params.sagRatio * 1.4)).toBeLessThanOrEqual(alive(params.sagRatio))
   })
 
-  it('is sorted by score and stays within the output cap', () => {
+  it('is sorted by score', () => {
     const scores = data.candidates.map((c) => c.score)
     expect(scores).toEqual([...scores].sort((a, b) => b - a))
-    expect(data.candidates.length).toBeLessThanOrEqual(params.maxCandidates)
   })
 })

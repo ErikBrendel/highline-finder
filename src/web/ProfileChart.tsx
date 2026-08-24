@@ -1,4 +1,4 @@
-import type { Candidate } from '../shared/types.js'
+import type { Candidate, ProfileSample } from '../shared/types.js'
 
 /**
  * Side elevation of one candidate: terrain, canopy band, and the sagging line.
@@ -17,8 +17,8 @@ const W = 900
 const H = 200
 const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 
-export function ProfileChart({ c }: { c: Candidate }) {
-  const p = c.profile
+export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSample[] }) {
+  const p = profile
   const lo = Math.min(...p.map((s) => s.ground)) - 2
   const hi = Math.max(...p.map((s) => Math.max(s.surface, s.line))) + 3
   const iw = W - PAD.left - PAD.right

@@ -74,7 +74,10 @@ export const DEFAULT_PARAMS: Params = {
   refineRadius: 3,
   refineStep: 1,
   refineIterations: 8,
-  maxCandidates: 300,
+  // Off: profiles were 89% of the dataset and every one is recoverable from the WCS the planner
+  // already uses, so the file scales with the number of lines rather than with 2.5 KB each. The
+  // cost is a couple of elevation windows when a line is opened. See Candidate.profile.
+  storeProfiles: false,
   // The web app re-derives clearances from this profile rather than the raster, so its resolution
   // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m
   // sampling, against the 2 m the pipeline itself walks.

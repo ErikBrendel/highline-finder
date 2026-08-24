@@ -3,8 +3,8 @@ import { bearingOf, oppositeBearing, sectorOf, toWgs84 } from '../shared/geo.js'
 import type { Anchor } from './openness.js'
 import type { Endpoint } from './hotspots.js'
 import type { AnchorOut, Candidate, Params } from '../shared/types.js'
-import { chooseHeights, lineHeightAt, rescoreAtSag } from '../shared/scoring.js'
-import { buildProfile } from '../shared/profile.js'
+import { chooseHeights, lineHeightAt, maxFeasibleSag, rescoreAtSag } from '../shared/scoring.js'
+import { buildProfile, packProfile } from '../shared/profile.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -167,8 +167,10 @@ export function evaluateLine(
     canopyBlockedFraction: 0,
     score: 0,
     scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
-    profile: buildProfile(a, b, hA, hB, roundedLength, ground, surface, p),
+    maxSagRatio: 0,
+    profile: packProfile(buildProfile(a, b, hA, hB, roundedLength, ground, surface, p)),
   }
+  provisional.maxSagRatio = maxFeasibleSag(provisional.profile!, roundedLength, hA, hB, p)
 
   // Every measured field is filled in by the same function the web app uses, so the two cannot
   // disagree. Returns null if the line fails a hard constraint at the generation sag.

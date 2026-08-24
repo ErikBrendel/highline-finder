@@ -211,12 +211,17 @@ async function main() {
   }
 
   // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
-  // can walk two neighbours onto the same optimum.
-  const finalCandidates = dedupe(refinedAll, p.dedupRadius).slice(0, p.maxCandidates)
+  // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
+  // line found is stored.
+  const deduped = dedupe(refinedAll, p.dedupRadius)
+  const finalCandidates = p.storeProfiles
+    ? deduped
+    : deduped.map(({ profile: _profile, ...rest }) => rest)
   const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
   console.log(
     `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +
-      `${finalCandidates.length} after dedup and cap`,
+      `${finalCandidates.length} distinct` +
+      (p.storeProfiles ? ' (with profiles)' : ' (profiles fetched on demand)'),
   )
 
   const dataset: Dataset = {

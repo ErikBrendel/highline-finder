@@ -1,4 +1,5 @@
-import type { Candidate, Params, ProfileSample, ScoreParts } from './types.js'
+import type { Candidate, Params, ProfileSample, ScoreParts, StoredProfile } from './types.js'
+import { unpackProfile } from './profile.js'
 
 /**
  * Sag geometry, clearance metrics and scoring, shared by the pipeline and the web app.
@@ -208,15 +209,55 @@ export function scoreOf(
 const r2 = (v: number) => Math.round(v * 100) / 100
 
 /**
+ * Loosest sag at which a line still clears the terrain, as a fraction of span.
+ *
+ * Both gates degrade monotonically in sag -- more sag lowers the line at every interior point, so
+ * clearance and exposure only shrink -- which makes a bisection exact to the tolerance rather than
+ * a sample of the space.
+ *
+ * This is what lets the sag control filter a dataset with no stored profiles: one number per line
+ * answers "is this still valid" for every line at once, where the metrics themselves need the
+ * profile and are only wanted for the line actually being looked at.
+ */
+export function maxFeasibleSag(
+  sp: StoredProfile,
+  length: number,
+  hA: number,
+  hB: number,
+  p: Params,
+): number {
+  const feasible = (sag: number) => {
+    const profile = unpackProfile(sp, length, hA, hB, sag)
+    return metricsOf(profile, profile.map((s) => s.line), length, p) !== null
+  }
+  let lo = 0
+  let hi = 0.25
+  if (!feasible(lo)) return 0
+  if (feasible(hi)) return hi
+  for (let i = 0; i < 14; i++) {
+    const mid = (lo + hi) / 2
+    if (feasible(mid)) lo = mid
+    else hi = mid
+  }
+  return Math.round(lo * 10000) / 10000
+}
+
+/**
  * Re-derives a candidate at a different sag, or null if it stops being feasible.
  *
  * Only tightening is meaningful. Candidates the pipeline rejected are not in the dataset at all,
  * so lowering the sag below the one used for generation cannot bring them back, and would report
  * an incomplete result as if it were complete.
+ *
+ * Without a stored profile the validity question is still answered exactly, from `maxSagRatio`, but
+ * the metrics cannot be recomputed and are left at the values they were generated with. The browser
+ * fetches a profile for whichever line is opened and rescores that one properly.
  */
 export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candidate | null {
-  const line = lineOverProfile(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio)
-  const m = metricsOf(c.profile, line, c.length, p)
+  if (!c.profile) return sagRatio <= c.maxSagRatio + 1e-9 ? c : null
+
+  const profile = unpackProfile(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio)
+  const m = metricsOf(profile, profile.map((s) => s.line), c.length, p)
   if (!m) return null
 
   const { score, parts } = scoreOf(c.length, c.offLevel, m, p)
@@ -229,6 +270,5 @@ export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candida
     canopyBlockedFraction: Math.round(m.canopyBlockedFraction * 1000) / 1000,
     score: Math.round(score * 10) / 10,
     scoreParts: parts,
-    profile: c.profile.map((s, i) => ({ ...s, line: r2(line[i]!) })),
   }
 }

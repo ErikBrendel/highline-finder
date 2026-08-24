@@ -5,9 +5,14 @@ import { gridFrom } from './testing.js'
 import { DEFAULT_PARAMS } from './params.js'
 import type { Anchor } from './openness.js'
 import type { Grid } from '../shared/grid.js'
-import type { Params } from '../shared/types.js'
+import type { Candidate, Params } from '../shared/types.js'
+import { unpackProfile } from '../shared/profile.js'
 
 const p: Params = DEFAULT_PARAMS
+
+/** The stored profile with its derived fields back, as the browser sees it. */
+const expand = (c: Candidate) =>
+  unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, p.sagRatio)
 
 /**
  * An anchor that is open in every direction, so tests exercise lines.ts in isolation. Ground
@@ -48,7 +53,8 @@ describe('findLines', () => {
     expect(c.sag).toBeCloseTo(sagOf(220), 2)
     expect(c.offLevel).toBe(0)
 
-    const mid = c.profile.reduce((a, s) => (Math.abs(s.d - 110) < Math.abs(a.d - 110) ? s : a))
+    const samples = expand(c)
+    const mid = samples.reduce((a, s) => (Math.abs(s.d - 110) < Math.abs(a.d - 110) ? s : a))
     expect(mid.line).toBeCloseTo(50 + p.aFrameMax - sagOf(220), 1)
     expect(c.canopyBlockedFraction).toBe(0)
   })
@@ -58,7 +64,7 @@ describe('findLines', () => {
     // the biggest gap is the first sample past the edge, not the sagging middle.
     const g = canyon(20)
     const c = findLines(rimsOf(g), g, g, p).candidates[0]!
-    const gaps = c.profile.map((s) => s.line - s.ground)
+    const gaps = expand(c).map((s) => s.line - s.ground)
     expect(c.exposure).toBeCloseTo(Math.max(...gaps), 0)
     expect(Math.max(...gaps)).toBeGreaterThan(50 + p.aFrameMax - sagOf(220) - 20)
   })
@@ -68,7 +74,8 @@ describe('findLines', () => {
     // anchorZone exclusion this candidate -- and every other -- would be rejected.
     const g = canyon(20)
     const c = findLines(rimsOf(g), g, g, p).candidates[0]!
-    expect(c.profile[0]!.line - c.profile[0]!.ground).toBeLessThanOrEqual(p.aFrameMax)
+    const first = expand(c)[0]!
+    expect(first.line - first.ground).toBeLessThanOrEqual(p.aFrameMax)
     expect(p.aFrameMax).toBeLessThan(p.minClearance)
     expect(c.clearanceMin).toBeGreaterThanOrEqual(p.minClearance)
   })
