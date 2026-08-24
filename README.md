@@ -66,7 +66,7 @@ but "which valley is worth a trip" — and it is the layer built to survive a mu
 area: it is a few tens of kilobytes, and its size grows with *terrain* rather than with area
 searched, because flat ground contributes nothing at all. Unlike the candidate list it is built
 before dedup and before the `maxCandidates` cap, so a place where four hundred near-identical spans
-work burns brighter than one where a single line does. It fades out between zoom 15.5 and 17.5,
+work burns brighter than one where a single line does. It fades out between zoom 14 and 16,
 where individual candidates become legible and are the better answer.
 
 The pipeline also writes `anchors.json`, a dump of every anchor the openness scan kept. It powers a

@@ -347,11 +347,11 @@ export function MapView({
             2.5, 1,
           ],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 6, 0.6, 11, 1.2, 16, 2.5],
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 11, 16, 16, 60, 17.5, 90],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 11, 16, 16, 60],
           // Faded out by the time individual lines are legible: past here the candidates
           // themselves are the better answer, and a red wash over them only obscures them. Zoom
           // rather than a scale in metres, so the exact hand-over shifts a little with window size.
-          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 15.5, 1, 17.5, 0],
+          'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 14, 1, 16, 0],
           'heatmap-color': [
             'interpolate', ['linear'], ['heatmap-density'],
             0, 'rgba(0,0,0,0)',
