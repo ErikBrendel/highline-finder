@@ -56,8 +56,10 @@ export function App() {
   const [maxOffLevel, setMaxOffLevel] = useState(100)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [bbox, setBbox] = useState(initial.bbox)
-  // OSM: paths, roads and place names are what orient you before you know where you are looking.
-  const [basemapMix, setBasemapMix] = useState(MIX_MAX)
+  // OSM by default: paths, roads and place names orient you before you know where you are looking.
+  const [basemapMix, setBasemapMix] = useState(
+    Math.min(MIX_MAX, Math.max(0, initial.basemapMix ?? MIX_MAX)),
+  )
   const [showLines, setShowLines] = useState(true)
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
@@ -281,8 +283,9 @@ export function App() {
         : custom,
       rig: fallback ? { a: fallback.a.aFrame, b: fallback.b.aFrame } : rig,
       sagPct,
+      basemapMix,
     })
-  }, [bbox, selectedId, selected, custom, rig, sagPct])
+  }, [bbox, selectedId, selected, custom, rig, sagPct, basemapMix])
 
   useEffect(() => {
     // replaceState, not pushState: panning the map should not fill the back button.

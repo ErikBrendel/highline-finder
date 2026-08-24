@@ -7,6 +7,7 @@ const full: UrlState = {
   custom: { a: { lat: 52.2001, lon: 13.6552 }, b: { lat: 52.2043, lon: 13.6614 } },
   rig: { a: 0.5, b: 1.2 },
   sagPct: 6.5,
+  basemapMix: 1.4,
 }
 
 describe('url state', () => {
@@ -30,6 +31,10 @@ describe('url state', () => {
     expect(s.rig).toBeNull()
     expect(s.sagPct).toBeNull()
     expect(s.custom.b).toEqual({ lat: 52.2, lon: 13.6 })
+  })
+
+  it('reads a basemap blend of zero rather than treating it as absent', () => {
+    expect(parseUrl(toSearch({ ...full, basemapMix: 0 })).basemapMix).toBe(0)
   })
 
   it('rejects coordinates outside the world', () => {

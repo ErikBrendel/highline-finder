@@ -50,6 +50,7 @@ The URL tracks the map, so any view can be copied out of the address bar and sen
 | `a=lat,lon` `b=lat,lon` | The planned line's anchors — or, when a candidate is selected and no planned line is placed, that candidate's own coordinates as a fallback. |
 | `rig=hA,hB` | Manual rig heights, in metres above ground. Absent means auto. |
 | `sag=pct` | Midspan sag, as a percent of span. |
+| `map=n` | Basemap blend: `0` ortho, `1` hillshade, `2` OSM, fractions cross-fade. |
 
 Candidate ids are derived from anchor coordinates, so regenerating the dataset with different
 parameters can move an anchor and orphan an id. That is why a shared candidate carries its geometry

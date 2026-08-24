@@ -25,6 +25,8 @@ export interface UrlState {
   custom: CustomPoints
   rig: RigHeights | null
   sagPct: number | null
+  /** Basemap blend position. Left unclamped here; the caller owns the valid range. */
+  basemapMix: number | null
 }
 
 const EMPTY: UrlState = {
@@ -33,6 +35,7 @@ const EMPTY: UrlState = {
   custom: { a: null, b: null },
   rig: null,
   sagPct: null,
+  basemapMix: null,
 }
 
 /** 6 decimals of a degree is ~11 cm, past any accuracy this data has. */
@@ -58,6 +61,7 @@ export function parseUrl(search: string): UrlState {
   const at = numbers(q.get('at'), 4)
   const rig = numbers(q.get('rig'), 2)
   const sag = numbers(q.get('sag'), 1)
+  const map = numbers(q.get('map'), 1)
   return {
     ...EMPTY,
     bbox: at ? (at as [number, number, number, number]) : null,
@@ -65,6 +69,7 @@ export function parseUrl(search: string): UrlState {
     custom: { a: point(q.get('a')), b: point(q.get('b')) },
     rig: rig ? { a: rig[0]!, b: rig[1]! } : null,
     sagPct: sag ? sag[0]! : null,
+    basemapMix: map ? map[0]! : null,
   }
 }
 
@@ -76,5 +81,6 @@ export function toSearch(s: UrlState): string {
   if (s.custom.b) q.set('b', `${coord(s.custom.b.lat)},${coord(s.custom.b.lon)}`)
   if (s.rig) q.set('rig', `${s.rig.a.toFixed(2)},${s.rig.b.toFixed(2)}`)
   if (s.sagPct !== null) q.set('sag', s.sagPct.toFixed(1))
+  if (s.basemapMix !== null) q.set('map', s.basemapMix.toFixed(1))
   return q.toString()
 }
