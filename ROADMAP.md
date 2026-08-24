@@ -54,10 +54,14 @@ anchors only, one AOI, static viewer.
 - **Tighten the openness prefilter.** It currently only removes ~80 % of in-range pairs in high
   relief terrain, because a 5 m drop within 120 m is easy to satisfy where there is 38 m of relief.
   Scaling `minProbeDrop` to local relief would sharpen it.
-- **Spatial index for pairing.** The plain double loop is quadratic in anchors while the number of
-  pairs actually *in range* grows only linearly with area, so nearly all of its work is rejecting
-  pairs kilometres apart. A uniform grid keyed on `maxLength` makes the enumeration
-  output-sensitive. This is now the top compute cost of adding area.
+- **Coarse pre-pass at tile granularity.** The 16 m mask rejects ~46 % of ground but still needs
+  every 1 km tile on a compact area, because tiles are coarse and the accepted set is dilated by one
+  so a line cannot run into unloaded terrain. It only pays where relief is sparse relative to the
+  tile grid. Fetching terrain from the WCS by window instead of by published tile would let the mask
+  work at its own resolution.
+- **A cheaper vegetation source for screening.** With the surface model deferred to line corridors,
+  it is still the largest single cost of a large run. A coarse canopy height model would let a line
+  be rejected on vegetation before any 0.2 m data is fetched, with `bdom` only for final scoring.
 - **Validation set.** Import documented real highlines and assert the finder rediscovers them.
   Nothing else distinguishes "found 2000 candidates" from "found 2000 artefacts".
 

@@ -100,25 +100,32 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
 
 ## How it works
 
-1. **Ingest** — resolve each area to EPSG:25833, download the 1 km terrain tiles it touches and
+1. **Coarse pre-pass** — fetch a 16 m terrain grid from the survey's WCS (which supports the OGC
+   scaling extension, so no coarser product is needed) and mark ground that never falls more than
+   `maskMinDrop` within `maskRadius`. At ~15 KB per km² against 1.4 MB for the 1 m tiles, this is
+   effectively free, and it decides which full-resolution tiles are worth fetching at all. The
+   `coarse mask` toggle in the app draws the result.
+2. **Ingest** — resolve each area to EPSG:25833, download the 1 km terrain tiles it touches and
    assemble a 1 m grid. The surface model is *not* fetched yet: it is 33 MB per km² against the
    terrain model's 1.4 MB, and canopy is only ever scored, never enforced, so it is fetched in
    step 5 for the corridors that survive (the 0.2 m data is downsampled by *max*, because for
    clearance the tallest obstacle in a cell is the one that matters).
-2. **Openness scan** — for every point on a 5 m grid, cast a ray in each of 64 directions and
+3. **Openness scan** — for every point on a 5 m grid, cast a ray in each of 64 directions and
    record a bitmask of the sectors where a line could actually leave: nothing in the way, and the
    ground falls away far enough. This stage is *linear* in area and independent per tile.
-3. **Pairing** — only test pairs that are open *towards each other*. Two array lookups per pair,
-   no raster access, which is what keeps the quadratic part affordable.
-4. **Heights and offlevel** — each anchor has a *range* of usable attachment heights (ground level
+4. **Pairing** — anchors are bucketed on a `maxLength` lattice so only the nine buckets around one
+   anchor can hold a partner in range, which makes the enumeration output-sensitive rather than
+   quadratic. Surviving pairs must also be open *towards each other*: two array lookups per pair,
+   no raster access.
+5. **Heights and offlevel** — each anchor has a *range* of usable attachment heights (ground level
    at a clean edge, up to a 2 m A-frame), so the search picks the pair of heights that is as level
    as possible and then as high as possible. Height difference is hard-capped at 2 % of span — 1 m
    over 50 m, 10 m over 500 m. This is what stops the finder proposing badly tilted lines.
-5. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain and to canopy.
-6. **Score and dedup** — filter, rank, then collapse near-duplicates: two lines are the same when
+6. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain and to canopy.
+7. **Score and dedup** — filter, rank, then collapse near-duplicates: two lines are the same when
    *both* endpoints are within `dedupRadius`, so lines sharing one anchor survive as the different
    lines they are.
-7. **Refine** — hill-climb both anchors of each surviving candidate to a local score maximum,
+8. **Refine** — hill-climb both anchors of each surviving candidate to a local score maximum,
    moving each end up to `refineRadius` from where the lattice put it. This is what stops the 5 m
    anchor grid being the limiting factor on where an anchor is reported, and it mostly pays off by
    finding a position where the two ends level out exactly.

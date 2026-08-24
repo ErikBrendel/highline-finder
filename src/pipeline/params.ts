@@ -106,6 +106,7 @@ export const DEFAULT_PARAMS: Params = {
 export const DEFAULT_AOIS: Aoi[] = [
   // Sperenberg gypsum pits: 38 m of relief in flat Brandenburg, and the reason this project exists.
   { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
-  // Chorin / Oderbruch edge, north-east of Berlin.
-  { south: 52.818013, west: 13.896186, north: 52.862093, east: 13.950634 },
+  // Chorin and the Eberswalde glacial valley, north-east of Berlin. 137 km2, and a strict
+  // superset of the 18 km2 rectangle this started as.
+  { south: 52.769741, west: 13.874750, north: 52.869081, east: 14.058569 },
 ]
