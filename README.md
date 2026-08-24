@@ -39,6 +39,17 @@ npm test              # unit + integration tests
 npm run build         # static bundle in dist/, deployable as-is
 ```
 
+### Reading it at scale
+
+The `hotspots` toggle draws a red heatmap of every place where *any* feasible line was found, with
+the endpoints of all of them collapsed at a 50 m radius and weighted by how many collapsed into
+each spot. It answers a different question from the candidate list — not "which line should I walk"
+but "which valley is worth a trip" — and it is the layer built to survive a much larger search
+area: it is a few tens of kilobytes, and its size grows with *terrain* rather than with area
+searched, because flat ground contributes nothing at all. Unlike the candidate list it is built
+before dedup and before the `maxCandidates` cap, so a place where four hundred near-identical spans
+work burns brighter than one where a single line does.
+
 The pipeline also writes `anchors.json`, a dump of every anchor the openness scan kept. It powers a
 development-only overlay (bottom right of the map under `npm run dev`) that draws all of them,
 coloured by how many directions are open, with per-point detail on hover. It is gitignored and

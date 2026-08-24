@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
-import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
+import type { AnchorDump, Candidate, Dataset, Hotspots } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
@@ -178,6 +178,24 @@ function sectorWedges(
   }
 }
 
+/**
+ * Hotspots as a heatmap rather than circles: the question at this zoom is "where is there
+ * anything", and overlapping soft blobs answer it where hundreds of discrete dots would just read
+ * as noise. Weighted by how many feasible line endpoints collapsed into each spot, so a place with
+ * four hundred workable spans burns brighter than one with a single line.
+ */
+function hotspotsGeoJson(h: Hotspots | null): GeoJSON.FeatureCollection {
+  if (!h) return { type: 'FeatureCollection', features: [] }
+  return {
+    type: 'FeatureCollection',
+    features: h.lat.map((lat, i) => ({
+      type: 'Feature',
+      properties: { count: h.count[i]!, score: h.score[i]! },
+      geometry: { type: 'Point', coordinates: [h.lon[i]!, lat] },
+    })),
+  }
+}
+
 function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection {
   if (!dump) return { type: 'FeatureCollection', features: [] }
   return {
@@ -214,10 +232,12 @@ interface Props {
   selected: Candidate | null
   basemapMix: number
   anchorDump: AnchorDump | null
+  hotspots: Hotspots | null
   custom: CustomPoints
   showLines: boolean
   onSelect: (id: string | null) => void
   onSetCustom: (which: 'a' | 'b', at: LatLon | null) => void
+  onClearCustom: () => void
   onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
 }
 
@@ -227,10 +247,12 @@ export function MapView({
   selected,
   basemapMix,
   anchorDump,
+  hotspots,
   custom,
   showLines,
   onSelect,
   onSetCustom,
+  onClearCustom,
   onMoveAnchor,
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
@@ -288,6 +310,33 @@ export function MapView({
     m.on('load', () => {
       // First, so every other overlay draws above it.
       removeOverlay.current = installLoadingOverlay(m)
+
+      m.addSource('hotspots', { type: 'geojson', data: hotspotsGeoJson(null) })
+      m.addLayer({
+        id: 'hotspots',
+        type: 'heatmap',
+        source: 'hotspots',
+        paint: {
+          // Log-scaled: counts run from 1 to several hundred, and a linear ramp would leave
+          // everything but the single busiest spot invisible.
+          'heatmap-weight': [
+            'interpolate', ['linear'], ['log10', ['max', ['get', 'count'], 1]],
+            0, 0.15,
+            1, 0.5,
+            2.5, 1,
+          ],
+          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 6, 0.6, 11, 1.2, 16, 2.5],
+          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 11, 16, 16, 60, 19, 140],
+          'heatmap-color': [
+            'interpolate', ['linear'], ['heatmap-density'],
+            0, 'rgba(0,0,0,0)',
+            0.1, 'rgba(120,20,20,0.30)',
+            0.35, 'rgba(185,28,28,0.48)',
+            0.65, 'rgba(239,68,68,0.62)',
+            1, 'rgba(254,215,170,0.75)',
+          ],
+        },
+      })
 
       m.addSource('aoi', {
         type: 'geojson',
@@ -481,6 +530,13 @@ export function MapView({
   useEffect(() => {
     const m = map.current
     if (!m || !ready.current) return
+    const src = m.getSource('hotspots') as maplibregl.GeoJSONSource | undefined
+    src?.setData(hotspotsGeoJson(hotspots))
+  }, [hotspots])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready.current) return
     if (anchorDump) {
       sectorCount.current = anchorDump.sectorCount
       anchorRange.current = [anchorDump.aFrameMin, anchorDump.aFrameMax]
@@ -600,8 +656,7 @@ export function MapView({
           {(custom.a || custom.b) && (
             <button
               onClick={() => {
-                onSetCustom('a', null)
-                onSetCustom('b', null)
+                onClearCustom()
                 setMenu(null)
               }}
             >

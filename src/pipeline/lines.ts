@@ -1,6 +1,7 @@
 import type { Grid, Pos } from '../shared/grid.js'
 import { bearingOf, oppositeBearing, sectorOf, toWgs84 } from '../shared/geo.js'
 import type { Anchor } from './openness.js'
+import type { Endpoint } from './hotspots.js'
 import type { AnchorOut, Candidate, Params } from '../shared/types.js'
 import { chooseHeights, lineHeightAt, rescoreAtSag } from '../shared/scoring.js'
 import { buildProfile } from '../shared/profile.js'
@@ -86,6 +87,12 @@ function clearsTerrain(
 export interface FindResult {
   /** Deduplicated but not capped; run.ts refines and caps. */
   candidates: Candidate[]
+  /**
+   * Both anchors of every feasible line, before dedup. Kept as bare positions because the full
+   * candidates would be tens of thousands of 120-sample profiles; this is what the hotspot layer
+   * is built from, and density is exactly what dedup destroys.
+   */
+  endpoints: Endpoint[]
   pairsInRange: number
   pairsSectorPassed: number
   pairsLevelEnough: number
@@ -178,6 +185,7 @@ export function findLines(
   let pairsSectorPassed = 0
   let pairsLevelEnough = 0
   const feasible: Candidate[] = []
+  const endpoints: Endpoint[] = []
 
   // Plain double loop. At this AOI size that is ~2e6 iterations of a sector lookup, which is
   // nothing; a uniform grid index only becomes necessary for regional runs (see ROADMAP).
@@ -212,13 +220,19 @@ export function findLines(
       pairsLevelEnough++
 
       const c = evaluateLine(a, b, ground, surface, p)
-      if (c) feasible.push(c)
+      if (!c) continue
+      feasible.push(c)
+      endpoints.push(
+        { e: c.a.e, n: c.a.n, score: c.score },
+        { e: c.b.e, n: c.b.n, score: c.score },
+      )
     }
   }
 
   const candidates = dedupe(feasible, p.dedupRadius)
   return {
     candidates,
+    endpoints,
     pairsInRange,
     pairsSectorPassed,
     pairsLevelEnough,

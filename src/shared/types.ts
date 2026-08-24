@@ -216,6 +216,22 @@ export interface AnchorDump {
   open: string[]
 }
 
+/**
+ * Where lines are possible at all, at a scale where individual lines are meaningless.
+ *
+ * Parallel arrays rather than objects, and derived from every feasible line rather than the capped
+ * candidate list: `count` is how many line endpoints collapsed into the spot, which is the whole
+ * signal -- one workable line and four hundred look identical on a map of candidates.
+ */
+export interface Hotspots {
+  /** Clustering radius in metres. */
+  radius: number
+  lat: number[]
+  lon: number[]
+  count: number[]
+  score: number[]
+}
+
 export interface Dataset {
   meta: DatasetMeta
   candidates: Candidate[]

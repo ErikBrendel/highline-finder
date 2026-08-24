@@ -3,9 +3,18 @@ import { toWgs84 } from '../shared/geo.js'
 import { loadProduct } from './raster.js'
 import { packSectors, scanAnchors, type Anchor } from './openness.js'
 import { dedupe, findLines, refine } from './lines.js'
+import { clusterEndpoints, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
-import type { Aoi, AnchorDump, Candidate, Dataset, Params, Region } from '../shared/types.js'
+import type {
+  Aoi,
+  AnchorDump,
+  Candidate,
+  Dataset,
+  Hotspots,
+  Params,
+  Region,
+} from '../shared/types.js'
 
 /**
  * CLI entry point. Writes src/web/public/candidates.json, which is the only artefact the web app
@@ -20,11 +29,20 @@ import type { Aoi, AnchorDump, Candidate, Dataset, Params, Region } from '../sha
 
 const OUT = new URL('../web/public/candidates.json', import.meta.url).pathname
 const ANCHORS_OUT = new URL('../web/public/anchors.json', import.meta.url).pathname
+const HOTSPOTS_OUT = new URL('../web/public/hotspots.json', import.meta.url).pathname
+
+/**
+ * Radius the hotspot layer collapses line endpoints over. Ten times the candidate `dedupRadius`:
+ * this answers "is this valley worth a trip", where two spots 60 m apart are the same answer.
+ */
+const HOTSPOT_RADIUS = 50
 
 interface AreaResult {
   region: Region
   /** Anchors inside the AOIs, for the debug dump. */
   anchors: Anchor[]
+  /** Anchors of every feasible line in this area, for the hotspot layer. */
+  endpoints: Endpoint[]
   refined: {
     candidates: Candidate[]
     improved: number
@@ -113,6 +131,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       anchorsKept: anchors.length,
     },
     anchors,
+    endpoints: r.endpoints,
     refined: {
       candidates: ref.candidates,
       improved: ref.improved,
@@ -158,6 +177,7 @@ async function main() {
   const regions: Region[] = []
   const dumpAnchors: Anchor[] = []
   const refinedAll: Candidate[] = []
+  const endpoints: Endpoint[] = []
   const totals = {
     anchorsScanned: 0,
     anchorsKept: 0,
@@ -173,9 +193,11 @@ async function main() {
   for (const [index, area] of areas.entries()) {
     const label = `region ${index + 1}/${areas.length}`
     console.log(`\n=== ${label} ===`)
-    const { anchors, region, refined } = await searchArea(area, p, label)
+    const found = await searchArea(area, p, label)
+    const { anchors, region, refined } = found
     regions.push(region)
     dumpAnchors.push(...anchors)
+    endpoints.push(...found.endpoints)
     refinedAll.push(...refined.candidates)
     totals.anchorsScanned += region.anchorsScanned
     totals.anchorsKept += region.anchorsKept
@@ -259,6 +281,30 @@ async function main() {
     dump.open.push(packSectors(a.open))
   }
   await writeFile(ANCHORS_OUT, JSON.stringify(dump))
+
+  // Clustered across all regions at once, so a spot straddling two of them is one spot.
+  const spots = clusterEndpoints(endpoints, HOTSPOT_RADIUS)
+  spots.sort((a, b) => b.count - a.count)
+  const hotspots: Hotspots = {
+    radius: HOTSPOT_RADIUS,
+    lat: [],
+    lon: [],
+    count: [],
+    score: [],
+  }
+  for (const s of spots) {
+    const { lat, lon } = toWgs84(s.e, s.n)
+    hotspots.lat.push(r6(lat))
+    hotspots.lon.push(r6(lon))
+    hotspots.count.push(s.count)
+    hotspots.score.push(Math.round(s.score * 10) / 10)
+  }
+  await writeFile(HOTSPOTS_OUT, JSON.stringify(hotspots))
+  const hotKb = (JSON.stringify(hotspots).length / 1024).toFixed(0)
+  console.log(
+    `hotspots: ${endpoints.length} feasible endpoints -> ${spots.length} spots ` +
+      `@${HOTSPOT_RADIUS}m (${hotKb} KB), busiest ${spots[0]?.count ?? 0} endpoints`,
+  )
   const anchorKb = (JSON.stringify(dump).length / 1024).toFixed(0)
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
   console.log(

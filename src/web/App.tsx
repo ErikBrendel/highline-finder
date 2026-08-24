@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AnchorDump, Candidate, Dataset } from '../shared/types.js'
+import type { AnchorDump, Candidate, Dataset, Hotspots } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
@@ -48,6 +48,7 @@ export function App() {
   const [showLines, setShowLines] = useState(true)
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
+  const [hotspots, setHotspots] = useState<Hotspots | null>(null)
   const [custom, setCustom] = useState<CustomPoints>({ a: null, b: null })
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(null)
@@ -56,7 +57,7 @@ export function App() {
   // computed, not held in state, so no effect has to write it.
   const [terrainVersion, setTerrainVersion] = useState(0)
   const [terrainFailed, setTerrainFailed] = useState(false)
-  const [anchorError, setAnchorError] = useState<string | null>(null)
+  const [layerError, setLayerError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}candidates.json`)
@@ -154,6 +155,10 @@ export function App() {
   /** Places one end of the planned line. */
   const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => commit(place(custom, which, at))
 
+  // One call, not two setCustomPoint calls: both would read the same pre-update `custom`, so the
+  // second would put the first end back.
+  const clearCustom = () => commit({ a: null, b: null })
+
   /**
    * Dragging an anchor handle. Dragging one that belongs to a *found* line forks that line into the
    * planned one, which is the quick way to ask "what if this candidate started three metres over
@@ -180,11 +185,28 @@ export function App() {
       setAnchorDump(null)
       return
     }
-    setAnchorError(null)
+    setLayerError(null)
     fetch(`${import.meta.env.BASE_URL}anchors.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setAnchorDump)
-      .catch(() => setAnchorError('anchors.json missing — run `npm run pipeline`'))
+      .catch(() => setLayerError('anchors.json missing — run `npm run pipeline`'))
+  }
+
+  /**
+   * The "where is anything possible at all" layer. Fetched on demand like the anchor dump, but
+   * unlike it this one ships: it is a few tens of kilobytes and is the only view that stays
+   * meaningful as the searched area grows.
+   */
+  const toggleHotspots = () => {
+    if (hotspots) {
+      setHotspots(null)
+      return
+    }
+    setLayerError(null)
+    fetch(`${import.meta.env.BASE_URL}hotspots.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(setHotspots)
+      .catch(() => setLayerError('hotspots.json missing — run `npm run pipeline`'))
   }
 
   const visible = useMemo(() => {
@@ -273,6 +295,9 @@ export function App() {
             <button data-active={showLines} onClick={() => setShowLines(!showLines)}>
               {visible.length} lines
             </button>
+            <button data-active={!!hotspots} onClick={toggleHotspots}>
+              {hotspots ? `${hotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
+            </button>
             <button data-active={!!anchorDump} onClick={toggleAnchors}>
               {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
             </button>
@@ -280,7 +305,7 @@ export function App() {
               filters
             </button>
           </div>
-          {anchorError && <div className="togglenote">{anchorError}</div>}
+          {layerError && <div className="togglenote">{layerError}</div>}
 
           {showFilters && (
             <div className="filters">
@@ -331,10 +356,12 @@ export function App() {
             selected={selected}
             basemapMix={basemapMix}
             anchorDump={anchorDump}
+            hotspots={hotspots}
             custom={custom}
             showLines={showLines}
             onSelect={setSelectedId}
             onSetCustom={setCustomPoint}
+            onClearCustom={clearCustom}
             onMoveAnchor={moveAnchor}
           />
 
