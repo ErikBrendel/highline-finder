@@ -6,6 +6,7 @@ import type {
   Hotspots,
   MaskCells,
   StoredProfile,
+  TileUsage,
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
@@ -76,7 +77,12 @@ export function App() {
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
   const [showHotspots, setShowHotspots] = useState(true)
   const [mask, setMask] = useState<MaskCells | null>(null)
-  const [showMask, setShowMask] = useState(false)
+  const [tiles, setTiles] = useState<TileUsage | null>(null)
+  /**
+   * One debug view at a time. A coarse field and a grid of tiles drawn together are unreadable, and
+   * the useful comparison is between them rather than of both at once.
+   */
+  const [debugLayer, setDebugLayer] = useState<'none' | 'coarse' | 'terrain' | 'surface'>('none')
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -137,22 +143,29 @@ export function App() {
    * and at the zoom the map opens at it is the only layer that says anything useful.
    */
   /**
-   * The coarse pre-pass, so the ground skipped before any full-resolution fetch is visible. Off by
-   * default: it is a view of the pipeline rather than of the terrain.
+   * Cycles the debug views: the coarse pre-pass, then what was actually fetched per source tile for
+   * terrain and for surface. Off by default -- these are views of the pipeline, not of the terrain.
    */
-  const toggleMask = () => {
-    if (mask) {
-      setShowMask(!showMask)
-      return
-    }
+  const DEBUG_ORDER = ['none', 'coarse', 'terrain', 'surface'] as const
+  const cycleDebug = () => {
+    const next = DEBUG_ORDER[(DEBUG_ORDER.indexOf(debugLayer) + 1) % DEBUG_ORDER.length]!
+    setDebugLayer(next)
     setLayerError(null)
-    fetch(`${import.meta.env.BASE_URL}mask.json`)
+    const need = next === 'coarse' ? !mask : next !== 'none' && !tiles
+    if (!need) return
+    const file = next === 'coarse' ? 'mask.json' : 'tiles.json'
+    fetch(`${import.meta.env.BASE_URL}${file}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((m: MaskCells) => {
-        setMask(m)
-        setShowMask(true)
-      })
-      .catch(() => setLayerError('mask.json missing — run `npm run pipeline`'))
+      .then((d) => (next === 'coarse' ? setMask(d) : setTiles(d)))
+      .catch(() => setLayerError(`${file} missing — run \`npm run pipeline\``))
+  }
+
+  const debugLabel = () => {
+    if (debugLayer === 'none') return 'debug layers'
+    if (debugLayer === 'coarse') return mask ? `coarse drop @${mask.sourceRes} m` : 'coarse drop'
+    if (!tiles) return `${debugLayer} tiles`
+    const on = debugLayer === 'terrain' ? tiles.terrain : tiles.surface
+    return `${debugLayer}: ${on.filter(Boolean).length}/${on.length} tiles`
   }
 
   useEffect(() => {
@@ -498,8 +511,8 @@ export function App() {
                 {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
               </button>
             )}
-            <button data-active={showMask && !!mask} onClick={toggleMask}>
-              {mask ? `skipped <${mask.minDrop} m` : 'coarse mask'}
+            <button data-active={debugLayer !== 'none'} onClick={cycleDebug}>
+              {debugLabel()}
             </button>
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
@@ -557,7 +570,9 @@ export function App() {
             basemapMix={basemapMix}
             anchorDump={anchorDump}
             hotspots={showHotspots ? hotspots : null}
-            mask={showMask ? mask : null}
+            mask={debugLayer === 'coarse' ? mask : null}
+            tiles={debugLayer === 'terrain' || debugLayer === 'surface' ? tiles : null}
+            tileLayer={debugLayer === 'surface' ? 'surface' : 'terrain'}
             initialBbox={initial.bbox}
             custom={custom}
             showLines={showLines}

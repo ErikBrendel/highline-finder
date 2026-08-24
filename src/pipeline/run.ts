@@ -16,6 +16,7 @@ import type {
   MaskCells,
   Params,
   Region,
+  TileUsage,
 } from '../shared/types.js'
 
 /**
@@ -33,6 +34,7 @@ const OUT = new URL('../web/public/candidates.json', import.meta.url).pathname
 const ANCHORS_OUT = new URL('../web/public/anchors.json', import.meta.url).pathname
 const HOTSPOTS_OUT = new URL('../web/public/hotspots.json', import.meta.url).pathname
 const MASK_OUT = new URL('../web/public/mask.json', import.meta.url).pathname
+const TILES_OUT = new URL('../web/public/tiles.json', import.meta.url).pathname
 
 /**
  * Radius the hotspot layer collapses line endpoints over. Ten times the candidate `dedupRadius`:
@@ -46,6 +48,8 @@ interface AreaResult {
   anchors: Anchor[]
   /** The coarse pre-pass, aggregated for the map overlay. */
   mask: MaskCells
+  /** What was actually fetched per source tile, and what it yielded. */
+  tiles: TileUsage
   /** Anchors of every feasible line in this area, for the hotspot layer. */
   endpoints: Endpoint[]
   refined: {
@@ -175,6 +179,22 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       `mean +${gain.toFixed(2)} score`,
   )
 
+  const anchorsPerTile = new Map<string, number>()
+  for (const a of anchors) {
+    const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
+    anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
+  }
+  const tiles: TileUsage = { size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [] }
+  for (const id of allTiles) {
+    const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
+    const { lat, lon } = toWgs84(e * 1000 + 500, n * 1000 + 500)
+    tiles.lat.push(Math.round(lat * 1e6) / 1e6)
+    tiles.lon.push(Math.round(lon * 1e6) / 1e6)
+    tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
+    tiles.surface.push(wanted.has(id))
+    tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
+  }
+
   return {
     region: {
       aois: area.aois,
@@ -188,6 +208,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     },
     anchors,
     mask: exportMask(drop, p),
+    tiles,
     endpoints: r.endpoints,
     refined: {
       candidates: ref.candidates,
@@ -236,6 +257,7 @@ async function main() {
   const refinedAll: Candidate[] = []
   const endpoints: Endpoint[] = []
   const maskCells: MaskCells[] = []
+  const tileUse: TileUsage[] = []
   const totals = {
     anchorsScanned: 0,
     anchorsKept: 0,
@@ -260,6 +282,7 @@ async function main() {
     for (const e of found.endpoints) endpoints.push(e)
     for (const c of refined.candidates) refinedAll.push(c)
     maskCells.push(found.mask)
+    tileUse.push(found.tiles)
     totals.anchorsScanned += region.anchorsScanned
     totals.anchorsKept += region.anchorsKept
     totals.pairsInRange += refined.find.pairsInRange
@@ -356,6 +379,21 @@ async function main() {
     lon: maskCells.flatMap((m) => m.lon),
     drop: maskCells.flatMap((m) => m.drop),
   }
+  const tiles: TileUsage = {
+    size: 1000,
+    lat: tileUse.flatMap((t) => t.lat),
+    lon: tileUse.flatMap((t) => t.lon),
+    terrain: tileUse.flatMap((t) => t.terrain),
+    surface: tileUse.flatMap((t) => t.surface),
+    anchors: tileUse.flatMap((t) => t.anchors),
+  }
+  await writeFile(TILES_OUT, JSON.stringify(tiles))
+  const barren = tiles.terrain.filter((t, i) => t && tiles.anchors[i] === 0).length
+  console.log(
+    `tiles: ${tiles.terrain.filter(Boolean).length}/${tiles.lat.length} terrain fetched ` +
+      `(${barren} yielded no anchor), ${tiles.surface.filter(Boolean).length} surface`,
+  )
+
   await writeFile(MASK_OUT, JSON.stringify(mask))
   const skipped = mask.drop.filter((d) => d < p.maskMinDrop).length
   console.log(

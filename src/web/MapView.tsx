@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
-import type { AnchorDump, Candidate, Dataset, Hotspots, MaskCells } from '../shared/types.js'
+import type {
+  AnchorDump,
+  Candidate,
+  Dataset,
+  Hotspots,
+  MaskCells,
+  TileUsage,
+} from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
@@ -238,6 +245,41 @@ function maskGeoJson(m: MaskCells | null): GeoJSON.FeatureCollection {
   }
 }
 
+/**
+ * Source tiles as squares, carrying what was fetched for each and what it yielded.
+ *
+ * The honest counterpart to the coarse mask: the mask shows what the pre-pass concluded at 16 m,
+ * this shows what could actually be acted on, since the data arrives in 1 km tiles.
+ */
+function tilesGeoJson(t: TileUsage | null, layer: 'terrain' | 'surface'): GeoJSON.FeatureCollection {
+  if (!t) return { type: 'FeatureCollection', features: [] }
+  return {
+    type: 'FeatureCollection',
+    features: t.lat.map((lat, i) => {
+      const dLat = t.size / 111320 / 2
+      const dLon = t.size / (111320 * Math.cos((lat * Math.PI) / 180)) / 2
+      const lon = t.lon[i]!
+      return {
+        type: 'Feature',
+        properties: {
+          fetched: (layer === 'terrain' ? t.terrain[i] : t.surface[i]) ? 1 : 0,
+          anchors: t.anchors[i]!,
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [lon - dLon, lat - dLat],
+            [lon + dLon, lat - dLat],
+            [lon + dLon, lat + dLat],
+            [lon - dLon, lat + dLat],
+            [lon - dLon, lat - dLat],
+          ]],
+        },
+      }
+    }),
+  }
+}
+
 function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection {
   if (!dump) return { type: 'FeatureCollection', features: [] }
   return {
@@ -276,6 +318,8 @@ interface Props {
   anchorDump: AnchorDump | null
   hotspots: Hotspots | null
   mask: MaskCells | null
+  tiles: TileUsage | null
+  tileLayer: 'terrain' | 'surface'
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
   custom: CustomPoints
@@ -295,6 +339,8 @@ export function MapView({
   anchorDump,
   hotspots,
   mask,
+  tiles,
+  tileLayer,
   initialBbox,
   custom,
   showLines,
@@ -375,6 +421,31 @@ export function MapView({
     m.on('load', () => {
       // First, so every other overlay draws above it.
       removeOverlay.current = installLoadingOverlay(m)
+
+      m.addSource('tiles', { type: 'geojson', data: tilesGeoJson(null, 'terrain') })
+      m.addLayer({
+        id: 'tiles',
+        type: 'fill',
+        source: 'tiles',
+        paint: {
+          // Fetched and productive is green; fetched for nothing is amber, which is the filter
+          // being too loose; skipped is dark, and a dark tile beside a busy one is it being too
+          // tight.
+          'fill-color': [
+            'case',
+            ['==', ['get', 'fetched'], 0], '#0b1220',
+            ['==', ['get', 'anchors'], 0], '#f59e0b',
+            '#22c55e',
+          ],
+          'fill-opacity': ['case', ['==', ['get', 'fetched'], 0], 0.55, 0.22],
+        },
+      })
+      m.addLayer({
+        id: 'tilesEdge',
+        type: 'line',
+        source: 'tiles',
+        paint: { 'line-color': '#8b93a3', 'line-width': 0.6, 'line-opacity': 0 },
+      })
 
       m.addSource('mask', { type: 'geojson', data: maskGeoJson(null) })
       m.addLayer({
@@ -633,6 +704,14 @@ export function MapView({
     const src = m.getSource('hotspots') as maplibregl.GeoJSONSource | undefined
     src?.setData(hotspotsGeoJson(hotspots))
   }, [hotspots, ready])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('tiles') as maplibregl.GeoJSONSource | undefined
+    src?.setData(tilesGeoJson(tiles, tileLayer))
+    m.setPaintProperty('tilesEdge', 'line-opacity', tiles ? 0.4 : 0)
+  }, [tiles, tileLayer, ready])
 
   useEffect(() => {
     const m = map.current

@@ -308,6 +308,27 @@ export interface MaskCells {
   drop: number[]
 }
 
+/**
+ * What the pipeline actually fetched, per 1 km source tile.
+ *
+ * Distinct from MaskCells, which reports what the coarse pre-pass *thought*: source data comes in
+ * 1 km tiles, so a decision taken at 16 m cannot be acted on at 16 m. Showing the two side by side
+ * is the point -- it is how you see a filter being too loose (tiles fetched that yielded nothing)
+ * or too tight (tiles skipped beside productive ones).
+ */
+export interface TileUsage {
+  /** Tile side in metres. */
+  size: number
+  lat: number[]
+  lon: number[]
+  /** Whether the terrain model was fetched for this tile. */
+  terrain: boolean[]
+  /** Whether the surface model was, which happens only where a line crosses. */
+  surface: boolean[]
+  /** Anchors the exact 1 m scan found in it. Zero means the terrain fetch bought nothing. */
+  anchors: number[]
+}
+
 export interface Dataset {
   meta: DatasetMeta
   candidates: Candidate[]

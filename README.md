@@ -51,6 +51,21 @@ uses, so the chart and the exact metrics are unchanged — they just arrive a mo
 Turn it on if you want the dataset self-contained and offline; leave it off if you want it to hold
 far more lines.
 
+### Seeing what the pipeline fetched
+
+The `debug layers` button cycles three views of the pipeline itself:
+
+- **coarse drop** — what the 16 m pre-pass concluded, greyed where it fell below the threshold.
+- **terrain tiles** — the 1 km tiles the terrain model was fetched for. Green where the exact 1 m
+  scan then found anchors, amber where it found none (the filter being too loose), dark where the
+  tile was skipped (a dark tile beside a busy one is it being too tight).
+- **surface tiles** — the tiles the surface model was fetched for, which is only where a line
+  actually crosses. This is the filter that works: 1 of 9 tiles at Vehlen, 66 of 156 at
+  Niederfinow.
+
+The gap between the first view and the second is the point: a decision taken at 16 m cannot be
+acted on when the data arrives in 1 km units.
+
 ### Sharing a view
 
 The URL tracks the map, so any view can be copied out of the address bar and sent:
@@ -103,8 +118,12 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
 1. **Coarse pre-pass** — fetch a 16 m terrain grid from the survey's WCS (which supports the OGC
    scaling extension, so no coarser product is needed) and mark ground that never falls more than
    `maskMinDrop` within `maskRadius`. At ~15 KB per km² against 1.4 MB for the 1 m tiles, this is
-   effectively free, and it decides which full-resolution tiles are worth fetching at all. The
-   `coarse mask` toggle in the app draws the result.
+   effectively free. **Measured caveat:** it does not currently save anything. Source data arrives
+   in 1 km tiles, and the relief that passes the test is scattered at a finer scale than that, so
+   every tile in every area is still needed — Vehlen rejects 90 % of cells and skips 0 of 9 tiles.
+   No threshold fixes it: at 12 m Niederfinow needs 79 % of its tiles and keeps 90 % of its lines.
+   It is kept as diagnostics, not as an optimisation. The `debug layers` toggle draws it, alongside
+   what was actually fetched per tile.
 2. **Ingest** — resolve each area to EPSG:25833, download the 1 km terrain tiles it touches and
    assemble a 1 m grid. The surface model is *not* fetched yet: it is 33 MB per km² against the
    terrain model's 1.4 MB, and canopy is only ever scored, never enforced, so it is fetched in
