@@ -96,8 +96,8 @@ the link goes stale rather than broken.
 
 ### Reading it at scale
 
-The `hotspots` layer, on by default, draws a red heatmap of every place where a *walkable* line was
-found — one clearing the canopy as well as the terrain — with
+The `hotspots` layer, on by default, draws a red heatmap of every place where a line worth a trip
+was found — at most 20 % canopy blockage *and* scoring at least 55 — with
 the endpoints of all of them collapsed at a 50 m radius and weighted by how many collapsed into
 each spot. It answers a different question from the candidate list — not "which line should I walk"
 but "which valley is worth a trip" — and it is the layer built to survive a much larger search
@@ -106,6 +106,10 @@ searched, because flat ground contributes nothing at all. Unlike the candidate l
 before dedup and before the `maxCandidates` cap, so a place where four hundred near-identical spans
 work burns brighter than one where a single line does. It fades out between zoom 14 and 16,
 where individual candidates become legible and are the better answer.
+
+Both conditions are needed. Blockage alone marked a pine thicket whose best line scored 39; score
+alone would mark ground where nothing is walkable. Score already folds canopy together with
+exposure and length, so it separates the cases blockage cannot.
 
 The pipeline also writes `anchors.json`, a dump of every anchor the openness scan kept. It powers a
 development-only overlay (bottom right of the map under `npm run dev`) that draws all of them,

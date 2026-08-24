@@ -6,12 +6,15 @@
  * deduped candidate list -- a place where 400 near-identical spans work is more interesting than
  * one where a single line does, and the candidate list deliberately throws that difference away.
  *
- * "Walkable" here means clearing the canopy as well as the terrain, which is stricter than the
- * search's own definition of feasible. Everywhere else canopy is scored rather than enforced, on
- * purpose -- a line through the trees is still worth reporting, with its blockage stated. But this
- * layer answers "is there anything here", and answering yes on the strength of a thousand lines
- * that all run through 20 m of pine is answering a different question than the one being asked. In
- * closed-canopy Brandenburg that is the difference between a map of relief and a map of highlines.
+ * "Worth a trip" is stricter than the search's own definition of feasible, because this layer says
+ * yes or no where everything else reports a figure. Two conditions, and both are needed.
+ *
+ * A blockage ceiling, because answering yes on the strength of a thousand lines that all run
+ * through 20 m of pine is answering a different question than the one being asked -- one measured
+ * spot lit up on 1,066 endpoints whose best line scored 39. And a score floor, because blockage
+ * alone cannot tell that spot apart from the Mueggelberge, where the best line scores 63 and no
+ * line at all is completely clear of trees. Score already folds canopy together with exposure and
+ * length, so it separates the two cases that blockage on its own confuses.
  *
  * Data volume is the point. Two AOIs produce ~79k endpoints and about 300 spots at a 50 m radius,
  * a few tens of kilobytes, and the count grows with *terrain* rather than with area searched --
@@ -32,9 +35,20 @@ export interface Endpoint {
   blocked: number
 }
 
-/** Whether a line is clear enough of vegetation to actually be walked as found. */
+/**
+ * Most canopy a line may run through and still mark its surroundings as worth a trip.
+ *
+ * Not zero. Requiring a completely clear line meant wooded hills with a good line through them
+ * showed nothing at all, which is a worse answer than a slightly generous one.
+ */
+export const HOTSPOT_MAX_BLOCKED = 0.2
+
+/** Lowest score that counts. Below this a line is technically feasible and practically not. */
+export const HOTSPOT_MIN_SCORE = 55
+
+/** Whether a line is good enough to mark the ground around it as worth going to look at. */
 export function isWalkable(p: Endpoint): boolean {
-  return p.blocked === 0
+  return p.blocked <= HOTSPOT_MAX_BLOCKED && p.score >= HOTSPOT_MIN_SCORE
 }
 
 export interface Hotspot {

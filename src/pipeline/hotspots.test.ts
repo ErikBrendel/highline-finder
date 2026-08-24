@@ -4,9 +4,17 @@ import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 const at = (e: number, n: number, score = 50, blocked = 0): Endpoint => ({ e, n, score, blocked })
 
 describe('isWalkable', () => {
-  it('accepts a line that clears the canopy and rejects one that clips it at all', () => {
-    expect(isWalkable(at(0, 0, 50, 0))).toBe(true)
-    expect(isWalkable(at(0, 0, 50, 0.01))).toBe(false)
+  it('takes a good line that clips some canopy', () => {
+    expect(isWalkable(at(0, 0, 63, 0.2))).toBe(true)
+  })
+
+  it('rejects a line buried in canopy however it scores', () => {
+    expect(isWalkable(at(0, 0, 70, 0.21))).toBe(false)
+  })
+
+  it('rejects a clear line that is barely a line', () => {
+    // The case blockage alone cannot see: technically feasible, practically not worth the trip.
+    expect(isWalkable(at(0, 0, 39, 0))).toBe(false)
   })
 })
 
