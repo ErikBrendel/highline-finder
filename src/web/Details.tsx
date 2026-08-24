@@ -6,8 +6,9 @@ import { Slider } from './Slider.js'
 import {
   NEIGHBOURHOOD,
   PLANNED_REFINE_RADIUS,
+  PLANNED_REFINE_FINEST,
   PLANNED_REFINE_RINGS,
-  PLANNED_REFINE_SPACING,
+  PLANNED_REFINE_START,
 } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
 
@@ -29,14 +30,14 @@ const DASH = '—'
  */
 function optimizeHelp(offer: number | null): string {
   const reach = offer ?? 1
-  const spacing = PLANNED_REFINE_SPACING * reach
+  const spacing = PLANNED_REFINE_START * reach
   const lines = [
     'Hill-climb both anchors toward a better score, one at a time.',
     '',
     `Each step scans ${NEIGHBOURHOOD.length} positions around anchor A — a hexagonal patch of a ` +
-      `triangular lattice, ${spacing.toFixed(1)} m between neighbouring points, ` +
-      `${PLANNED_REFINE_RINGS} rings out — and moves it to the best one, if any beats where it ` +
-      `stands. Then the same for B, against A’s new position. ${NEIGHBOURHOOD.length * 2} ` +
+      `triangular lattice, ${PLANNED_REFINE_RINGS} rings out — and moves it to the best one, if ` +
+      `any beats where it stands. Then the same for B, against A’s new position. ` +
+      `${NEIGHBOURHOOD.length * 2} ` +
       'candidate lines per step, not the square of that: the two ends are scanned separately, so ' +
       'a move that only helps if both ends make it together is invisible to it.',
     '',
@@ -44,10 +45,10 @@ function optimizeHelp(offer: number | null): string {
       'well as which way, so it strides out where the ground rewards it and shortens up near the ' +
       'top.',
     '',
-    `The lattice halves whenever the scan stalls, down to ${PLANNED_REFINE_SPACING} m, so a run ` +
-      'finishes at full resolution however coarsely it started. It stops when even the finest ' +
-      `patch makes things worse, or when both anchors are ${PLANNED_REFINE_RADIUS * reach} m from ` +
-      'where you put them.',
+    `The lattice starts at ${spacing.toFixed(1)} m and halves whenever the scan stalls, down to ` +
+      `${PLANNED_REFINE_FINEST} m, so a run arrives quickly and then settles at full resolution ` +
+      'however coarsely it started. It stops when even the finest patch makes things worse, or ' +
+      `when both anchors are ${PLANNED_REFINE_RADIUS * reach} m from where you put them.`,
     '',
     'Score here counts hard-constraint failures too, so a line running through terrain or a ' +
       'building is walked out of it before anything gets polished.',

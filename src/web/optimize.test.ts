@@ -5,7 +5,7 @@ import {
   optimizeStep,
   PLANNED_REFINE_RADIUS,
   PLANNED_REFINE_RINGS,
-  PLANNED_REFINE_SPACING,
+  PLANNED_REFINE_FINEST,
 } from './optimize.js'
 import { Grid } from '../shared/grid.js'
 import { planLine } from '../shared/plan.js'
@@ -55,7 +55,7 @@ describe('optimizeStep', () => {
   const g = terrain()
   const start = { a: at(85, 100), b: at(315, 100) }
   const o = { origin: start, ground: g, surface: g, sagRatio: 0.05, params: p, rig: null, reach: 1 }
-  const fine = PLANNED_REFINE_SPACING
+  const fine = PLANNED_REFINE_FINEST
   const scoreOf = (pl: { a: typeof start.a; b: typeof start.b }) =>
     planLine(pl.a, pl.b, g, g, 0.05, p)!.candidate.score
 
@@ -138,7 +138,7 @@ describe('optimizeFrame', () => {
     // anchors on an eight-times-coarser lattice. Nothing is left for a tenth-metre step to find.
     for (const reach of [1, 8]) {
       const settled = settle(reach)
-      expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_SPACING)).toBeNull()
+      expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_FINEST)).toBeNull()
     }
   })
 })

@@ -27,22 +27,30 @@ import type { Params } from '../shared/types.js'
 export const PLANNED_REFINE_RADIUS = 25
 
 /**
- * Spacing of the lattice the anchors move on, in metres. Every run ends at this resolution,
- * whatever its reach.
+ * Spacing the lattice starts at, in metres, before any reach multiplier.
+ *
+ * A metre is the resolution of the underlying rasters, so at the start of a run this is the scale
+ * at which the terrain actually has features -- and a 36-point patch at a metre covers a three
+ * metre circle, which is enough to see which way the ground falls rather than inching toward it.
+ */
+export const PLANNED_REFINE_START = 1
+
+/**
+ * Spacing the lattice winds down to, in metres. Every run ends at this resolution, at any reach.
  *
  * A tenth of a metre, not a metre: the samplers are bilinear, so sub-metre moves do change what the
  * line measures, and the things worth resolving at that scale are real. A roof edge is a one-metre
  * ramp in the composite ground, and a metre-grid search either stands on the roof or beside it with
  * nothing in between.
  */
-export const PLANNED_REFINE_SPACING = 0.1
+export const PLANNED_REFINE_FINEST = 0.1
 
 /** Rings of the hex neighbourhood scanned around an anchor. 3 gives 36 candidate positions. */
 export const PLANNED_REFINE_RINGS = 3
 
 /**
  * Where an anchor may move in one step: a hexagonal patch of the triangular lattice centred on it,
- * in units of {@link PLANNED_REFINE_SPACING}, nearest first.
+ * in units of the current spacing, nearest first.
  *
  * A patch rather than the ring of rays this used to be, for two reasons. A ring offers one
  * distance, so the scan picks a direction and the step length is whatever the spacing happens to
@@ -73,14 +81,23 @@ export const NEIGHBOURHOOD: Pos[] = (() => {
 })()
 
 /**
- * Steps taken per animation frame.
+ * Metres an anchor may travel in one animation frame, before the reach multiplier.
  *
- * Step size and animation speed are separate questions and this is what keeps them separate. A step
- * moves an anchor up to three spacings, so four of them advance it by rather more than a metre --
- * about the pace the walk has always been drawn at. Measured at 36 us per line evaluation on a
- * 500 m span, and 72 evaluations to a step, a frame is around 10 ms of work.
+ * A distance budget rather than a step count, because a step is worth three spacings and the
+ * spacing changes by a factor of ten over a run: counting steps made the coarse phase blur past in
+ * two frames and the fine phase crawl. Budgeting distance keeps the drawn pace the same throughout,
+ * which is the whole reason the walk is animated instead of run to completion.
+ *
+ * Scaled by reach, so a wide run takes about as long as a narrow one -- otherwise a reach-32 run
+ * would be four hundred frames of watching an anchor cross a field.
  */
-export const PLANNED_REFINE_SUBSTEPS = 4
+export const PLANNED_REFINE_PACE = 2
+
+/**
+ * Steps a frame may take however little ground they cover, so a walk that has converged cannot spin
+ * on the budget. Eight steps is 576 line evaluations, around 20 ms on a 500 m span.
+ */
+const MAX_STEPS_PER_FRAME = 8
 
 export interface Plan {
   a: Pos
@@ -99,13 +116,13 @@ interface Options {
    * 36 points and simply covers more ground. 1 is the careful default.
    *
    * Only the starting spacing scales. Whenever the scan can no longer improve, the spacing halves
-   * and it tries again, down to `PLANNED_REFINE_SPACING` -- so a run at any reach finishes on the
-   * same tenth-metre lattice a reach-1 run does, and a wide search is not a blunt one. Scaling the
-   * radius alone would leave a reach-32 run creeping across 800 m in tenths of a metre, which is
-   * many minutes of animation; the coarse phase is how it gets there in the time a narrow run takes.
+   * and it tries again, down to `PLANNED_REFINE_FINEST` -- which is not scaled, so a run at any
+   * reach finishes on the same tenth-metre lattice, and a wide search is not a blunt one. Scaling
+   * the radius alone would leave a reach-32 run creeping across 800 m a metre at a time, which is
+   * minutes of animation; the coarse phase is how it gets there in the time a narrow run takes.
    *
    * What a coarse phase genuinely costs is what falls between its points on the way: at reach 32
-   * the lattice is 3.2 m and a two-metre ledge can sit entirely in a gap. So a wide search finds a
+   * the lattice starts at 32 m and a whole hillside can sit in a gap. So a wide search finds a
    * different answer, not a strictly better one.
    */
   reach: number
@@ -170,23 +187,30 @@ export function optimizeStep(current: Plan, o: Options, spacing: number): Plan |
 /**
  * One animation frame's worth of descent, coarse to fine.
  *
- * Each frame restarts at the reach's lattice spacing and halves it whenever the scan stalls, down to
- * `PLANNED_REFINE_SPACING`. Restarting coarse every frame rather than ratcheting down is
+ * Each frame restarts at the reach's starting spacing and halves it whenever the scan stalls, down to
+ * `PLANNED_REFINE_FINEST`. Restarting coarse every frame rather than ratcheting down is
  * deliberate: having moved at a fine spacing, the coarse patch is often worth another look, and
  * finding out costs one stalled scan. Null means even the finest patch cannot improve the line,
  * which is the only thing that stops a run.
  */
 export function optimizeFrame(current: Plan, o: Options): Plan | null {
+  const budget = PLANNED_REFINE_PACE * o.reach
   let out: Plan | null = null
   let cur = current
-  let spacing = PLANNED_REFINE_SPACING * o.reach
-  for (let i = 0; i < PLANNED_REFINE_SUBSTEPS; i++) {
+  let spacing = PLANNED_REFINE_START * o.reach
+  let travelled = 0
+
+  for (let i = 0; i < MAX_STEPS_PER_FRAME && travelled < budget; i++) {
     let next = optimizeStep(cur, o, spacing)
-    while (!next && spacing > PLANNED_REFINE_SPACING) {
-      spacing = Math.max(PLANNED_REFINE_SPACING, spacing / 2)
+    while (!next && spacing > PLANNED_REFINE_FINEST) {
+      spacing = Math.max(PLANNED_REFINE_FINEST, spacing / 2)
       next = optimizeStep(cur, o, spacing)
     }
     if (!next) break
+    travelled += Math.max(
+      Math.hypot(next.a.e - cur.a.e, next.a.n - cur.a.n),
+      Math.hypot(next.b.e - cur.b.e, next.b.n - cur.b.n),
+    )
     cur = next
     out = cur
   }
