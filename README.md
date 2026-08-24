@@ -140,8 +140,8 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
    no raster access.
 5. **Heights and offlevel** — each anchor has a *range* of usable attachment heights (ground level
    at a clean edge, up to a 2 m A-frame), so the search picks the pair of heights that is as level
-   as possible and then as high as possible. Height difference is hard-capped at 2 % of span — 1 m
-   over 50 m, 10 m over 500 m. This is what stops the finder proposing badly tilted lines.
+   as possible and then as high as possible. Height difference is hard-capped at 3 % of span — 1.5 m
+   over 50 m, 15 m over 500 m. This is what stops the finder proposing badly tilted lines.
 6. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain and to canopy.
 7. **Score and dedup** — filter, rank, then collapse near-duplicates: two lines are the same when
    *both* endpoints are within `dedupRadius`, so lines sharing one anchor survive as the different

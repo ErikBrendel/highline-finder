@@ -15,8 +15,8 @@ export const DEFAULT_PARAMS: Params = {
   aFrameMin: 0,
   aFrameMax: 1.5,
 
-  // 1 m of offlevel on a 50 m line, scaling linearly to 10 m at 500 m.
-  maxOffLevelRatio: 0.02,
+  // 1.5 m of offlevel on a 50 m line, scaling linearly to 15 m at 500 m.
+  maxOffLevelRatio: 0.03,
 
   // Enough that a walker plus sag does not scrape. Applies only outside anchorZone.
   minClearance: 3.0,

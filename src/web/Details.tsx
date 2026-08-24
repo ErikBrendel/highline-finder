@@ -62,13 +62,13 @@ export function Details({
     },
     {
       label: 'Offlevel',
-      value: stat((c) => `${c.offLevel.toFixed(2)} m · ${(c.offLevelRatio * 100).toFixed(2)} %`),
+      value: stat((c) => `${c.offLevel.toFixed(1)} m · ${(c.offLevelRatio * 100).toFixed(1)} %`),
     },
     { label: 'Ground A / B', value: stat((c) => `${c.a.ground.toFixed(1)} / ${c.b.ground.toFixed(1)} m`) },
     // The planned line has sliders for these instead.
     ...(isPlanned
       ? []
-      : [{ label: 'Rig height A / B', value: stat((c) => `+${c.a.aFrame.toFixed(2)} / +${c.b.aFrame.toFixed(2)} m`) }]),
+      : [{ label: 'Rig height A / B', value: stat((c) => `+${c.a.aFrame.toFixed(1)} / +${c.b.aFrame.toFixed(1)} m`) }]),
     {
       label: 'Score: exp / len / canopy / margin / level',
       value: stat((c) => {
@@ -106,7 +106,7 @@ export function Details({
               <>
                 {' '}&middot; midspan sag {c.sag.toFixed(1)} m
                 &middot; offlevel {c.offLevel.toFixed(1)} m (
-                {(c.offLevelRatio * 100).toFixed(2)} %)
+                {(c.offLevelRatio * 100).toFixed(1)} %)
               </>
             )}
           </span>

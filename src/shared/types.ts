@@ -25,7 +25,7 @@ export interface Params {
   aFrameMax: number
   /**
    * Largest tolerated height difference between the two attachment points, as a fraction of
-   * span. 0.02 means 1 m over 50 m and 10 m over 500 m. An offlevel line is harder to rig, walks
+   * span. 0.03 means 1.5 m over 50 m and 15 m over 500 m. An offlevel line is harder to rig, walks
    * unevenly and loads the low anchor more, so this is a hard constraint rather than a penalty.
    */
   maxOffLevelRatio: number
