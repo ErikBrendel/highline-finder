@@ -13,10 +13,17 @@ import type { Aoi, Params } from '../shared/types.js'
  *
  * The key covers everything that can change a result: the region's own rectangles, every parameter,
  * and a fingerprint of the pipeline and shared source. Hashing the source is what makes this safe
- * to leave on by default -- editing the scoring rule invalidates every region automatically,
- * where a hand-maintained version number would eventually be forgotten and serve stale results as
- * if they were fresh. Tests are excluded, since they cannot affect output.
+ * to leave on by default -- editing the scoring rule invalidates every region automatically, where
+ * a hand-maintained version number would eventually be forgotten and serve stale results as if they
+ * were fresh.
+ *
+ * Two files are excluded. Tests cannot affect output. And params.ts holds only data -- the
+ * parameters and the list of areas -- both of which are already in the key by value, so hashing it
+ * as source would mean adding one area invalidated every other, which is exactly what this exists
+ * to avoid.
  */
+
+const DATA_ONLY = new Set(['params.ts'])
 
 const CACHE_DIR = new URL('../../data/cache/', import.meta.url).pathname
 const SOURCE_DIRS = ['../pipeline/', '../shared/']
@@ -29,7 +36,7 @@ async function sourceFingerprint(): Promise<string> {
   for (const dir of SOURCE_DIRS) {
     const path = new URL(dir, import.meta.url).pathname
     for (const name of (await readdir(path)).sort()) {
-      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts') || DATA_ONLY.has(name)) continue
       hash.update(name)
       hash.update(await readFile(join(path, name)))
     }

@@ -92,15 +92,35 @@ function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCell
   return out
 }
 
+/**
+ * Times a stage and prints how long it took.
+ *
+ * Every stage of this pipeline has been the bottleneck at some point -- dedup once took most of an
+ * hour while looking like a footnote in the log -- so where the time goes is worth stating rather
+ * than guessing at.
+ */
+async function stage<T>(label: string, run: () => T | Promise<T>): Promise<T> {
+  const started = Date.now()
+  const out = await run()
+  const seconds = (Date.now() - started) / 1000
+  // Summed across regions: which stage is expensive matters more than which region was.
+  const key = label.replace(/ \(region[^)]*\)/, '')
+  timings.set(key, (timings.get(key) ?? 0) + seconds)
+  console.log(`${label}  [${seconds.toFixed(1)}s]`)
+  return out
+}
+
+const timings = new Map<string, number>()
+
 const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
 const pct2 = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : 'n/a')
 
 async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
   const { bbox, boxes } = area
 
-  console.log(`[1/6] coarse pre-pass (${label})`)
-  const coarse = await loadCoarse(bbox, p.maskRes)
-  const drop = dropField(coarse, p.maskRadius)
+  const drop = await stage(`[1/6] coarse pre-pass (${label})`, async () =>
+    dropField(await loadCoarse(bbox, p.maskRes), p.maskRadius),
+  )
   const allTiles = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
   const wantedTiles =
     p.maskMinDrop > 0
@@ -115,16 +135,16 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  ${groundTiles.length} of ${allTiles.length} terrain tiles worth loading`)
 
-  console.log(`[2/6] terrain (${label})`)
-  const ground = await loadProduct('dgm', bbox, 1, wantedTiles ?? undefined)
+  const ground = await stage(`[2/6] terrain (${label})`, () =>
+    loadProduct('dgm', bbox, 1, wantedTiles ?? undefined),
+  )
   const ext = ground.extent()
   console.log(
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
       `${ext.min.toFixed(2)}..${ext.max.toFixed(2)} m (relief ${(ext.max - ext.min).toFixed(1)} m)`,
   )
 
-  console.log('[3/6] openness scan')
-  const scan = scanAnchors(ground, p)
+  const scan = await stage('[3/6] openness scan', () => scanAnchors(ground, p))
   // Ground merged in between two AOIs is read for profiles but never searched.
   const anchors = scan.anchors.filter((a) => boxes.some((b) => contains(b, a.e, a.n)))
   const meanOpen = anchors.length
@@ -144,8 +164,9 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     console.log(`  inside an AOI             ${anchors.length}`)
   }
 
-  console.log('[4/6] pairing and terrain test')
-  const found = terrainPairs(anchors, ground, p)
+  const found = await stage('[4/6] pairing and terrain test', () =>
+    terrainPairs(anchors, ground, p),
+  )
 
   /**
    * The surface model is fetched here rather than alongside the terrain, and only for the tiles the
@@ -153,7 +174,6 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
    * and canopy is never a hard constraint -- so paying for it over the whole area of interest buys
    * canopy figures for ground no line ever crosses.
    */
-  console.log('[5/6] surface, for the corridors that survived')
   const wanted = corridorTiles(found.pairs, p.refineRadius + p.profileStep)
   const all = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
   const used = all.filter((t) => wanted.has(t))
@@ -161,11 +181,12 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     `  ${used.length} of ${all.length} tiles carry a line ` +
       `(~${used.length * 33} MB instead of ~${all.length * 33} MB)`,
   )
-  const surface = await loadProduct('bdom', bbox, 1, wanted)
+  const surface = await stage('[5/6] surface, for the corridors that survived', () =>
+    loadProduct('bdom', bbox, 1, wanted),
+  )
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-  console.log('[6/6] profiles, score and refinement')
-  const r = evaluatePairs(found, ground, surface, p)
+  const r = await stage('[6/6] profiles and score', () => evaluatePairs(found, ground, surface, p))
   console.log(`  pairs in length range      ${r.pairsInRange}`)
   console.log(
     `  survived sector test       ${r.pairsSectorPassed}  ` +
@@ -181,7 +202,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
 
-  const ref = refine(r.candidates, ground, surface, p)
+  const ref = await stage('[6/6] local refinement', () => refine(r.candidates, ground, surface, p))
   const gain = ref.improved ? ref.totalGain / ref.improved : 0
   console.log(
     `  ${ref.improved}/${r.candidates.length} improved from ${ref.evaluations} evaluations, ` +
@@ -353,7 +374,7 @@ async function main() {
   // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
   // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
   // line found is stored.
-  const deduped = dedupe(refinedAll, p.dedupRadius)
+  const deduped = await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius))
   const finalCandidates = p.storeProfiles
     ? deduped
     : deduped.map(({ profile: _profile, ...rest }) => rest)
@@ -448,7 +469,7 @@ async function main() {
 
   // Clustered across all regions at once, so a spot straddling two of them is one spot.
   const walkable = endpoints.filter(isWalkable)
-  const spots = clusterEndpoints(walkable, HOTSPOT_RADIUS)
+  const spots = await stage('hotspot clustering', () => clusterEndpoints(walkable, HOTSPOT_RADIUS))
   spots.sort((a, b) => b.count - a.count)
   const hotspots: Hotspots = {
     radius: HOTSPOT_RADIUS,
@@ -477,6 +498,17 @@ async function main() {
     `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB), ` +
       `anchors.json (${anchorKb} KB, ${dumpAnchors.lat.length} points)`,
   )
+
+  const total = (Date.now() - started) / 1000
+  console.log('\nwhere the time went:')
+  for (const [label, seconds] of [...timings].sort((a, b) => b[1] - a[1])) {
+    const share = (100 * seconds) / total
+    if (share < 1) continue
+    console.log(
+      `  ${label.padEnd(44)} ${seconds.toFixed(1).padStart(7)}s  ` +
+        `${share.toFixed(0).padStart(3)}%`,
+    )
+  }
 
   if (finalCandidates.length) {
     console.log('\ntop 10:')

@@ -108,8 +108,11 @@ export const DEFAULT_PARAMS: Params = {
  */
 /**
  * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
- * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the
- * dedup pass rather than reported twice.
+ * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the dedup
+ * pass rather than reported twice.
+ *
+ * This list is data, not code: regionCache.ts leaves params.ts out of its source fingerprint on
+ * purpose, so adding an area here re-runs that area alone.
  */
 export const DEFAULT_AOIS: Aoi[] = [
   // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.
@@ -119,6 +122,8 @@ export const DEFAULT_AOIS: Aoi[] = [
   { south: 52.769741, west: 13.874750, north: 52.869081, east: 14.058569 },
   // Linthe: 4.6 km2 west of Berlin.
   { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
+  // Mueggelberge: 22 km2 in south-east Berlin.
+  { south: 52.390088, west: 13.601721, north: 52.428357, east: 13.677498 },
   // Vehlen: 10.6 km2, further west again.
   { south: 52.422160, west: 12.297235, north: 52.444399, east: 12.360257 },
 ]
