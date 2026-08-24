@@ -137,10 +137,10 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   console.log(`  ${groundTiles.length} of ${allTiles.length} terrain tiles worth loading`)
 
   /**
-   * Ground here means what an anchor could stand on, which includes roofs -- so the cadastre's
-   * footprints are folded in as part of building the grid rather than as a later correction. Only
-   * the tiles that carry a footprint pay for the surface model; on the rest the mask is the whole
-   * cost, and that is most of Brandenburg.
+   * Ground here means what an anchor could stand on, which includes roofs -- so the city model is
+   * folded in as part of building the grid rather than as a later correction. It costs 5-50 KB a
+   * tile and nothing at all where there are no buildings; see buildings.ts for why it is not
+   * derived from the surface model.
    */
   const built = await stage(`[2/6] terrain and buildings (${label})`, async () => {
     const ground = await loadProduct('dgm', bbox, 1, wantedTiles ?? undefined)
@@ -227,7 +227,6 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
     anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
   }
-  const roofTiles = new Set(built.buildings.tiles)
   const tiles: TileUsage = { size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [] }
   for (const id of allTiles) {
     const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
@@ -235,8 +234,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     tiles.lat.push(Math.round(lat * 1e6) / 1e6)
     tiles.lon.push(Math.round(lon * 1e6) / 1e6)
     tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
-    // Building tiles pulled the surface model too, so the overlay counts them as fetched.
-    tiles.surface.push(wanted.has(id) || roofTiles.has(id))
+    tiles.surface.push(wanted.has(id))
     tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
   }
 

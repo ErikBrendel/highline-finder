@@ -16,12 +16,13 @@ anchors only, one AOI, static viewer.
   bulk of the span. Model as a tolerance window of `max(5 m, 2 % of length)` at each end, inside
   which canopy is ignored, and enforce canopy clearance as a hard constraint outside it. This is
   what turns the canopy column from a score into a real filter.
-- **Buildings in the pipeline.** The viewer treats a roof as ground — ALKIS footprints fetched per
-  256 m window, see `src/web/terrain.ts` — so an anchor dropped on a building stands on it and a
-  line has to clear one it crosses. The search still does not: it runs its lines through houses and
-  counts roofs as forest. Per-corridor WMS requests are the wrong shape for a pipeline; the bulk
-  equivalent is `alkis/Vektordaten/shape/` (80–100 MB per Landkreis, buildings and water as
-  polygons), rasterised once per AOI to a 1 m mask.
+- **Buildings in the coarse pre-pass.** The search now stands on roofs — ALKIS footprints
+  rasterised per 1 km tile, see `src/pipeline/buildings.ts` — but the pre-pass that decides which
+  tiles are worth loading at all still measures bare terrain. A flat tile with a thirty-metre
+  building on it has thirty metres of usable relief and gets skipped anyway. Fixing it means either
+  loading terrain for every tile with a footprint regardless of relief, which in a city is every
+  tile, or folding building height into the coarse drop field — which needs a coarse building
+  height, and ALKIS footprints have no height. `3d_gebaeude` LoD1 does.
 - **Anchoring to the side of a building, not just the top.** A parapet, a balcony, a beam through a
   window: in practice urban lines are rigged off the structure, not off the roof surface, and the
   usable attachment point is often several metres below the roof and horizontally outside the
