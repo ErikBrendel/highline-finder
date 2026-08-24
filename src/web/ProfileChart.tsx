@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Candidate, ProfileSample } from '../shared/types.js'
 import { COVER_BUILDING, type Cover, coverRuns } from './landcover.js'
+import { emitHoverPoint } from './hoverMarker.js'
+import { toWgs84 } from '../shared/geo.js'
 
 /**
  * Side elevation of one candidate: terrain, canopy band, and the sagging line.
@@ -100,6 +102,22 @@ export function ProfileChart({ c, profile, cover }: Props) {
   }
 
   const hover = hoverIndex === null ? null : p[hoverIndex]!
+
+  /**
+   * Mirrors the hovered sample onto the map.
+   *
+   * Interpolated between the anchors in projected metres and converted once, rather than between
+   * their latitudes and longitudes: over half a kilometre the difference is millimetres, but doing
+   * it right costs nothing. Cleared on unmount as well as on leaving, so closing the panel or
+   * picking another line does not leave a dot behind.
+   */
+  useEffect(() => {
+    if (!hover) return emitHoverPoint(null)
+    const t = c.length > 0 ? hover.d / c.length : 0
+    emitHoverPoint(toWgs84(c.a.e + (c.b.e - c.a.e) * t, c.a.n + (c.b.n - c.a.n) * t))
+  }, [hover, c])
+
+  useEffect(() => () => emitHoverPoint(null), [])
   // Flip the readout to the left of the guide near the right edge, so it never runs off.
   const hoverX = hover ? x(hover.d) : 0
   const readoutFlipped = hoverX > W - 150
