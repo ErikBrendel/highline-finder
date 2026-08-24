@@ -48,6 +48,11 @@ async function exists(path: string): Promise<boolean> {
 /**
  * Returns the local path of the GeoTIFF for one product/tile, downloading and unzipping it
  * on first use. The unzipped .tif is what gets cached; the .zip is not retained.
+ *
+ * Retried, because a run now fetches hundreds of tiles of tens of megabytes each and a single
+ * dropped connection two hundred tiles in should not cost the whole run. Failures are transport
+ * ones -- a reset socket, a truncated body -- so a short backoff clears them; an HTTP error is a
+ * missing tile and is not worth retrying, but it is also not worth distinguishing here.
  */
 export async function tileTiff(product: Product, tile: string): Promise<string> {
   await mkdir(CACHE_DIR, { recursive: true })
@@ -56,16 +61,27 @@ export async function tileTiff(product: Product, tile: string): Promise<string> 
 
   const url = `${BASE}/${product}/tif/${product}_${tile}.zip`
   process.stdout.write(`  fetching ${product}_${tile} ... `)
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
-  const zip = new Uint8Array(await res.arrayBuffer())
-
-  const entries = unzipSync(zip)
-  const name = Object.keys(entries).find((k) => k.endsWith('.tif'))
-  if (!name) throw new Error(`no .tif inside ${url}`)
-  await writeFile(tifPath, entries[name]!)
-  process.stdout.write(`${(zip.length / 1e6).toFixed(1)} MB zip -> ${(entries[name]!.length / 1e6).toFixed(1)} MB tif\n`)
-  return tifPath
+  let last: unknown
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
+      const zip = new Uint8Array(await res.arrayBuffer())
+      const entries = unzipSync(zip)
+      const name = Object.keys(entries).find((k) => k.endsWith('.tif'))
+      if (!name) throw new Error(`no .tif inside ${url}`)
+      await writeFile(tifPath, entries[name]!)
+      process.stdout.write(
+        `${(zip.length / 1e6).toFixed(1)} MB zip -> ${(entries[name]!.length / 1e6).toFixed(1)} MB tif\n`,
+      )
+      return tifPath
+    } catch (e) {
+      last = e
+      process.stdout.write(`retry ${attempt + 1} `)
+      await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)))
+    }
+  }
+  throw new Error(`${url} failed after 5 attempts: ${last}`)
 }
 
 /** Cached derived artefacts (assembled AOI grids), keyed by caller-supplied name. */
