@@ -288,3 +288,46 @@ describe('dedupe', () => {
     expect(kept.map((c) => c.score)).toEqual([90, 70])
   })
 })
+
+describe('dedupe indexing', () => {
+  /** The original definition, kept as an oracle: every kept line compared against every other. */
+  function bruteForce(cs: Candidate[], radius: number): Candidate[] {
+    const r2 = radius * radius
+    const near = (x: { e: number; n: number }, y: { e: number; n: number }) =>
+      (x.e - y.e) ** 2 + (x.n - y.n) ** 2 <= r2
+    const kept: Candidate[] = []
+    for (const c of [...cs].sort((x, y) => y.score - x.score)) {
+      const dup = kept.some(
+        (k) => (near(c.a, k.a) && near(c.b, k.b)) || (near(c.a, k.b) && near(c.b, k.a)),
+      )
+      if (!dup) kept.push(c)
+    }
+    return kept
+  }
+
+  it('keeps exactly what comparing everything against everything would keep', () => {
+    // A deterministic spread of overlapping lines, dense enough that most are duplicates.
+    const cs: Candidate[] = []
+    let seed = 1
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+    for (let i = 0; i < 600; i++) {
+      const ae = 1000 + Math.round(rnd() * 300)
+      const an = 2000 + Math.round(rnd() * 300)
+      const be = ae + 120 + Math.round(rnd() * 60)
+      const bn = an + Math.round(rnd() * 60)
+      cs.push({
+        id: `c${i}`,
+        a: { lat: 0, lon: 0, e: ae, n: an, ground: 0, anchor: 0, aFrame: 0 },
+        b: { lat: 0, lon: 0, e: be, n: bn, ground: 0, anchor: 0, aFrame: 0 },
+        length: 0, bearing: 0, sag: 0, offLevel: 0, offLevelRatio: 0,
+        clearanceMin: 0, exposure: 0, canopyClearanceMin: 0, canopyBlockedFraction: 0,
+        score: Math.round(rnd() * 1000) / 10,
+        scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
+        maxSagRatio: 0.1,
+      })
+    }
+    for (const radius of [5, 25, 60]) {
+      expect(dedupe(cs, radius).map((c) => c.id)).toEqual(bruteForce(cs, radius).map((c) => c.id))
+    }
+  })
+})

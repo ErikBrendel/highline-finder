@@ -405,16 +405,51 @@ export function refine(
  */
 export function dedupe(candidates: Candidate[], radius: number): Candidate[] {
   const r2 = radius * radius
-  const near = (p: AnchorOut, q: AnchorOut) =>
-    (p.e - q.e) ** 2 + (p.n - q.n) ** 2 <= r2
+  const near = (p: AnchorOut, q: AnchorOut) => (p.e - q.e) ** 2 + (p.n - q.n) ** 2 <= r2
+  const duplicates = (c: Candidate, k: Candidate) =>
+    (near(c.a, k.a) && near(c.b, k.b)) || (near(c.a, k.b) && near(c.b, k.a))
+
+  /**
+   * Kept lines indexed by both of their endpoints, on a lattice of `radius`.
+   *
+   * A duplicate of `c` must have an endpoint within `radius` of `c.a` -- that is half of what the
+   * test asks either way round -- so the nine cells around `c.a` hold every line worth comparing
+   * against. Exact, not approximate.
+   *
+   * Scanning everything kept was fine at a few thousand candidates and quadratic beyond: a 141 km2
+   * area produced 1.6 million feasible lines against 14,762 distinct ones, which is 24 billion
+   * comparisons and most of an hour.
+   */
+  const cell = radius > 0 ? radius : 1
+  const buckets = new Map<string, number[]>()
+  const keyOf = (p: AnchorOut) => `${Math.floor(p.e / cell)}_${Math.floor(p.n / cell)}`
+  const register = (index: number, p: AnchorOut) => {
+    const key = keyOf(p)
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(index)
+    else buckets.set(key, [index])
+  }
 
   const kept: Candidate[] = []
   for (const c of [...candidates].sort((x, y) => y.score - x.score)) {
-    const duplicate = kept.some(
-      (k) =>
-        (near(c.a, k.a) && near(c.b, k.b)) || (near(c.a, k.b) && near(c.b, k.a)),
-    )
-    if (!duplicate) kept.push(c)
+    const cx = Math.floor(c.a.e / cell)
+    const cy = Math.floor(c.a.n / cell)
+    let duplicate = false
+    for (let dx = -1; dx <= 1 && !duplicate; dx++) {
+      for (let dy = -1; dy <= 1 && !duplicate; dy++) {
+        for (const i of buckets.get(`${cx + dx}_${cy + dy}`) ?? []) {
+          if (duplicates(c, kept[i]!)) {
+            duplicate = true
+            break
+          }
+        }
+      }
+    }
+    if (duplicate) continue
+    register(kept.length, c.a)
+    register(kept.length, c.b)
+    kept.push(c)
   }
   return kept
 }
+
