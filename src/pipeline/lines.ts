@@ -199,36 +199,63 @@ export function terrainPairs(anchors: Anchor[], ground: Grid, p: Params): Terrai
   let pairsLevelEnough = 0
   const pairs: [Pos, Pos][] = []
 
-  // Plain double loop. At this AOI size that is ~2e6 iterations of a sector lookup, which is
-  // nothing; a uniform grid index only becomes necessary for regional runs (see ROADMAP).
+  /**
+   * Anchors bucketed on a lattice of `maxLength`, so only the nine buckets around one anchor can
+   * hold a partner in range.
+   *
+   * The plain double loop was fine at a square kilometre and is not at a hundred: pairs *in range*
+   * grow linearly with area while the loop grows quadratically, so almost all of its work became
+   * rejecting anchors kilometres apart. Bucketing makes the enumeration output-sensitive, and it is
+   * exact rather than approximate -- two points within maxLength cannot land more than one bucket
+   * apart on a lattice of that size.
+   */
+  const buckets = new Map<string, number[]>()
+  const cell = p.maxLength
+  const keyOf = (e: number, n: number) => `${Math.floor(e / cell)}_${Math.floor(n / cell)}`
   for (let i = 0; i < anchors.length; i++) {
     const a = anchors[i]!
-    for (let j = i + 1; j < anchors.length; j++) {
-      const b = anchors[j]!
-      const dE = b.e - a.e
-      const dN = b.n - a.n
-      const length = Math.hypot(dE, dN)
-      if (length < p.minLength || length > p.maxLength) continue
-      pairsInRange++
+    const key = keyOf(a.e, a.n)
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(i)
+    else buckets.set(key, [i])
+  }
 
-      const bearing = bearingOf(dE, dN)
-      if (!a.open[sectorOf(bearing, p.sectorCount)]) continue
-      if (!b.open[sectorOf(oppositeBearing(bearing), p.sectorCount)]) continue
-      pairsSectorPassed++
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i]!
+    const cx = Math.floor(a.e / cell)
+    const cy = Math.floor(a.n / cell)
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const j of buckets.get(`${cx + dx}_${cy + dy}`) ?? []) {
+          // Each unordered pair is visited once, exactly as the double loop did.
+          if (j <= i) continue
+          const b = anchors[j]!
+          const dE = b.e - a.e
+          const dN = b.n - a.n
+          const length = Math.hypot(dE, dN)
+          if (length < p.minLength || length > p.maxLength) continue
+          pairsInRange++
 
-      // Cheap pre-check on the same rule evaluateLine will apply, so the offlevel funnel stays
-      // observable in the logs instead of hiding inside the profile rejection count.
-      const h = chooseHeights(
-        a.anchorMin,
-        a.anchorMax,
-        b.anchorMin,
-        b.anchorMax,
-        p.maxOffLevelRatio * length,
-      )
-      if (!h) continue
-      pairsLevelEnough++
+          const bearing = bearingOf(dE, dN)
+          if (!a.open[sectorOf(bearing, p.sectorCount)]) continue
+          if (!b.open[sectorOf(oppositeBearing(bearing), p.sectorCount)]) continue
+          pairsSectorPassed++
 
-      if (clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) pairs.push([a, b])
+          // Cheap pre-check on the same rule evaluateLine will apply, so the offlevel funnel stays
+          // observable in the logs instead of hiding inside the profile rejection count.
+          const h = chooseHeights(
+            a.anchorMin,
+            a.anchorMax,
+            b.anchorMin,
+            b.anchorMax,
+            p.maxOffLevelRatio * length,
+          )
+          if (!h) continue
+          pairsLevelEnough++
+
+          if (clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) pairs.push([a, b])
+        }
+      }
     }
   }
   return { pairs, pairsInRange, pairsSectorPassed, pairsLevelEnough }

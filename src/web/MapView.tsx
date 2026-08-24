@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
-import type { AnchorDump, Candidate, Dataset, Hotspots } from '../shared/types.js'
+import type { AnchorDump, Candidate, Dataset, Hotspots, MaskCells } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
@@ -206,6 +206,38 @@ function hotspotsGeoJson(h: Hotspots | null): GeoJSON.FeatureCollection {
   }
 }
 
+/**
+ * The coarse pre-pass as squares, so the ground skipped before any full-resolution fetch is visible.
+ *
+ * Cells carry a centre and the run's cell size rather than corners; the square is built here because
+ * one number per cell is a great deal less to ship than four coordinate pairs.
+ */
+function maskGeoJson(m: MaskCells | null): GeoJSON.FeatureCollection {
+  if (!m) return { type: 'FeatureCollection', features: [] }
+  return {
+    type: 'FeatureCollection',
+    features: m.lat.map((lat, i) => {
+      const dLat = m.res / 111320 / 2
+      const dLon = m.res / (111320 * Math.cos((lat * Math.PI) / 180)) / 2
+      const lon = m.lon[i]!
+      return {
+        type: 'Feature',
+        properties: { drop: m.drop[i]! },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [lon - dLon, lat - dLat],
+            [lon + dLon, lat - dLat],
+            [lon + dLon, lat + dLat],
+            [lon - dLon, lat + dLat],
+            [lon - dLon, lat - dLat],
+          ]],
+        },
+      }
+    }),
+  }
+}
+
 function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection {
   if (!dump) return { type: 'FeatureCollection', features: [] }
   return {
@@ -243,6 +275,7 @@ interface Props {
   basemapMix: number
   anchorDump: AnchorDump | null
   hotspots: Hotspots | null
+  mask: MaskCells | null
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
   custom: CustomPoints
@@ -261,6 +294,7 @@ export function MapView({
   basemapMix,
   anchorDump,
   hotspots,
+  mask,
   initialBbox,
   custom,
   showLines,
@@ -341,6 +375,25 @@ export function MapView({
     m.on('load', () => {
       // First, so every other overlay draws above it.
       removeOverlay.current = installLoadingOverlay(m)
+
+      m.addSource('mask', { type: 'geojson', data: maskGeoJson(null) })
+      m.addLayer({
+        id: 'mask',
+        type: 'fill',
+        source: 'mask',
+        paint: {
+          // Excluded ground is greyed out; ground that passed but only just keeps a faint tint, so
+          // it is obvious how much slack the threshold actually has where it matters.
+          'fill-color': ['case', ['<', ['get', 'drop'], ['literal', 0]], '#0b1220', '#38bdf8'],
+          'fill-opacity': 0,
+        },
+      })
+      m.addLayer({
+        id: 'maskEdge',
+        type: 'line',
+        source: 'mask',
+        paint: { 'line-color': '#0b1220', 'line-width': 0.4, 'line-opacity': 0 },
+      })
 
       m.addSource('hotspots', { type: 'geojson', data: hotspotsGeoJson(null) })
       m.addLayer({
@@ -575,6 +628,23 @@ export function MapView({
     const src = m.getSource('hotspots') as maplibregl.GeoJSONSource | undefined
     src?.setData(hotspotsGeoJson(hotspots))
   }, [hotspots, ready])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('mask') as maplibregl.GeoJSONSource | undefined
+    src?.setData(maskGeoJson(mask))
+    const t = mask?.minDrop ?? 0
+    m.setPaintProperty('mask', 'fill-color', [
+      'case', ['<', ['get', 'drop'], t], '#0b1220', '#38bdf8',
+    ])
+    m.setPaintProperty('mask', 'fill-opacity', mask
+      ? ['case',
+          ['<', ['get', 'drop'], t], 0.62,
+          ['interpolate', ['linear'], ['get', 'drop'], t, 0.16, t * 4, 0]]
+      : 0)
+    m.setPaintProperty('maskEdge', 'line-opacity', mask ? 0.35 : 0)
+  }, [mask, ready])
 
   useEffect(() => {
     const m = map.current

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
+import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors, type Anchor } from './openness.js'
 import { dedupe, evaluatePairs, refine, terrainPairs } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
@@ -12,6 +13,7 @@ import type {
   Candidate,
   Dataset,
   Hotspots,
+  MaskCells,
   Params,
   Region,
 } from '../shared/types.js'
@@ -30,6 +32,7 @@ import type {
 const OUT = new URL('../web/public/candidates.json', import.meta.url).pathname
 const ANCHORS_OUT = new URL('../web/public/anchors.json', import.meta.url).pathname
 const HOTSPOTS_OUT = new URL('../web/public/hotspots.json', import.meta.url).pathname
+const MASK_OUT = new URL('../web/public/mask.json', import.meta.url).pathname
 
 /**
  * Radius the hotspot layer collapses line endpoints over. Ten times the candidate `dedupRadius`:
@@ -41,6 +44,8 @@ interface AreaResult {
   region: Region
   /** Anchors inside the AOIs, for the debug dump. */
   anchors: Anchor[]
+  /** The coarse pre-pass, aggregated for the map overlay. */
+  mask: MaskCells
   /** Anchors of every feasible line in this area, for the hotspot layer. */
   endpoints: Endpoint[]
   refined: {
@@ -57,21 +62,55 @@ interface AreaResult {
   }
 }
 
+function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCells {
+  const cells = aggregateDrops(drop, p.maskExportRes)
+  const out: MaskCells = {
+    res: p.maskExportRes,
+    sourceRes: p.maskRes,
+    minDrop: p.maskMinDrop,
+    lat: [],
+    lon: [],
+    drop: [],
+  }
+  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+  for (const c of cells) {
+    const { lat, lon } = toWgs84(c.e, c.n)
+    out.lat.push(r6(lat))
+    out.lon.push(r6(lon))
+    out.drop.push(c.drop)
+  }
+  return out
+}
+
 const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
 const pct2 = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : 'n/a')
 
 async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
   const { bbox, boxes } = area
 
-  console.log(`[1/5] terrain (${label})`)
-  const ground = await loadProduct('dgm', bbox, 1)
+  console.log(`[1/6] coarse pre-pass (${label})`)
+  const coarse = await loadCoarse(bbox, p.maskRes)
+  const drop = dropField(coarse, p.maskRadius)
+  const allTiles = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
+  const wantedTiles = p.maskMinDrop > 0 ? tilesWorthLoading(drop, p.maskMinDrop) : null
+  const groundTiles = wantedTiles ? allTiles.filter((t) => wantedTiles.has(t)) : allTiles
+  const passing = [...drop.data].filter((v) => !Number.isNaN(v) && v >= p.maskMinDrop).length
+  const valid = [...drop.data].filter((v) => !Number.isNaN(v)).length
+  console.log(
+    `  ${drop.w}x${drop.h} @${p.maskRes}m, ${((100 * passing) / Math.max(1, valid)).toFixed(1)}% of ` +
+      `cells fall >=${p.maskMinDrop}m within ${p.maskRadius}m`,
+  )
+  console.log(`  ${groundTiles.length} of ${allTiles.length} terrain tiles worth loading`)
+
+  console.log(`[2/6] terrain (${label})`)
+  const ground = await loadProduct('dgm', bbox, 1, wantedTiles ?? undefined)
   const ext = ground.extent()
   console.log(
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
       `${ext.min.toFixed(2)}..${ext.max.toFixed(2)} m (relief ${(ext.max - ext.min).toFixed(1)} m)`,
   )
 
-  console.log('[2/5] openness scan')
+  console.log('[3/6] openness scan')
   const scan = scanAnchors(ground, p)
   // Ground merged in between two AOIs is read for profiles but never searched.
   const anchors = scan.anchors.filter((a) => boxes.some((b) => contains(b, a.e, a.n)))
@@ -92,7 +131,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     console.log(`  inside an AOI             ${anchors.length}`)
   }
 
-  console.log('[3/5] pairing and terrain test')
+  console.log('[4/6] pairing and terrain test')
   const found = terrainPairs(anchors, ground, p)
 
   /**
@@ -101,7 +140,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
    * and canopy is never a hard constraint -- so paying for it over the whole area of interest buys
    * canopy figures for ground no line ever crosses.
    */
-  console.log('[4/5] surface, for the corridors that survived')
+  console.log('[5/6] surface, for the corridors that survived')
   const wanted = corridorTiles(found.pairs, p.refineRadius + p.profileStep)
   const all = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
   const used = all.filter((t) => wanted.has(t))
@@ -112,7 +151,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   const surface = await loadProduct('bdom', bbox, 1, wanted)
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-  console.log('[5/5] profiles, score and refinement')
+  console.log('[6/6] profiles, score and refinement')
   const r = evaluatePairs(found, ground, surface, p)
   console.log(`  pairs in length range      ${r.pairsInRange}`)
   console.log(
@@ -148,6 +187,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       anchorsKept: anchors.length,
     },
     anchors,
+    mask: exportMask(drop, p),
     endpoints: r.endpoints,
     refined: {
       candidates: ref.candidates,
@@ -195,6 +235,7 @@ async function main() {
   const dumpAnchors: Anchor[] = []
   const refinedAll: Candidate[] = []
   const endpoints: Endpoint[] = []
+  const maskCells: MaskCells[] = []
   const totals = {
     anchorsScanned: 0,
     anchorsKept: 0,
@@ -214,6 +255,7 @@ async function main() {
     const { anchors, region, refined } = found
     regions.push(region)
     dumpAnchors.push(...anchors)
+    maskCells.push(found.mask)
     endpoints.push(...found.endpoints)
     refinedAll.push(...refined.candidates)
     totals.anchorsScanned += region.anchorsScanned
@@ -303,6 +345,22 @@ async function main() {
     dump.open.push(packSectors(a.open))
   }
   await writeFile(ANCHORS_OUT, JSON.stringify(dump))
+
+  const mask: MaskCells = {
+    res: p.maskExportRes,
+    sourceRes: p.maskRes,
+    minDrop: p.maskMinDrop,
+    lat: maskCells.flatMap((m) => m.lat),
+    lon: maskCells.flatMap((m) => m.lon),
+    drop: maskCells.flatMap((m) => m.drop),
+  }
+  await writeFile(MASK_OUT, JSON.stringify(mask))
+  const skipped = mask.drop.filter((d) => d < p.maskMinDrop).length
+  console.log(
+    `mask: ${mask.drop.length} cells @${p.maskExportRes}m, ${skipped} below the ${p.maskMinDrop}m ` +
+      `threshold (${((100 * skipped) / Math.max(1, mask.drop.length)).toFixed(0)}% of the area) ` +
+      `(${(JSON.stringify(mask).length / 1024).toFixed(0)} KB)`,
+  )
 
   // Clustered across all regions at once, so a spot straddling two of them is one spot.
   const walkable = endpoints.filter(isWalkable)

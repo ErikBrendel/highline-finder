@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AnchorDump, Candidate, Dataset, Hotspots, StoredProfile } from '../shared/types.js'
+import type {
+  AnchorDump,
+  Candidate,
+  Dataset,
+  Hotspots,
+  MaskCells,
+  StoredProfile,
+} from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
 import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
@@ -66,6 +73,8 @@ export function App() {
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
   const [showHotspots, setShowHotspots] = useState(true)
+  const [mask, setMask] = useState<MaskCells | null>(null)
+  const [showMask, setShowMask] = useState(false)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -124,6 +133,25 @@ export function App() {
    * The "where is anything possible at all" layer, loaded eagerly and shown by default: it is 6 KB,
    * and at the zoom the map opens at it is the only layer that says anything useful.
    */
+  /**
+   * The coarse pre-pass, so the ground skipped before any full-resolution fetch is visible. Off by
+   * default: it is a view of the pipeline rather than of the terrain.
+   */
+  const toggleMask = () => {
+    if (mask) {
+      setShowMask(!showMask)
+      return
+    }
+    setLayerError(null)
+    fetch(`${import.meta.env.BASE_URL}mask.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((m: MaskCells) => {
+        setMask(m)
+        setShowMask(true)
+      })
+      .catch(() => setLayerError('mask.json missing — run `npm run pipeline`'))
+  }
+
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}hotspots.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
@@ -414,6 +442,9 @@ export function App() {
                 {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
               </button>
             )}
+            <button data-active={showMask && !!mask} onClick={toggleMask}>
+              {mask ? `skipped <${mask.minDrop} m` : 'coarse mask'}
+            </button>
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>
@@ -470,6 +501,7 @@ export function App() {
             basemapMix={basemapMix}
             anchorDump={anchorDump}
             hotspots={showHotspots ? hotspots : null}
+            mask={showMask ? mask : null}
             initialBbox={initial.bbox}
             custom={custom}
             showLines={showLines}

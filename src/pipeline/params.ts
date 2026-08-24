@@ -78,6 +78,15 @@ export const DEFAULT_PARAMS: Params = {
   // already uses, so the file scales with the number of lines rather than with 2.5 KB each. The
   // cost is a couple of elevation windows when a line is opened. See Candidate.profile.
   storeProfiles: false,
+
+  // Coarse pre-pass. 16 m costs ~15 KB per square kilometre against 1.4 MB for the 1 m tiles, so
+  // screening at this resolution is effectively free. The 4 m threshold is deliberately timid --
+  // the real gate is 10 m within 25 m, and averaging to 16 m under-reports -- so this rejects only
+  // ground that is unambiguously flat. A measured dead-flat rectangle reads 1.8 m here.
+  maskRes: 16,
+  maskRadius: 32,
+  maskMinDrop: 4,
+  maskExportRes: 128,
   // The web app re-derives clearances from this profile rather than the raster, so its resolution
   // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m
   // sampling, against the 2 m the pipeline itself walks.

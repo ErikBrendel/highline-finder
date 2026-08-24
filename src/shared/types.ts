@@ -100,6 +100,25 @@ export interface Params {
    * and offline but the file grows by ~2.5 KB per line.
    */
   storeProfiles: boolean
+  /**
+   * Resolution the coarse pre-pass measures terrain at, in metres. Fetched from the survey's WCS
+   * with the scaling extension, so no new product is involved.
+   */
+  maskRes: number
+  /** Radius the coarse drop is measured over. Scaled up from dropSearchRadius, see coarse.ts. */
+  maskRadius: number
+  /**
+   * Fall the coarse pass demands before full-resolution data is fetched, in metres. 0 disables the
+   * pre-pass entirely.
+   *
+   * Deliberately far below the anchor scan's own 10 m: downsampling averages, so a coarse cell
+   * under-reports the drop inside it, and a narrow feature can be erased completely. This is a
+   * lossy filter by nature -- measured at 64 m, a 4 m threshold keeps ~97% of candidate endpoints
+   * for half the area, and a 12 m threshold keeps ~84% for a quarter.
+   */
+  maskMinDrop: number
+  /** Cell size the mask is aggregated to for the debug overlay, in metres. */
+  maskExportRes: number
   /** Samples kept in the serialised profile, to bound output size. */
   profilePoints: number
 }
@@ -261,6 +280,22 @@ export interface Hotspots {
   lon: number[]
   count: number[]
   score: number[]
+}
+
+/**
+ * The coarse pre-pass, aggregated for display. Shows which ground was rejected before any
+ * full-resolution data was fetched, and how close each part came to the threshold.
+ */
+export interface MaskCells {
+  /** Cell size of these aggregated cells, in metres. */
+  res: number
+  /** Resolution the drop was actually measured at. */
+  sourceRes: number
+  minDrop: number
+  lat: number[]
+  lon: number[]
+  /** Greatest coarse fall found in the cell. Below minDrop means the cell was skipped. */
+  drop: number[]
 }
 
 export interface Dataset {
