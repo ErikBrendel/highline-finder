@@ -60,8 +60,9 @@ export function installLoadingOverlay(m: MlMap): () => void {
     source: SOURCE,
     paint: {
       'line-color': ['get', 'color'],
-      'line-opacity': ['get', 'o'],
-      'line-width': 1,
+      // The outline carries further than the fill at a glance, so it is drawn at full strength.
+      'line-opacity': ['min', 1, ['*', 2, ['get', 'o']]],
+      'line-width': 1.5,
     },
   })
 
@@ -75,13 +76,13 @@ export function installLoadingOverlay(m: MlMap): () => void {
       const age = now - w.since
       let o: number
       if (w.kind === 'loading') {
-        o = 0.16 + 0.09 * Math.sin((age / PULSE_MS) * Math.PI * 2)
+        o = 0.34 + 0.16 * Math.sin((age / PULSE_MS) * Math.PI * 2)
       } else {
         if (age > FLASH_MS) {
           tracked.delete(key)
           continue
         }
-        o = 0.5 * (1 - age / FLASH_MS)
+        o = 0.65 * (1 - age / FLASH_MS)
       }
       features.push({
         type: 'Feature',
