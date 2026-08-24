@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
+import { raiseOntoBuildings } from './buildings.js'
 import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
@@ -135,13 +136,25 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  ${groundTiles.length} of ${allTiles.length} terrain tiles worth loading`)
 
-  const ground = await stage(`[2/6] terrain (${label})`, () =>
-    loadProduct('dgm', bbox, 1, wantedTiles ?? undefined),
-  )
+  /**
+   * Ground here means what an anchor could stand on, which includes roofs -- so the cadastre's
+   * footprints are folded in as part of building the grid rather than as a later correction. Only
+   * the tiles that carry a footprint pay for the surface model; on the rest the mask is the whole
+   * cost, and that is most of Brandenburg.
+   */
+  const built = await stage(`[2/6] terrain and buildings (${label})`, async () => {
+    const ground = await loadProduct('dgm', bbox, 1, wantedTiles ?? undefined)
+    return { ground, buildings: await raiseOntoBuildings(ground, groundTiles) }
+  })
+  const ground = built.ground
   const ext = ground.extent()
   console.log(
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
       `${ext.min.toFixed(2)}..${ext.max.toFixed(2)} m (relief ${(ext.max - ext.min).toFixed(1)} m)`,
+  )
+  console.log(
+    `  ${built.buildings.tiles.length} of ${groundTiles.length} tiles carry a building, ` +
+      `ground raised at ${built.buildings.cells} cells`,
   )
 
   const scan = await stage('[3/6] openness scan', () => scanAnchors(ground, p))
@@ -214,6 +227,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
     anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
   }
+  const roofTiles = new Set(built.buildings.tiles)
   const tiles: TileUsage = { size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [] }
   for (const id of allTiles) {
     const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
@@ -221,7 +235,8 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     tiles.lat.push(Math.round(lat * 1e6) / 1e6)
     tiles.lon.push(Math.round(lon * 1e6) / 1e6)
     tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
-    tiles.surface.push(wanted.has(id))
+    // Building tiles pulled the surface model too, so the overlay counts them as fetched.
+    tiles.surface.push(wanted.has(id) || roofTiles.has(id))
     tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
   }
 
