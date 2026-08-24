@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { toWgs84 } from '../shared/geo.js'
-import { loadProduct } from './raster.js'
+import { tilesForBounds, toWgs84 } from '../shared/geo.js'
+import { corridorTiles, loadProduct } from './raster.js'
 import { packSectors, scanAnchors, type Anchor } from './openness.js'
-import { dedupe, findLines, refine } from './lines.js'
+import { dedupe, evaluatePairs, refine, terrainPairs } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
@@ -63,17 +63,15 @@ const pct2 = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : '
 async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
   const { bbox, boxes } = area
 
-  console.log(`[1/4] ingest (${label})`)
+  console.log(`[1/5] terrain (${label})`)
   const ground = await loadProduct('dgm', bbox, 1)
-  const surface = await loadProduct('bdom', bbox, 1)
   const ext = ground.extent()
   console.log(
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
       `${ext.min.toFixed(2)}..${ext.max.toFixed(2)} m (relief ${(ext.max - ext.min).toFixed(1)} m)`,
   )
-  console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-  console.log('[2/4] openness scan')
+  console.log('[2/5] openness scan')
   const scan = scanAnchors(ground, p)
   // Ground merged in between two AOIs is read for profiles but never searched.
   const anchors = scan.anchors.filter((a) => boxes.some((b) => contains(b, a.e, a.n)))
@@ -94,8 +92,28 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     console.log(`  inside an AOI             ${anchors.length}`)
   }
 
-  console.log('[3/4] pairing, profiles, score')
-  const r = findLines(anchors, ground, surface, p)
+  console.log('[3/5] pairing and terrain test')
+  const found = terrainPairs(anchors, ground, p)
+
+  /**
+   * The surface model is fetched here rather than alongside the terrain, and only for the tiles the
+   * surviving corridors cross. It is 33 MB per square kilometre against the terrain model's 1.4 MB,
+   * and canopy is never a hard constraint -- so paying for it over the whole area of interest buys
+   * canopy figures for ground no line ever crosses.
+   */
+  console.log('[4/5] surface, for the corridors that survived')
+  const wanted = corridorTiles(found.pairs, p.refineRadius + p.profileStep)
+  const all = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
+  const used = all.filter((t) => wanted.has(t))
+  console.log(
+    `  ${used.length} of ${all.length} tiles carry a line ` +
+      `(~${used.length * 33} MB instead of ~${all.length * 33} MB)`,
+  )
+  const surface = await loadProduct('bdom', bbox, 1, wanted)
+  console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
+
+  console.log('[5/5] profiles, score and refinement')
+  const r = evaluatePairs(found, ground, surface, p)
   console.log(`  pairs in length range      ${r.pairsInRange}`)
   console.log(
     `  survived sector test       ${r.pairsSectorPassed}  ` +
@@ -111,7 +129,6 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
 
-  console.log('[4/4] local refinement')
   const ref = refine(r.candidates, ground, surface, p)
   const gain = ref.improved ? ref.totalGain / ref.improved : 0
   console.log(

@@ -177,17 +177,27 @@ export function evaluateLine(
   return rescoreAtSag(provisional, p.sagRatio, p)
 }
 
-export function findLines(
-  anchors: Anchor[],
-  ground: Grid,
-  surface: Grid,
-  p: Params,
-): FindResult {
+export interface TerrainPairs {
+  /** Anchor pairs whose line clears the terrain. A superset of the feasible set. */
+  pairs: [Pos, Pos][]
+  pairsInRange: number
+  pairsSectorPassed: number
+  pairsLevelEnough: number
+}
+
+/**
+ * The pair search, up to but not including anything that needs the surface model.
+ *
+ * Split out because the surface model is 33 MB per square kilometre against the terrain model's
+ * 1.4 MB, and canopy is never a gate -- only a score. So the corridors worth paying for are exactly
+ * the ones a line already crosses, and those cannot be known until this pass has run. Everything
+ * here reads `ground` alone.
+ */
+export function terrainPairs(anchors: Anchor[], ground: Grid, p: Params): TerrainPairs {
   let pairsInRange = 0
   let pairsSectorPassed = 0
   let pairsLevelEnough = 0
-  const feasible: Candidate[] = []
-  const endpoints: Endpoint[] = []
+  const pairs: [Pos, Pos][] = []
 
   // Plain double loop. At this AOI size that is ~2e6 iterations of a sector lookup, which is
   // nothing; a uniform grid index only becomes necessary for regional runs (see ROADMAP).
@@ -208,39 +218,61 @@ export function findLines(
 
       // Cheap pre-check on the same rule evaluateLine will apply, so the offlevel funnel stays
       // observable in the logs instead of hiding inside the profile rejection count.
-      if (
-        !chooseHeights(
-          a.anchorMin,
-          a.anchorMax,
-          b.anchorMin,
-          b.anchorMax,
-          p.maxOffLevelRatio * length,
-        )
-      ) {
-        continue
-      }
+      const h = chooseHeights(
+        a.anchorMin,
+        a.anchorMax,
+        b.anchorMin,
+        b.anchorMax,
+        p.maxOffLevelRatio * length,
+      )
+      if (!h) continue
       pairsLevelEnough++
 
-      const c = evaluateLine(a, b, ground, surface, p)
-      if (!c) continue
-      feasible.push(c)
-      endpoints.push(
-        { e: c.a.e, n: c.a.n, score: c.score, blocked: c.canopyBlockedFraction },
-        { e: c.b.e, n: c.b.n, score: c.score, blocked: c.canopyBlockedFraction },
-      )
+      if (clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) pairs.push([a, b])
     }
+  }
+  return { pairs, pairsInRange, pairsSectorPassed, pairsLevelEnough }
+}
+
+/** Scores terrain-passing pairs against the surface model, and collapses near-duplicates. */
+export function evaluatePairs(
+  found: TerrainPairs,
+  ground: Grid,
+  surface: Grid,
+  p: Params,
+): FindResult {
+  const feasible: Candidate[] = []
+  const endpoints: Endpoint[] = []
+  for (const [a, b] of found.pairs) {
+    const c = evaluateLine(a, b, ground, surface, p)
+    if (!c) continue
+    feasible.push(c)
+    endpoints.push(
+      { e: c.a.e, n: c.a.n, score: c.score, blocked: c.canopyBlockedFraction },
+      { e: c.b.e, n: c.b.n, score: c.score, blocked: c.canopyBlockedFraction },
+    )
   }
 
   const candidates = dedupe(feasible, p.dedupRadius)
   return {
     candidates,
     endpoints,
-    pairsInRange,
-    pairsSectorPassed,
-    pairsLevelEnough,
+    pairsInRange: found.pairsInRange,
+    pairsSectorPassed: found.pairsSectorPassed,
+    pairsLevelEnough: found.pairsLevelEnough,
     pairsFeasible: feasible.length,
     candidatesAfterDedup: candidates.length,
   }
+}
+
+/** Both passes in one, for callers that already hold both rasters. */
+export function findLines(
+  anchors: Anchor[],
+  ground: Grid,
+  surface: Grid,
+  p: Params,
+): FindResult {
+  return evaluatePairs(terrainPairs(anchors, ground, p), ground, surface, p)
 }
 
 /** Offsets within `radius`, on a `step` lattice, ordered outward. Excludes the origin. */

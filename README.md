@@ -100,9 +100,11 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
 
 ## How it works
 
-1. **Ingest** — resolve each area to EPSG:25833, download the 1 km tiles it touches, assemble a 1 m
-   terrain grid and a 1 m surface grid (the 0.2 m surface model is downsampled by *max*, because
-   for clearance the tallest obstacle in a cell is the one that matters).
+1. **Ingest** — resolve each area to EPSG:25833, download the 1 km terrain tiles it touches and
+   assemble a 1 m grid. The surface model is *not* fetched yet: it is 33 MB per km² against the
+   terrain model's 1.4 MB, and canopy is only ever scored, never enforced, so it is fetched in
+   step 5 for the corridors that survive (the 0.2 m data is downsampled by *max*, because for
+   clearance the tallest obstacle in a cell is the one that matters).
 2. **Openness scan** — for every point on a 5 m grid, cast a ray in each of 64 directions and
    record a bitmask of the sectors where a line could actually leave: nothing in the way, and the
    ground falls away far enough. This stage is *linear* in area and independent per tile.
