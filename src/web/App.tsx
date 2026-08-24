@@ -21,6 +21,9 @@ import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { parseUrl, toSearch } from './urlState.js'
 import { optimizeStep } from './optimize.js'
+
+/** How long the button keeps offering a wider search after a run ends. */
+const OFFER_MS = 2000
 import { toWgs84 } from '../shared/geo.js'
 
 type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface'
@@ -176,6 +179,16 @@ export function App() {
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
   const [optimizing, setOptimizing] = useState(false)
+  /**
+   * Reach of the run in progress, and the reach the button is offering next.
+   *
+   * The offer is the whole feature. One click asks "is there something better right here"; while a
+   * run's offer still stands, clicking again doubles the reach, so spamming the button is a person
+   * saying "look much further" without needing a second control to say it with. Let the offer lapse
+   * and the next click is careful again.
+   */
+  const [reach, setReach] = useState(1)
+  const [offer, setOffer] = useState<number | null>(null)
   // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
   // computed, not held in state, so no effect has to write it.
@@ -403,6 +416,19 @@ export function App() {
    */
   const customRef = useRef(custom)
   customRef.current = custom
+
+  /** Ends a run, however it ended, and puts the next reach up on the button. */
+  const endRun = () => {
+    setOptimizing(false)
+    setOffer(reach * 2)
+  }
+
+  useEffect(() => {
+    if (offer === null) return
+    const timer = setTimeout(() => setOffer(null), OFFER_MS)
+    return () => clearTimeout(timer)
+  }, [offer])
+
   useEffect(() => {
     if (!optimizing || !data || sagPct === null || !customUtm) return
     const origin = customUtm
@@ -412,7 +438,7 @@ export function App() {
     const tick = () => {
       if (stopped) return
       const live = customRef.current
-      if (!live.a || !live.b) return setOptimizing(false)
+      if (!live.a || !live.b) return endRun()
       const [ae, an] = toUtm33(live.a.lat, live.a.lon)
       const [be, bn] = toUtm33(live.b.lat, live.b.lon)
       const next = optimizeStep(
@@ -424,9 +450,10 @@ export function App() {
           sagRatio: sagPct / 100,
           params: data.meta.params,
           rig,
+          reach,
         },
       )
-      if (!next) return setOptimizing(false)
+      if (!next) return endRun()
       setCustom({ a: toWgs84(next.a.e, next.a.n), b: toWgs84(next.b.e, next.b.n) })
       timer = setTimeout(tick, 100)
     }
@@ -437,7 +464,8 @@ export function App() {
       clearTimeout(timer)
     }
     // customUtm is read once, as the origin the wander is measured from, so it is deliberately not
-    // a dependency -- otherwise every step would restart the run and reset that origin.
+    // a dependency -- otherwise every step would restart the run and reset that origin. `reach` is
+    // set in the same click that starts the run, so it is already current when this effect runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optimizing, data, sagPct, rig])
 
@@ -746,7 +774,13 @@ export function App() {
               cover={cover}
               onRoof={onRoof}
               optimizing={optimizing}
-              onOptimize={() => setOptimizing(!optimizing)}
+              offer={offer}
+              onOptimize={() => {
+                if (optimizing) return endRun()
+                setReach(offer ?? 1)
+                setOffer(null)
+                setOptimizing(true)
+              }}
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
               failed={terrainFailed}

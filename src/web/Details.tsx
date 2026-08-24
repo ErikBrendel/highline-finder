@@ -35,6 +35,8 @@ interface Props {
   at: { a: LatLon; b: LatLon } | null
   failed: boolean
   optimizing: boolean
+  /** Reach the button is offering for the next run, or null for the careful default. */
+  offer: number | null
   onOptimize: () => void
   rig: RigHeights | null
   onRig: (r: RigHeights | null) => void
@@ -42,7 +44,7 @@ interface Props {
 }
 
 export function Details({
-  c, profile, cover, onRoof, planned, at, failed, optimizing, onOptimize, rig, onRig, onClose,
+  c, profile, cover, onRoof, planned, at, failed, optimizing, offer, onOptimize, rig, onRig, onClose,
 }: Props) {
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
@@ -101,14 +103,17 @@ export function Details({
           <button
             className="optimize"
             data-running={optimizing}
+            data-offer={!optimizing && offer !== null}
             onClick={onOptimize}
             title={
               optimizing
                 ? 'Stop'
-                : 'Walk both anchors toward a better line, a metre at a time'
+                : offer !== null
+                  ? `Search ${offer}× as far, in ${offer}× the steps. Click again while this shows to double it.`
+                  : 'Walk both anchors toward a better line, a metre at a time'
             }
           >
-            {optimizing ? 'optimising…' : 'optimise'}
+            {optimizing ? 'optimising…' : offer !== null ? `optimise ${offer}×` : 'optimise'}
           </button>
         )}
         {geom && (
