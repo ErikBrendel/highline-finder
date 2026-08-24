@@ -12,6 +12,7 @@ import { cachedUrl } from './tileCache.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import { installLoadingOverlay } from './loadingOverlay.js'
+import { installProbeOverlay } from './probeOverlay.js'
 
 /**
  * Basemaps come straight from the LGB WMS endpoints, which serve EPSG:3857 -- so MapLibre's
@@ -429,7 +430,8 @@ export function MapView({
 
     m.on('load', () => {
       // First, so every other overlay draws above it.
-      removeOverlay.current = installLoadingOverlay(m)
+      const overlays = [installLoadingOverlay(m), installProbeOverlay(m)]
+      removeOverlay.current = () => overlays.forEach((off) => off())
 
       m.addSource('tiles', { type: 'geojson', data: tilesGeoJson(null, 'terrain') })
       m.addLayer({

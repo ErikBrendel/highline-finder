@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NEIGHBOURHOOD,
   optimizeFrame,
   optimizeStep,
   PLANNED_REFINE_RADIUS,
-  PLANNED_REFINE_STEP,
+  PLANNED_REFINE_RINGS,
+  PLANNED_REFINE_SPACING,
 } from './optimize.js'
 import { Grid } from '../shared/grid.js'
 import { planLine } from '../shared/plan.js'
@@ -30,11 +32,30 @@ function terrain(perMetre = 1 / 20): Grid {
 
 const at = (e: number, n: number) => ({ e: 408000 + e, n: 5784000 + n })
 
+describe('NEIGHBOURHOOD', () => {
+  it('is a hexagon of the right size, on a lattice of unit spacing', () => {
+    const r = PLANNED_REFINE_RINGS
+    // 3r^2 + 3r + 1 points in a hexagon of radius r, less the centre the anchor already stands on.
+    expect(NEIGHBOURHOOD).toHaveLength(3 * r * r + 3 * r)
+    const d = NEIGHBOURHOOD.map((o) => Math.hypot(o.e, o.n))
+    expect(Math.min(...d)).toBeCloseTo(1)
+    expect(Math.max(...d)).toBeCloseTo(r)
+    // Nearest first, so a tie leaves the anchor as close to where it was as possible.
+    expect([...d].sort((x, y) => x - y)).toEqual(d)
+  })
+
+  it('covers every direction, unlike the ring of rays it replaced', () => {
+    const bearings = NEIGHBOURHOOD.map((o) => Math.atan2(o.e, o.n))
+    // Six corners and six edge midpoints at the least, so no 45 degree blind spots.
+    expect(new Set(bearings.map((b) => b.toFixed(3))).size).toBeGreaterThan(12)
+  })
+})
+
 describe('optimizeStep', () => {
   const g = terrain()
   const start = { a: at(85, 100), b: at(315, 100) }
   const o = { origin: start, ground: g, surface: g, sagRatio: 0.05, params: p, rig: null, reach: 1 }
-  const fine = PLANNED_REFINE_STEP
+  const fine = PLANNED_REFINE_SPACING
   const scoreOf = (pl: { a: typeof start.a; b: typeof start.b }) =>
     planLine(pl.a, pl.b, g, g, 0.05, p)!.candidate.score
 
@@ -44,11 +65,11 @@ describe('optimizeStep', () => {
     expect(scoreOf(next)).toBeGreaterThan(scoreOf(start))
   })
 
-  it('moves at most one step per anchor, so the walk is watchable', () => {
+  it('moves at most one patch per anchor, so the walk is watchable', () => {
     const next = optimizeStep(start, o, fine)!
     for (const which of ['a', 'b'] as const) {
       const d = Math.hypot(next[which].e - start[which].e, next[which].n - start[which].n)
-      expect(d).toBeLessThanOrEqual(fine + 1e-9)
+      expect(d).toBeLessThanOrEqual(fine * PLANNED_REFINE_RINGS + 1e-9)
     }
   })
 
@@ -117,7 +138,7 @@ describe('optimizeFrame', () => {
     // anchors on an eight-times-coarser lattice. Nothing is left for a tenth-metre step to find.
     for (const reach of [1, 8]) {
       const settled = settle(reach)
-      expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_STEP)).toBeNull()
+      expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_SPACING)).toBeNull()
     }
   })
 })

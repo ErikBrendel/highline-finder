@@ -21,6 +21,7 @@ import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { parseUrl, toSearch } from './urlState.js'
 import { optimizeFrame } from './optimize.js'
+import { emitProbes } from './probeOverlay.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
 const OFFER_MS = 2000
@@ -441,6 +442,9 @@ export function App() {
       if (!live.a || !live.b) return endRun()
       const [ae, an] = toUtm33(live.a.lat, live.a.lon)
       const [be, bn] = toUtm33(live.b.lat, live.b.lon)
+      // Collected for the frame and handed over in one go, so the overlay rewrites its source once
+      // per frame rather than once per measurement.
+      const probes: number[] = []
       const next = optimizeFrame(
         { a: { e: ae, n: an }, b: { e: be, n: bn } },
         {
@@ -451,8 +455,10 @@ export function App() {
           params: data.meta.params,
           rig,
           reach,
+          onProbe: (e, n) => probes.push(e, n),
         },
       )
+      emitProbes(probes)
       if (!next) return endRun()
       setCustom({ a: toWgs84(next.a.e, next.a.n), b: toWgs84(next.b.e, next.b.n) })
       timer = setTimeout(tick, 100)

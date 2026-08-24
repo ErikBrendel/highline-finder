@@ -27,44 +27,60 @@ import type { Params } from '../shared/types.js'
 export const PLANNED_REFINE_RADIUS = 25
 
 /**
- * Finest move the walk ever makes, in metres. Every run ends at this resolution, whatever its reach.
+ * Spacing of the lattice the anchors move on, in metres. Every run ends at this resolution,
+ * whatever its reach.
  *
  * A tenth of a metre, not a metre: the samplers are bilinear, so sub-metre moves do change what the
  * line measures, and the things worth resolving at that scale are real. A roof edge is a one-metre
  * ramp in the composite ground, and a metre-grid search either stands on the roof or beside it with
  * nothing in between.
  */
-export const PLANNED_REFINE_STEP = 0.1
+export const PLANNED_REFINE_SPACING = 0.1
+
+/** Rings of the hex neighbourhood scanned around an anchor. 3 gives 36 candidate positions. */
+export const PLANNED_REFINE_RINGS = 3
 
 /**
- * Descent steps taken per animation frame.
+ * Where an anchor may move in one step: a hexagonal patch of the triangular lattice centred on it,
+ * in units of {@link PLANNED_REFINE_SPACING}, nearest first.
  *
- * Step size and animation speed are separate questions and this is what keeps them separate. Ten
- * tenth-metre steps advance an anchor about a metre per frame, which is the pace the walk was
- * always drawn at -- so making the search ten times finer costs nothing visually. Measured at 36 us
- * per evaluation on a 500 m span, a frame is well under 10 ms of work even with the halvings below.
+ * A patch rather than the ring of rays this used to be, for two reasons. A ring offers one
+ * distance, so the scan picks a direction and the step length is whatever the spacing happens to
+ * be; a patch picks both, which lets the walk stride out where the ground rewards it and shorten up
+ * near the top without waiting for the halving to notice. And scanning three rings deep can cross a
+ * bad band one spacing wide, where a single-ring scan is walled in by neighbours that are all worse
+ * than where it stands even though the ground just past them is better. That second one does
+ * nothing at the finest spacing -- a tenth of a metre on a bilinear 1 m raster has no such
+ * structure to cross -- and everything during a wide run's coarse phase, where a spacing is metres.
+ *
+ * Hex rather than square because every point of a triangular lattice is the same distance from all
+ * six of its neighbours, so the patch has no diagonal that is secretly 41 % further than the rest.
+ *
+ * Nearest first so that where two positions score identically the anchor takes the closer one and
+ * stays put rather than skating.
  */
-export const PLANNED_REFINE_SUBSTEPS = 10
+export const NEIGHBOURHOOD: Pos[] = (() => {
+  const r = PLANNED_REFINE_RINGS
+  const out: Pos[] = []
+  // Axial hex coordinates: the hexagon of radius r is |q| <= r, |s| <= r, |q + s| <= r.
+  for (let q = -r; q <= r; q++) {
+    for (let t = Math.max(-r, -q - r); t <= Math.min(r, -q + r); t++) {
+      if (q === 0 && t === 0) continue
+      out.push({ e: q + t / 2, n: (t * Math.sqrt(3)) / 2 })
+    }
+  }
+  return out.sort((x, y) => Math.hypot(x.e, x.n) - Math.hypot(y.e, y.n))
+})()
 
 /**
- * Compass directions tried per anchor per step.
+ * Steps taken per animation frame.
  *
- * Eight was too coarse. Coordinate descent on a 45 degree rose can only leave a spot along one of
- * eight rays, so a ridge or a roof edge running at an awkward angle stops the walk dead even
- * though a few degrees over would have kept improving -- and the anchor sits there looking like a
- * local maximum when it is really a limitation of the rose. At 32 the spacing is 11.25 degrees,
- * which on a tenth-metre step is two centimetres of lateral error.
- *
- * The cost is linear and paid every frame: 32 directions times two anchors times ten steps is 640
- * line evaluations, measured at about 23 ms on a 500 m span. That is the reason not to simply keep
- * doubling -- the walk runs on the main thread between paints.
+ * Step size and animation speed are separate questions and this is what keeps them separate. A step
+ * moves an anchor up to three spacings, so four of them advance it by rather more than a metre --
+ * about the pace the walk has always been drawn at. Measured at 36 us per line evaluation on a
+ * 500 m span, and 72 evaluations to a step, a frame is around 10 ms of work.
  */
-export const PLANNED_REFINE_DIRECTIONS = 32
-
-const DIRECTIONS: Pos[] = Array.from({ length: PLANNED_REFINE_DIRECTIONS }, (_, i) => {
-  const bearing = (2 * Math.PI * i) / PLANNED_REFINE_DIRECTIONS
-  return { e: Math.sin(bearing), n: Math.cos(bearing) }
-})
+export const PLANNED_REFINE_SUBSTEPS = 4
 
 export interface Plan {
   a: Pos
@@ -79,19 +95,26 @@ interface Options {
   params: Params
   rig: RigHeights | null
   /**
-   * Multiplier on the radius, and on the *travel* step the walk starts at. 1 is the careful default.
+   * Multiplier on the radius, and on the lattice spacing the scan starts at. The patch keeps its
+   * 36 points and simply covers more ground. 1 is the careful default.
    *
-   * Only the travel step scales. Whenever the walk can no longer improve, the step halves and it
-   * tries again, down to `PLANNED_REFINE_STEP` -- so a run at any reach finishes at the same tenth
-   * of a metre a reach-1 run does, and a wide search is not a blunt one. Scaling the radius alone
-   * would leave a reach-32 run creeping 0.1 m at a time across 800 m, which is twenty minutes of
-   * animation; the coarse phase is how it gets there in the same time a narrow run takes.
+   * Only the starting spacing scales. Whenever the scan can no longer improve, the spacing halves
+   * and it tries again, down to `PLANNED_REFINE_SPACING` -- so a run at any reach finishes on the
+   * same tenth-metre lattice a reach-1 run does, and a wide search is not a blunt one. Scaling the
+   * radius alone would leave a reach-32 run creeping across 800 m in tenths of a metre, which is
+   * many minutes of animation; the coarse phase is how it gets there in the time a narrow run takes.
    *
-   * What a coarse travel step genuinely costs is what it passes over on the way: a two-metre ledge
-   * is easy to stride across at 3.2 m a step and there is nothing to notice it. So a wide search
-   * finds a different answer, not a strictly better one.
+   * What a coarse phase genuinely costs is what falls between its points on the way: at reach 32
+   * the lattice is 3.2 m and a two-metre ledge can sit entirely in a gap. So a wide search finds a
+   * different answer, not a strictly better one.
    */
   reach: number
+  /**
+   * Called with every position actually measured, so the map can show what the search looked at.
+   * Positions rejected for being outside the radius are not reported: they were skipped, not
+   * checked.
+   */
+  onProbe?: (e: number, n: number) => void
 }
 
 function rank(a: Pos, b: Pos, o: Options): { violations: number; score: number } | null {
@@ -109,10 +132,15 @@ const within = (p: Pos, origin: Pos, radius: number) =>
   Math.hypot(p.e - origin.e, p.n - origin.n) <= radius + 1e-9
 
 /**
- * One descent step at a given move size. Returns the improved pair, or null when neither anchor can
- * do better -- which is how the caller knows to shrink the step, and eventually to stop.
+ * One step: scan the neighbourhood of each anchor in turn at the given lattice spacing and move it
+ * to the best position found, if any beats where it stands.
+ *
+ * Returns null when neither anchor can improve, which is how the caller knows to shrink the spacing
+ * and eventually to stop. B is scanned against A's new position rather than its old one -- that is
+ * what makes this coordinate descent, and also what it cannot see past: a move that only helps if
+ * both ends make it together is invisible here.
  */
-export function optimizeStep(current: Plan, o: Options, step: number): Plan | null {
+export function optimizeStep(current: Plan, o: Options, spacing: number): Plan | null {
   let best = rank(current.a, current.b, o)
   if (!best) return null
   const radius = PLANNED_REFINE_RADIUS * o.reach
@@ -120,20 +148,21 @@ export function optimizeStep(current: Plan, o: Options, step: number): Plan | nu
   let moved = false
 
   for (const which of ['a', 'b'] as const) {
-    // Fixed for this anchor's whole sweep, so it moves at most one step per call however many
-    // directions improve on the last -- otherwise two agreeing neighbours compound and the walk
-    // jumps instead of creeping, which at a large reach would cover the whole radius in a frame.
+    // Fixed for the anchor's whole scan, so it lands on one position out of the patch rather than
+    // hopping from each improvement to the next and travelling several patches in a single step.
     const from = out[which]
-    for (const d of DIRECTIONS) {
-      const to = { e: from.e + d.e * step, n: from.n + d.n * step }
-      if (!within(to, o.origin[which], radius)) continue
-      const next = which === 'a' ? { a: to, b: out.b } : { a: out.a, b: to }
-      const score = rank(next.a, next.b, o)
+    let to = from
+    for (const d of NEIGHBOURHOOD) {
+      const at = { e: from.e + d.e * spacing, n: from.n + d.n * spacing }
+      if (!within(at, o.origin[which], radius)) continue
+      o.onProbe?.(at.e, at.n)
+      const score = rank(which === 'a' ? at : out.a, which === 'a' ? out.b : at, o)
       if (!score || !better(score, best)) continue
       best = score
-      out = next
+      to = at
       moved = true
     }
+    out = which === 'a' ? { a: to, b: out.b } : { a: out.a, b: to }
   }
   return moved ? out : null
 }
@@ -141,21 +170,21 @@ export function optimizeStep(current: Plan, o: Options, step: number): Plan | nu
 /**
  * One animation frame's worth of descent, coarse to fine.
  *
- * Each frame restarts at the reach's travel step and halves it whenever the walk stalls, down to
- * `PLANNED_REFINE_STEP`. Restarting coarse every frame rather than ratcheting down is deliberate:
- * having moved at a fine step, the coarse direction is often open again, and finding out costs one
- * stalled sweep. Null means even a tenth of a metre cannot improve the line, which is the only
- * thing that stops a run.
+ * Each frame restarts at the reach's lattice spacing and halves it whenever the scan stalls, down to
+ * `PLANNED_REFINE_SPACING`. Restarting coarse every frame rather than ratcheting down is
+ * deliberate: having moved at a fine spacing, the coarse patch is often worth another look, and
+ * finding out costs one stalled scan. Null means even the finest patch cannot improve the line,
+ * which is the only thing that stops a run.
  */
 export function optimizeFrame(current: Plan, o: Options): Plan | null {
   let out: Plan | null = null
   let cur = current
-  let step = PLANNED_REFINE_STEP * o.reach
+  let spacing = PLANNED_REFINE_SPACING * o.reach
   for (let i = 0; i < PLANNED_REFINE_SUBSTEPS; i++) {
-    let next = optimizeStep(cur, o, step)
-    while (!next && step > PLANNED_REFINE_STEP) {
-      step = Math.max(PLANNED_REFINE_STEP, step / 2)
-      next = optimizeStep(cur, o, step)
+    let next = optimizeStep(cur, o, spacing)
+    while (!next && spacing > PLANNED_REFINE_SPACING) {
+      spacing = Math.max(PLANNED_REFINE_SPACING, spacing / 2)
+      next = optimizeStep(cur, o, spacing)
     }
     if (!next) break
     cur = next

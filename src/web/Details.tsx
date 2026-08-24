@@ -4,9 +4,10 @@ import type { Cover } from './landcover.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
 import {
-  PLANNED_REFINE_DIRECTIONS,
+  NEIGHBOURHOOD,
   PLANNED_REFINE_RADIUS,
-  PLANNED_REFINE_STEP,
+  PLANNED_REFINE_RINGS,
+  PLANNED_REFINE_SPACING,
 } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
 
@@ -28,31 +29,39 @@ const DASH = '—'
  */
 function optimizeHelp(offer: number | null): string {
   const reach = offer ?? 1
+  const spacing = PLANNED_REFINE_SPACING * reach
   const lines = [
     'Hill-climb both anchors toward a better score, one at a time.',
     '',
-    `Each step tries anchor A in ${PLANNED_REFINE_DIRECTIONS} compass directions ` +
-      `(${(360 / PLANNED_REFINE_DIRECTIONS).toFixed(2)}° apart), keeps the best move if any beats ` +
-      'where it stands, then does the same for B against A’s new position. That is ' +
-      `${PLANNED_REFINE_DIRECTIONS * 2} candidate lines per step, not ` +
-      `${PLANNED_REFINE_DIRECTIONS ** 2} — the two ends are searched separately, so a move only ` +
-      'both ends together would find is invisible to it.',
+    `Each step scans ${NEIGHBOURHOOD.length} positions around anchor A — a hexagonal patch of a ` +
+      `triangular lattice, ${spacing.toFixed(1)} m between neighbouring points, ` +
+      `${PLANNED_REFINE_RINGS} rings out — and moves it to the best one, if any beats where it ` +
+      `stands. Then the same for B, against A’s new position. ${NEIGHBOURHOOD.length * 2} ` +
+      'candidate lines per step, not the square of that: the two ends are scanned separately, so ' +
+      'a move that only helps if both ends make it together is invisible to it.',
     '',
-    `Steps start at ${(PLANNED_REFINE_STEP * reach).toFixed(1)} m and halve whenever the walk ` +
-      `stalls, down to ${PLANNED_REFINE_STEP} m, so it finishes at full resolution however far it ` +
-      'travelled. It stops when a tenth of a metre in any direction makes things worse, or when ' +
-      `both anchors are ${PLANNED_REFINE_RADIUS * reach} m from where you put them.`,
+    'Scanning a patch rather than a ring of directions means each step chooses how far to move as ' +
+      'well as which way, so it strides out where the ground rewards it and shortens up near the ' +
+      'top.',
+    '',
+    `The lattice halves whenever the scan stalls, down to ${PLANNED_REFINE_SPACING} m, so a run ` +
+      'finishes at full resolution however coarsely it started. It stops when even the finest ' +
+      `patch makes things worse, or when both anchors are ${PLANNED_REFINE_RADIUS * reach} m from ` +
+      'where you put them.',
     '',
     'Score here counts hard-constraint failures too, so a line running through terrain or a ' +
       'building is walked out of it before anything gets polished.',
     '',
     'This finds the top of the hill it is standing on, not the highest hill.',
+    '',
+    'The sparks on the map are the positions it measured, so you can see how far each run reached.',
   ]
   if (offer !== null) {
     lines.push(
       '',
-      `Now offering ${offer}× reach. Click again while this lasts to double it — a wider search, ` +
-        'though a coarse first pass can stride over something narrow on its way.',
+      `Now offering ${offer}× reach. Click again while this lasts to double it — the same ` +
+        `${NEIGHBOURHOOD.length} points spread over ${offer}× the ground, so a wider search but ` +
+        'one that can miss something narrow between them on the way.',
     )
   }
   return lines.join('\n')
