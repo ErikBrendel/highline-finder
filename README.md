@@ -42,8 +42,8 @@ npm run build         # static bundle in dist/, deployable as-is
 ### Where the elevation profiles live
 
 `storeProfiles` in [`params.ts`](src/pipeline/params.ts) decides whether each line ships with its
-own elevation profile. Off (the default), `candidates.json` holds 682 lines in 419 KB; on, the same
-lines would be about 3.9 MB, because profiles were 89 % of the file. The browser rebuilds the
+own elevation profile. Off (the default), `candidates.json` holds 11,628 lines in 7.1 MB (1.6 MB
+gzipped); on, the same lines would be about 67 MB, because profiles were 89 % of the file. The browser rebuilds the
 profile for whichever line you open, from the same elevation service and the same code the planner
 uses, so the chart and the exact metrics are unchanged — they just arrive a moment later, and one
 `maxSagRatio` per line keeps the sag control filtering the whole dataset exactly either way.
