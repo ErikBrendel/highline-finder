@@ -39,6 +39,23 @@ npm test              # unit + integration tests
 npm run build         # static bundle in dist/, deployable as-is
 ```
 
+### Sharing a view
+
+The URL tracks the map, so any view can be copied out of the address bar and sent:
+
+| Parameter | Meaning |
+|---|---|
+| `at=s,w,n,e` | Viewport rectangle. A rectangle rather than centre + zoom, so the recipient sees the same ground on a differently sized window. |
+| `line=<id>` | Selected candidate. |
+| `a=lat,lon` `b=lat,lon` | The planned line's anchors — or, when a candidate is selected and no planned line is placed, that candidate's own coordinates as a fallback. |
+| `rig=hA,hB` | Manual rig heights, in metres above ground. Absent means auto. |
+| `sag=pct` | Midspan sag, as a percent of span. |
+
+Candidate ids are derived from anchor coordinates, so regenerating the dataset with different
+parameters can move an anchor and orphan an id. That is why a shared candidate carries its geometry
+too: if the id no longer resolves, the same line is rebuilt and measured live as a planned line, so
+the link goes stale rather than broken.
+
 ### Reading it at scale
 
 The `hotspots` toggle draws a red heatmap of every place where *any* feasible line was found, with

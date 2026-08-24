@@ -9,6 +9,7 @@ import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
+import { parseUrl, toSearch } from './urlState.js'
 
 /**
  * Basemap tiles are served with `no-cache`, so they are cached in IndexedDB instead. Showing the
@@ -33,26 +34,37 @@ function CacheBadge() {
   )
 }
 
+/** Whether these placed points are just a candidate's own coordinates written back. */
+function sameLine(points: CustomPoints, c: Candidate): boolean {
+  const near = (p: LatLon | null, a: { lat: number; lon: number }) =>
+    !!p && Math.abs(p.lat - a.lat) < 1e-5 && Math.abs(p.lon - a.lon) < 1e-5
+  return near(points.a, c.a) && near(points.b, c.b)
+}
+
 export function App() {
+  // Read once. The URL is an input at startup and an output thereafter; treating it as live state
+  // both ways is how a URL writer and a URL reader start feeding each other.
+  const [initial] = useState(() => parseUrl(window.location.search))
   const [data, setData] = useState<Dataset | null>(null)
   const [error, setError] = useState<string | null>(null)
   // null until the dataset is loaded, because the floor comes from the pipeline's own sag.
-  const [sagPct, setSagPct] = useState<number | null>(null)
+  const [sagPct, setSagPct] = useState<number | null>(initial.sagPct)
   const [minScore, setMinScore] = useState(0)
   const [minLength, setMinLength] = useState(0)
   const [minExposure, setMinExposure] = useState(0)
   const [maxCanopy, setMaxCanopy] = useState(100)
   const [maxOffLevel, setMaxOffLevel] = useState(100)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [bbox, setBbox] = useState(initial.bbox)
   // OSM: paths, roads and place names are what orient you before you know where you are looking.
   const [basemapMix, setBasemapMix] = useState(MIX_MAX)
   const [showLines, setShowLines] = useState(true)
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
-  const [custom, setCustom] = useState<CustomPoints>({ a: null, b: null })
+  const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
-  const [rig, setRig] = useState<RigHeights | null>(null)
+  const [rig, setRig] = useState<RigHeights | null>(initial.rig)
   // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
   // computed, not held in state, so no effect has to write it.
@@ -68,7 +80,21 @@ export function App() {
         // a broken app rather than as stale output.
         if (!d.meta?.regions?.length) throw new Error('no regions in it — re-run `npm run pipeline`')
         setData(d)
-        setSagPct(d.meta.params.sagRatio * 100)
+        const floor = d.meta.params.sagRatio * 100
+        setSagPct((cur) => Math.max(floor, cur ?? floor))
+        // A shared candidate is restored by id if the dataset still has it. If regenerating moved
+        // the anchor that names it, the link's own geometry rebuilds the same line as a planned
+        // one instead -- stale rather than broken.
+        const found = d.candidates.find((c) => c.id === initial.lineId)
+        if (found) {
+          setSelectedId(found.id)
+          // The point parameters are either that candidate's own fallback geometry or a planned
+          // line the sharer had placed as well. Identical coordinates mean the former, and
+          // adopting it would draw a duplicate line on top of the candidate.
+          if (sameLine(initial.custom, found)) setCustom({ a: null, b: null })
+        } else if (initial.custom.a && initial.custom.b) {
+          setSelectedId(PLANNED_ID)
+        }
       })
       .catch((e) => setError(String(e)))
   }, [])
@@ -233,6 +259,36 @@ export function App() {
     [visible, selectedId, planned],
   )
 
+  /**
+   * The URL, rewritten in place as the view changes.
+   *
+   * A selected candidate also carries the geometry needed to rebuild it, so the link survives the
+   * dataset being regenerated with a different anchor. There is only one pair of point parameters,
+   * so a planned line the user placed themselves wins over that fallback -- and on load the two
+   * are told apart by whether the coordinates match the candidate.
+   */
+  const search = useMemo(() => {
+    const planning = selectedId === PLANNED_ID || !!custom.a || !!custom.b
+    const fallback = planning ? null : selected
+    return toSearch({
+      bbox,
+      lineId: selectedId && selectedId !== PLANNED_ID ? selectedId : null,
+      custom: fallback
+        ? {
+            a: { lat: fallback.a.lat, lon: fallback.a.lon },
+            b: { lat: fallback.b.lat, lon: fallback.b.lon },
+          }
+        : custom,
+      rig: fallback ? { a: fallback.a.aFrame, b: fallback.b.aFrame } : rig,
+      sagPct,
+    })
+  }, [bbox, selectedId, selected, custom, rig, sagPct])
+
+  useEffect(() => {
+    // replaceState, not pushState: panning the map should not fill the back button.
+    history.replaceState(null, '', search ? `?${search}` : window.location.pathname)
+  }, [search])
+
   if (error) return <div className="loading">Failed to load candidates.json &mdash; {error}</div>
   if (!data || sagPct === null) return <div className="loading">Loading&hellip;</div>
 
@@ -362,12 +418,14 @@ export function App() {
             basemapMix={basemapMix}
             anchorDump={anchorDump}
             hotspots={hotspots}
+            initialBbox={initial.bbox}
             custom={custom}
             showLines={showLines}
             onSelect={setSelectedId}
             onSetCustom={setCustomPoint}
             onClearCustom={clearCustom}
             onMoveAnchor={moveAnchor}
+            onViewport={setBbox}
           />
 
           {(selected || planPending) && (

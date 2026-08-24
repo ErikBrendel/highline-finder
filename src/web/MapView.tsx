@@ -233,12 +233,15 @@ interface Props {
   basemapMix: number
   anchorDump: AnchorDump | null
   hotspots: Hotspots | null
+  /** south, west, north, east from the URL; falls back to fitting every AOI. */
+  initialBbox: [number, number, number, number] | null
   custom: CustomPoints
   showLines: boolean
   onSelect: (id: string | null) => void
   onSetCustom: (which: 'a' | 'b', at: LatLon | null) => void
   onClearCustom: () => void
   onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
+  onViewport: (bbox: [number, number, number, number]) => void
 }
 
 export function MapView({
@@ -248,12 +251,14 @@ export function MapView({
   basemapMix,
   anchorDump,
   hotspots,
+  initialBbox,
   custom,
   showLines,
   onSelect,
   onSetCustom,
   onClearCustom,
   onMoveAnchor,
+  onViewport,
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
   const el = useRef<HTMLDivElement>(null)
@@ -273,12 +278,19 @@ export function MapView({
   const removeOverlay = useRef<(() => void) | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
+  const onViewportRef = useRef(onViewport)
+  onViewportRef.current = onViewport
 
   useEffect(() => {
     if (!el.current || map.current) return
     const aois = data.meta.regions.flatMap((r) => r.aois)
     const bounds = new maplibregl.LngLatBounds()
-    for (const a of aois) bounds.extend([a.west, a.south]).extend([a.east, a.north])
+    if (initialBbox) {
+      const [south, west, north, east] = initialBbox
+      bounds.extend([west, south]).extend([east, north])
+    } else {
+      for (const a of aois) bounds.extend([a.west, a.south]).extend([a.east, a.north])
+    }
     const m = new maplibregl.Map({
       container: el.current,
       style: {
@@ -301,7 +313,8 @@ export function MapView({
         ],
       },
       bounds,
-      fitBoundsOptions: { padding: 40 },
+      // No padding when the view came from a link: the rectangle is the view, not a thing in it.
+      fitBoundsOptions: { padding: initialBbox ? 0 : 40 },
     })
     map.current = m
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left')
@@ -451,6 +464,10 @@ export function MapView({
       m.on('contextmenu', (e) => {
         setMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lon: e.lngLat.lng })
       })
+      m.on('moveend', () => {
+        const b = m.getBounds()
+        onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()])
+      })
       m.on('movestart', () => setMenu(null))
       m.on('click', () => setMenu(null))
 
@@ -491,6 +508,9 @@ export function MapView({
       })
 
       ready.current = true
+      // Publish the opening view, so the URL is shareable before the user touches anything.
+      const b = m.getBounds()
+      onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()])
     })
     return () => {
       removeOverlay.current?.()
