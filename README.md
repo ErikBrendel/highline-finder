@@ -10,7 +10,8 @@ sagging-line model, and produces a ranked, browsable set of candidate lines with
 The MVP covers **Brandenburg and Berlin**, where the state survey office publishes 1 m LiDAR
 terrain and 20 cm surface models as open data. The default areas of interest are **Tropical** south
 of Berlin (38 m of relief in 1.2 km²), **Niederfinow** to the north-east (141 km², 151 m of relief),
-and **Linthe** and **Vehlen** to the west (4.6 and 5.3 km²).
+**Müggelberge** in south-east Berlin (23 km²), and **Linthe** and **Vehlen** to the west (4.9 and
+11.5 km²).
 
 ## Quickstart
 
@@ -42,8 +43,8 @@ npm run build         # static bundle in dist/, deployable as-is
 ### Where the elevation profiles live
 
 `storeProfiles` in [`params.ts`](src/pipeline/params.ts) decides whether each line ships with its
-own elevation profile. Off (the default), `candidates.json` holds 6,456 lines in 4.0 MB (0.9 MB
-gzipped); on, the same lines would be about 37 MB, because profiles were 89 % of the file. The browser rebuilds the
+own elevation profile. Off (the default), `candidates.json` holds 7,058 lines in 4.4 MB (1.0 MB
+gzipped); on, the same lines would be about 40 MB, because profiles were 89 % of the file. The browser rebuilds the
 profile for whichever line you open, from the same elevation service and the same code the planner
 uses, so the chart and the exact metrics are unchanged — they just arrive a moment later, and one
 `maxSagRatio` per line keeps the sag control filtering the whole dataset exactly either way.
