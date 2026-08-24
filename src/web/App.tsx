@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AnchorDump,
   Candidate,
@@ -18,6 +18,8 @@ import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { parseUrl, toSearch } from './urlState.js'
+import { optimizeStep } from './optimize.js'
+import { toWgs84 } from '../shared/geo.js'
 
 /**
  * Basemap tiles are served with `no-cache`, so they are cached in IndexedDB instead. Showing the
@@ -78,6 +80,7 @@ export function App() {
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
+  const [optimizing, setOptimizing] = useState(false)
   // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
   // computed, not held in state, so no effect has to write it.
@@ -219,6 +222,8 @@ export function App() {
    * what produced a maximum-update-depth loop before.
    */
   const commit = (next: CustomPoints) => {
+    // Any hand movement ends an optimisation: it is descending from a point the user has left.
+    setOptimizing(false)
     setCustom(next)
     const complete = !!next.a && !!next.b
     if (!complete) setRig(null)
@@ -287,6 +292,53 @@ export function App() {
         : visible.find((c) => c.id === selectedId)) ?? null,
     [visible, selectedId, planned],
   )
+
+  /**
+   * The optimiser, run as an animation rather than to completion.
+   *
+   * The loop reads the live positions from a ref instead of taking `custom` as a dependency: an
+   * effect that both reads and writes the same state is how this file previously managed to feed
+   * itself, and here it would do so sixty times a second rather than once.
+   */
+  const customRef = useRef(custom)
+  customRef.current = custom
+  useEffect(() => {
+    if (!optimizing || !data || sagPct === null || !customUtm) return
+    const origin = customUtm
+    let timer: ReturnType<typeof setTimeout>
+    let stopped = false
+
+    const tick = () => {
+      if (stopped) return
+      const live = customRef.current
+      if (!live.a || !live.b) return setOptimizing(false)
+      const [ae, an] = toUtm33(live.a.lat, live.a.lon)
+      const [be, bn] = toUtm33(live.b.lat, live.b.lon)
+      const next = optimizeStep(
+        { a: { e: ae, n: an }, b: { e: be, n: bn } },
+        {
+          origin,
+          ground: groundSampler,
+          surface: surfaceSampler,
+          sagRatio: sagPct / 100,
+          params: data.meta.params,
+          rig,
+        },
+      )
+      if (!next) return setOptimizing(false)
+      setCustom({ a: toWgs84(next.a.e, next.a.n), b: toWgs84(next.b.e, next.b.n) })
+      timer = setTimeout(tick, 100)
+    }
+
+    timer = setTimeout(tick, 0)
+    return () => {
+      stopped = true
+      clearTimeout(timer)
+    }
+    // customUtm is read once, as the origin the wander is measured from, so it is deliberately not
+    // a dependency -- otherwise every step would restart the run and reset that origin.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optimizing, data, sagPct, rig])
 
   /**
    * A profile for the selected line, when the dataset does not carry one.
@@ -516,6 +568,8 @@ export function App() {
             <Details
               c={detailed}
               profile={shownProfile}
+              optimizing={optimizing}
+              onOptimize={() => setOptimizing(!optimizing)}
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
               failed={terrainFailed}

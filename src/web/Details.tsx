@@ -29,12 +29,16 @@ interface Props {
   /** Endpoints to fall back on before there is a measurement to read them from. */
   at: { a: LatLon; b: LatLon } | null
   failed: boolean
+  optimizing: boolean
+  onOptimize: () => void
   rig: RigHeights | null
   onRig: (r: RigHeights | null) => void
   onClose: () => void
 }
 
-export function Details({ c, profile, planned, at, failed, rig, onRig, onClose }: Props) {
+export function Details({
+  c, profile, planned, at, failed, optimizing, onOptimize, rig, onRig, onClose,
+}: Props) {
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
   const ends = c ? { a: c.a, b: c.b } : at
@@ -81,6 +85,20 @@ export function Details({ c, profile, planned, at, failed, rig, onRig, onClose }
           {isPlanned && 'Planned line · '}
           {c ? `Score ${c.score.toFixed(1)}` : failed ? 'no elevation data here' : 'measuring…'}
         </strong>
+        {isPlanned && c && (
+          <button
+            className="optimize"
+            data-running={optimizing}
+            onClick={onOptimize}
+            title={
+              optimizing
+                ? 'Stop'
+                : 'Walk both anchors toward a better line, a metre at a time'
+            }
+          >
+            {optimizing ? 'optimising…' : 'optimise'}
+          </button>
+        )}
         {geom && (
           <span className="sub">
             {geom.length.toFixed(0)} m &middot; bearing {geom.bearing.toFixed(0)}&deg;
