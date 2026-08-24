@@ -92,8 +92,8 @@ export async function loadCoarse(bounds: Bounds, res: number): Promise<Grid> {
  * Greatest fall from each cell to any cell within `radius`, as a new grid.
  *
  * Mirrors the anchor scan's own gate -- `minDropDepth` within `dropSearchRadius` -- rather than
- * measuring relief. Relief over a large window does not discriminate: the Sperenberg and Chorin
- * areas and a measured dead-flat rectangle all exceed 16 m of it. What separates them is how
+ * measuring relief. Relief over a large window does not discriminate: Tropical, Niederfinow and a
+ * measured dead-flat rectangle all exceed 16 m of it. What separates them is how
  * steeply the ground falls, which is what this measures.
  *
  * Naive rather than separable, because a max-drop is not a separable operation and the grid is

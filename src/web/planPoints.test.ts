@@ -5,7 +5,7 @@ import { planLine } from '../shared/plan.js'
 import { toWgs84 } from '../shared/geo.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
-// Sperenberg, where the default AOI is. One degree of longitude here is ~68 km.
+// Tropical, one of the default AOIs. One degree of longitude here is ~68 km.
 const a = { lat: 52.2, lon: 13.66 }
 const near = { lat: 52.2, lon: 13.663 }
 const far = { lat: 52.2, lon: 13.76 }

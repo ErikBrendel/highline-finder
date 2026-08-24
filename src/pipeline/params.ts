@@ -3,7 +3,7 @@ import type { Aoi, Params } from '../shared/types.js'
 /**
  * Single source of truth for every tunable. Values are metres unless stated.
  *
- * These defaults are calibrated for the Sperenberg gypsum pits (38 m of relief in 1 km^2,
+ * These defaults are calibrated for Tropical (38 m of relief in 1 km^2,
  * ~55% closed pine canopy 15-30 m tall). Flatter or more open terrain will want different
  * numbers, in particular `minProbeDrop` and `minExposure`.
  */
@@ -94,9 +94,8 @@ export const DEFAULT_PARAMS: Params = {
 }
 
 /**
- * Sperenberg gypsum pits, Brandenburg. ~1150 x 990 m, spanning four 1 km source tiles.
- * Chosen because highlines are known to be riggable here, so it doubles as a sanity check
- * that the finder produces plausible geometry.
+ * Tropical. ~1150 x 990 m, spanning four 1 km source tiles. Chosen because highlines are known
+ * to be riggable here, so it doubles as a sanity check that the finder produces plausible geometry.
  */
 /**
  * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
@@ -104,9 +103,13 @@ export const DEFAULT_PARAMS: Params = {
  * dedup pass rather than reported twice.
  */
 export const DEFAULT_AOIS: Aoi[] = [
-  // Sperenberg gypsum pits: 38 m of relief in flat Brandenburg, and the reason this project exists.
+  // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.
   { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
-  // Chorin and the Eberswalde glacial valley, north-east of Berlin. 137 km2, and a strict
-  // superset of the 18 km2 rectangle this started as.
+  // Niederfinow: 141 km2 north-east of Berlin, 151 m of relief, and a strict superset of the
+  // 18 km2 rectangle this started as.
   { south: 52.769741, west: 13.874750, north: 52.869081, east: 14.058569 },
+  // Linthe: 0.36 km2 west of Berlin, 19.5 m of relief in a single steep feature.
+  { south: 52.143650, west: 12.786734, north: 52.148558, east: 12.795793 },
+  // Vehlen: 0.25 km2, further west again.
+  { south: 52.426806, west: 12.313895, north: 52.430913, east: 12.321964 },
 ]

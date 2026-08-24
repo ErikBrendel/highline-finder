@@ -69,7 +69,7 @@ anchors only, one AOI, static viewer.
 
 - **Legal and access layer.** Nature protection (Naturschutzgebiet, Landschaftsschutzgebiet, FFH,
   Vogelschutzgebiet), forestry ownership, and — specifically for the default AOI — the former
-  Soviet airfield and munitions areas around Sperenberg. A candidate you may not rig is noise.
+  former military land, which several parts of Brandenburg still are. A candidate you may not rig is noise.
 - **Approach.** Distance and walking time from the nearest road or path via OSM.
 - **Seasonality.** The surface model is a single epoch, so leaf-on vs leaf-off changes the canopy
   answer for deciduous stands.

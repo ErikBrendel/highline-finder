@@ -8,9 +8,9 @@ points could serve as anchors and in which directions, tests the spans between t
 sagging-line model, and produces a ranked, browsable set of candidate lines with elevation profiles.
 
 The MVP covers **Brandenburg and Berlin**, where the state survey office publishes 1 m LiDAR
-terrain and 20 cm surface models as open data. The default areas of interest are the Sperenberg
-gypsum pits south of Berlin (38 m of relief in 1.2 km²) and the Chorin area to the north-east
-(18.6 km²).
+terrain and 20 cm surface models as open data. The default areas of interest are **Tropical** south
+of Berlin (38 m of relief in 1.2 km²), **Niederfinow** to the north-east (141 km², 151 m of relief),
+and **Linthe** and **Vehlen** to the west (0.36 and 0.25 km²).
 
 ## Quickstart
 
