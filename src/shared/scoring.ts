@@ -58,6 +58,17 @@ export interface Metrics {
   exposure: number
   canopyClearanceMin: number
   canopyBlockedFraction: number
+  /**
+   * How badly the line fails the clearance rule, in metres, averaged over the interior and
+   * weighted toward midspan. Zero for anything that passes, so it costs a valid candidate nothing.
+   *
+   * `clearanceMin` alone is a single worst sample: it cannot tell a line grazing one boulder from
+   * one buried in a hillside for two hundred metres, and it does not care whether the offending
+   * ground is next to an anchor or right where the walker would be. Both differences matter to a
+   * person, and -- more to the point -- the search has no gradient to follow without them, so an
+   * anchor sitting inside a building has nothing telling it which way is out.
+   */
+  clearanceDeficit: number
 }
 
 export function lineHeightAt(hA: number, hB: number, sag: number, t: number): number {
@@ -96,6 +107,8 @@ export function rawMetricsAt(
   let canopyClearanceMin = Infinity
   let blocked = 0
   let samples = 0
+  let deficit = 0
+  let weight = 0
 
   for (let i = 0; i <= last; i++) {
     const t = last > 0 ? i / last : 0
@@ -110,11 +123,21 @@ export function rawMetricsAt(
     const canopyClear = line - (sp.surface[i] ?? ground)
     if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
     if (canopyClear < 0) blocked++
+    // Fraction of the way from the nearer anchor to midspan: 0 at the ends, 1 in the middle.
+    const central = Math.min(d, length - d) / (length / 2)
+    weight += central
+    if (clear < p.minClearance) deficit += central * (p.minClearance - clear)
     samples++
   }
 
   if (samples === 0) return null
-  return { clearanceMin, exposure, canopyClearanceMin, canopyBlockedFraction: blocked / samples }
+  return {
+    clearanceMin,
+    exposure,
+    canopyClearanceMin,
+    canopyBlockedFraction: blocked / samples,
+    clearanceDeficit: weight > 0 ? deficit / weight : 0,
+  }
 }
 
 /** The same, plus the validity gate. Null when the line is not a candidate. */
@@ -176,7 +199,60 @@ export function violationsOf(
 }
 
 /**
- * 0-100. Weights are a judgement call, not a derivation, so the components are stored on every
+ * Score points charged for one whole limit's worth of overshoot on each hard constraint.
+ *
+ * Judgement calls, like the score weights. Clearance is the heaviest because it is the one a
+ * misplaced anchor is usually failing and the one the search can actually walk out of; the rest
+ * are there so nothing that disqualifies a line is invisible in its score.
+ */
+const PENALTY = {
+  clearance: 40,
+  exposure: 20,
+  canopy: 20,
+  level: 20,
+  length: 20,
+  /** Per metre the rig is raised past what an A-frame reaches. Applied by the planner, see plan.ts. */
+  rig: 20,
+} as const
+
+/**
+ * How many score points a line's hard-constraint failures cost it. Zero for a valid candidate,
+ * which is why adding this changed nothing about the pipeline's output.
+ *
+ * Each term is the overshoot measured against its own limit, so the number reads as "limits' worth
+ * of wrongness", and each grows without bound -- deeper into a hillside is always worse, and there
+ * is no plateau for the search to get lost on. The point of it being continuous is exactly that:
+ * counting broken rules gives a step function with no downhill direction, so an anchor placed
+ * inside a building had nothing to tell it which way to walk. Every entry the planner lists under
+ * "would not qualify" has a term here.
+ *
+ * Allocation-free and on the pipeline's hot path -- roughly two million calls a run, all of them
+ * returning zero.
+ */
+export function penaltyOf(m: Metrics, length: number, offLevel: number, p: Params): number {
+  const over = (excess: number, limit: number, weight: number) =>
+    excess > 0 && limit > 0 ? (weight * excess) / limit : 0
+
+  const budget = p.maxOffLevelRatio * length
+  return (
+    over(m.clearanceDeficit, p.minClearance, PENALTY.clearance) +
+    over(p.minExposure - m.exposure, p.minExposure, PENALTY.exposure) +
+    over(m.canopyBlockedFraction - p.maxCanopyBlocked, 1 - p.maxCanopyBlocked, PENALTY.canopy) +
+    over(offLevel - budget, budget, PENALTY.level) +
+    over(p.minLength - length, p.minLength, PENALTY.length) +
+    over(length - p.maxLength, p.maxLength, PENALTY.length)
+  )
+}
+
+/** Points charged for rigging higher than an A-frame reaches, which no anchor move can fix. */
+export function rigPenalty(aFrameA: number, aFrameB: number, p: Params): number {
+  const over = (v: number) => Math.max(0, v - p.aFrameMax)
+  return PENALTY.rig * (over(aFrameA) + over(aFrameB))
+}
+
+/**
+ * 0-100 for a valid line, and as far below zero as its failures deserve for one that is not.
+ * Weights are a judgement call, not a derivation, so the components are stored on every
  * candidate for the UI to show.
  *
  * Exposure is scaled logarithmically between 5 m and 200 m. Linear scaling would pin every
@@ -203,11 +279,12 @@ export function scoreOf(
   }
   const score =
     100 *
-    (0.3 * parts.exposure +
-      0.15 * parts.length +
-      0.35 * parts.canopy +
-      0.05 * parts.margin +
-      0.15 * parts.level)
+      (0.3 * parts.exposure +
+        0.15 * parts.length +
+        0.35 * parts.canopy +
+        0.05 * parts.margin +
+        0.15 * parts.level) -
+    penaltyOf(m, length, offLevel, p)
   return { score, parts }
 }
 

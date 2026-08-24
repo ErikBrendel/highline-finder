@@ -3,7 +3,9 @@ import { buildProfile, packProfile } from './profile.js'
 import {
   chooseHeights,
   maxFeasibleSag,
+  penaltyOf,
   rawMetricsAt,
+  rigPenalty,
   scoreOf,
   violationsOf,
 } from './scoring.js'
@@ -32,6 +34,11 @@ export interface PlannedLine {
   candidate: Candidate
   /** Hard constraints this line fails. Empty means the search would have accepted it. */
   violations: string[]
+  /**
+   * Score points those failures cost, already subtracted from `candidate.score`. 0 when there are
+   * none, and the two always agree: no violation is free and nothing else is charged for.
+   */
+  penalty: number
 }
 
 /**
@@ -84,6 +91,9 @@ export function planLine(
 
   const r2 = (v: number) => Math.round(v * 100) / 100
   const { score, parts } = scoreOf(length, h.offLevel, m, p)
+  // The one failure no anchor move can undo, so it is charged here rather than inside scoreOf: it
+  // is a property of the rig setting, not of the terrain the search is walking over.
+  const rigCharge = rigPenalty(h.hA - gA, h.hB - gB, p)
   const wa = toWgs84(a.e, a.n)
   const wb = toWgs84(b.e, b.n)
   return {
@@ -100,12 +110,15 @@ export function planLine(
       exposure: r2(m.exposure),
       canopyClearanceMin: r2(m.canopyClearanceMin),
       canopyBlockedFraction: Math.round(m.canopyBlockedFraction * 1000) / 1000,
-      score: Math.round(score * 10) / 10,
+      // Deliberately not rounded, unlike a found candidate's: the optimiser ranks on this, and at
+      // one decimal a gentle slope reads as flat and the walk stops after its first step.
+      score: score - rigCharge,
       scoreParts: parts,
       maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p),
       profile: stored,
     },
     violations: [...violationsOf(m, length, h.offLevel, p), ...rigViolations(h, gA, gB, p)],
+    penalty: penaltyOf(m, length, h.offLevel, p) + rigCharge,
   }
 }
 

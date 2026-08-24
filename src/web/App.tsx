@@ -20,7 +20,7 @@ import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { parseUrl, toSearch } from './urlState.js'
-import { optimizeStep } from './optimize.js'
+import { optimizeFrame } from './optimize.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
 const OFFER_MS = 2000
@@ -441,7 +441,7 @@ export function App() {
       if (!live.a || !live.b) return endRun()
       const [ae, an] = toUtm33(live.a.lat, live.a.lon)
       const [be, bn] = toUtm33(live.b.lat, live.b.lon)
-      const next = optimizeStep(
+      const next = optimizeFrame(
         { a: { e: ae, n: an }, b: { e: be, n: bn } },
         {
           origin,

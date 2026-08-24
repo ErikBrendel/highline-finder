@@ -3,13 +3,16 @@ import {
   lineHeightAt,
   maxFeasibleSag,
   metricsAt,
+  penaltyOf,
   rawMetricsAt,
   rescoreAtSag,
   scoreOf,
+  violationsOf,
 } from './scoring.js'
 import { packProfile, unpackProfile } from './profile.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 import type { Candidate, ProfileSample } from './types.js'
+import type { Metrics } from './scoring.js'
 
 const p = DEFAULT_PARAMS
 
@@ -70,7 +73,10 @@ describe('metricsAt', () => {
 })
 
 describe('scoreOf', () => {
-  const base = { clearanceMin: 5, exposure: 20, canopyClearanceMin: 2, canopyBlockedFraction: 0 }
+  const base = {
+    clearanceMin: 5, exposure: 20, canopyClearanceMin: 2, canopyBlockedFraction: 0,
+    clearanceDeficit: 0,
+  }
 
   it('scales exposure logarithmically so big lines stay distinguishable', () => {
     const at = (exposure: number) => scoreOf(200, 0, { ...base, exposure }, p).parts.exposure
@@ -84,6 +90,53 @@ describe('scoreOf', () => {
     const clean = scoreOf(200, 0, base, p).score
     expect(scoreOf(200, 0, { ...base, canopyBlockedFraction: 0.5 }, p).score).toBeLessThan(clean)
     expect(scoreOf(200, p.maxOffLevelRatio * 200, base, p).score).toBeLessThan(clean)
+  })
+})
+
+describe('penaltyOf', () => {
+  /** A flat span with a block of ground raised to `top` over the samples from `from` to `to`. */
+  const withBump = (from: number, to: number, top: number) =>
+    packProfile(
+      flatSpan().map((sm) => (sm.d >= from && sm.d <= to ? { ...sm, ground: top } : sm)),
+    )
+  const measure = (sp: ReturnType<typeof withBump>) =>
+    rawMetricsAt(sp, 200, 50, 50, 0.05, p)!
+
+  it('costs a line that qualifies nothing at all', () => {
+    const m = metricsAt(packProfile(flatSpan()), 200, 50, 50, 0.05, p)!
+    expect(violationsOf(m, 200, 0, p)).toEqual([])
+    expect(penaltyOf(m, 200, 0, p)).toBe(0)
+  })
+
+  it('grows with how far the ground rises through the line', () => {
+    const shallow = penaltyOf(measure(withBump(90, 110, 44)), 200, 0, p)
+    const deep = penaltyOf(measure(withBump(90, 110, 48)), 200, 0, p)
+    expect(shallow).toBeGreaterThan(0)
+    expect(deep).toBeGreaterThan(shallow)
+  })
+
+  it('counts an obstruction at midspan for more than the same one beside an anchor', () => {
+    const middle = penaltyOf(measure(withBump(90, 110, 48)), 200, 0, p)
+    const nearEnd = penaltyOf(measure(withBump(15, 35, 48)), 200, 0, p)
+    expect(nearEnd).toBeGreaterThan(0)
+    expect(middle).toBeGreaterThan(nearEnd)
+  })
+
+  it('charges for every failure the planner lists, and for nothing it does not', () => {
+    const clean = metricsAt(packProfile(flatSpan()), 200, 50, 50, 0.05, p)!
+    const cases: [Metrics, number, number][] = [
+      [clean, 200, 0],
+      [clean, 200, p.maxOffLevelRatio * 200 + 2],
+      [clean, p.minLength - 10, 0],
+      [clean, p.maxLength + 10, 0],
+      [{ ...clean, exposure: p.minExposure - 4 }, 200, 0],
+      [{ ...clean, canopyBlockedFraction: p.maxCanopyBlocked + 0.1 }, 200, 0],
+      [measure(withBump(90, 110, 48)), 200, 0],
+    ]
+    for (const [m, length, offLevel] of cases) {
+      const failed = violationsOf(m, length, offLevel, p).length > 0
+      expect(penaltyOf(m, length, offLevel, p) > 0).toBe(failed)
+    }
   })
 })
 
@@ -171,6 +224,8 @@ describe('rawMetricsAt', () => {
     let canopyClearanceMin = Infinity
     let blocked = 0
     let n = 0
+    let deficit = 0
+    let weight = 0
     for (const s of samples) {
       const clear = s.line - s.ground
       if (clear > exposure) exposure = clear
@@ -179,9 +234,18 @@ describe('rawMetricsAt', () => {
       const canopy = s.line - s.surface
       if (canopy < canopyClearanceMin) canopyClearanceMin = canopy
       if (canopy < 0) blocked++
+      const central = Math.min(s.d, length - s.d) / (length / 2)
+      weight += central
+      if (clear < p.minClearance) deficit += central * (p.minClearance - clear)
       n++
     }
-    return { clearanceMin, exposure, canopyClearanceMin, canopyBlockedFraction: blocked / n }
+    return {
+      clearanceMin,
+      exposure,
+      canopyClearanceMin,
+      canopyBlockedFraction: blocked / n,
+      clearanceDeficit: weight > 0 ? deficit / weight : 0,
+    }
   }
 
   it('measures exactly what materialising the profile would have measured', () => {

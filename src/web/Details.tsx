@@ -3,6 +3,7 @@ import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '
 import type { Cover } from './landcover.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
+import { PLANNED_REFINE_RADIUS, PLANNED_REFINE_STEP } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
 
 function scoreColor(score: number): string {
@@ -13,6 +14,43 @@ function scoreColor(score: number): string {
 }
 
 const DASH = '—'
+
+/**
+ * What the button is about to do, in enough detail to trust or distrust the result.
+ *
+ * Long on purpose. A button that silently moves your line somewhere else has to say how it chose,
+ * because "optimise" could mean anything from a global search to a single nudge, and this is much
+ * closer to the nudge.
+ */
+function optimizeHelp(offer: number | null): string {
+  const reach = offer ?? 1
+  const lines = [
+    'Hill-climb both anchors toward a better score, one at a time.',
+    '',
+    'Each step tries anchor A in 8 compass directions, keeps the best move if any beats where it ' +
+      'stands, then does the same for B against A’s new position. 16 candidate lines per step, ' +
+      'not 64 — the two ends are searched separately, so a move only both ends together would ' +
+      'find is invisible to it.',
+    '',
+    `Steps start at ${(PLANNED_REFINE_STEP * reach).toFixed(1)} m and halve whenever the walk ` +
+      `stalls, down to ${PLANNED_REFINE_STEP} m, so it finishes at full resolution however far it ` +
+      'travelled. It stops when a tenth of a metre in any direction makes things worse, or when ' +
+      `both anchors are ${PLANNED_REFINE_RADIUS * reach} m from where you put them.`,
+    '',
+    'Score here counts hard-constraint failures too, so a line running through terrain or a ' +
+      'building is walked out of it before anything gets polished.',
+    '',
+    'This finds the top of the hill it is standing on, not the highest hill.',
+  ]
+  if (offer !== null) {
+    lines.push(
+      '',
+      `Now offering ${offer}× reach. Click again while this lasts to double it — a wider search, ` +
+        'though a coarse first pass can stride over something narrow on its way.',
+    )
+  }
+  return lines.join('\n')
+}
 
 interface Props {
   /**
@@ -105,13 +143,7 @@ export function Details({
             data-running={optimizing}
             data-offer={!optimizing && offer !== null}
             onClick={onOptimize}
-            title={
-              optimizing
-                ? 'Stop'
-                : offer !== null
-                  ? `Search ${offer}× as far, in ${offer}× the steps. Click again while this shows to double it.`
-                  : 'Walk both anchors toward a better line, a metre at a time'
-            }
+            title={optimizing ? 'Stop' : optimizeHelp(offer)}
           >
             {optimizing ? 'optimising…' : offer !== null ? `optimise ${offer}×` : 'optimise'}
           </button>
@@ -206,7 +238,9 @@ export function Details({
       {isPlanned && planned && (
         planned.violations.length > 0 ? (
           <div className="violations">
-            <b>Would not qualify as a candidate:</b>
+            <b>
+              Would not qualify as a candidate &mdash; costing {planned.penalty.toFixed(1)} score:
+            </b>
             <ul>
               {planned.violations.map((v) => (
                 <li key={v}>{v}</li>
