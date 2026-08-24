@@ -53,7 +53,9 @@ far more lines.
 
 ### Seeing what the pipeline fetched
 
-The `debug layers` button cycles three views of the pipeline itself:
+The `debug layers` button cycles three views of the pipeline itself. Development only, like the
+anchor overlay: `mask.json` and `tiles.json` are gitignored and never deployed, since these describe
+the pipeline rather than the terrain.
 
 - **coarse drop** — what the 16 m pre-pass concluded, greyed where it fell below the threshold.
 - **terrain tiles** — the 1 km tiles the terrain model was fetched for. Green where the exact 1 m

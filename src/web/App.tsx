@@ -596,15 +596,20 @@ export function App() {
                 {anchorDump ? `${anchorDump.lat.length.toLocaleString()} anchors` : 'anchors'}
               </button>
             )}
-            <button data-active={debugLayer !== 'none'} onClick={cycleDebug}>
-              {DEBUG_LABELS[debugLayer]}
-            </button>
+            {/* Dev only, like the anchor overlay: mask.json and tiles.json are gitignored, and
+                these are views of the pipeline rather than features. Vite folds the constant away,
+                so the fetches and the legend leave the bundle entirely. */}
+            {import.meta.env.DEV && (
+              <button data-active={debugLayer !== 'none'} onClick={cycleDebug}>
+                {DEBUG_LABELS[debugLayer]}
+              </button>
+            )}
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>
           </div>
           {layerError && <div className="togglenote">{layerError}</div>}
-          {debugLayer !== 'none' && (
+          {import.meta.env.DEV && debugLayer !== 'none' && (
             <DebugLegend layer={debugLayer} mask={mask} tiles={tiles} />
           )}
 
