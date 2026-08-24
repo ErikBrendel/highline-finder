@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { toUtm33 } from '../shared/geo.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { unpackProfile } from '../shared/profile.js'
+import { boxOf, contains } from './regions.js'
 import type { Dataset } from '../shared/types.js'
 
 /**
@@ -19,15 +20,14 @@ const present = existsSync(PATH)
 describe.skipIf(!present)('generated candidates.json', () => {
   const data: Dataset = JSON.parse(readFileSync(PATH, 'utf8'))
   const { params, regions } = data.meta
-  const aois = regions.flatMap((r) => r.aois)
-  const inSomeAoi = (lat: number, lon: number) =>
-    aois.some(
-      (a) =>
-        lat >= a.south - 1e-4 &&
-        lat <= a.north + 1e-4 &&
-        lon >= a.west - 1e-4 &&
-        lon <= a.east + 1e-4,
-    )
+  /**
+   * An AOI is given in latitude and longitude but searched as its UTM bounding box, which is a
+   * slightly larger, skewed quadrilateral -- so an anchor near a corner can sit outside the
+   * lat/lon rectangle and still be inside the area the search was asked to cover. The boxes are
+   * what the pipeline actually confines anchors to, so they are what this checks.
+   */
+  const boxes = regions.flatMap((r) => r.aois.map(boxOf))
+  const inSomeAoi = (e: number, n: number) => boxes.some((b) => contains(b, e, n))
 
   it('produced candidates, over ground with real relief', () => {
     expect(data.candidates.length).toBeGreaterThan(0)
@@ -54,7 +54,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
         const [e, n] = toUtm33(a.lat, a.lon)
         expect(e).toBeCloseTo(a.e, 1)
         expect(n).toBeCloseTo(a.n, 1)
-        expect(inSomeAoi(a.lat, a.lon)).toBe(true)
+        expect(inSomeAoi(a.e, a.n)).toBe(true)
       }
     }
   })
