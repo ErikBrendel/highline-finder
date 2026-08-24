@@ -117,9 +117,9 @@ export const DEFAULT_PARAMS: Params = {
 export const DEFAULT_AOIS: Aoi[] = [
   // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.
   { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
-  // Niederfinow: 141 km2 north-east of Berlin, 151 m of relief, and a strict superset of the
-  // 18 km2 rectangle this started as.
-  { south: 52.769741, west: 13.874750, north: 52.869081, east: 14.058569 },
+  // Eberswalde + Niederfinow: 190 km2 north-east of Berlin, 151 m of relief, and a strict superset
+  // of both the 18 km2 rectangle this started as and the 141 km2 one it grew into.
+  { south: 52.769741, west: 13.801037, north: 52.869081, east: 14.058569 },
   // Linthe: 4.6 km2 west of Berlin.
   { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
   // Mueggelberge: 22 km2 in south-east Berlin.
