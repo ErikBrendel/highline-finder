@@ -2,10 +2,16 @@
  * Collapses every feasible line's anchors into a handful of "interesting spots".
  *
  * The purpose is a layer you can read at the scale of a whole state: not which line to walk, but
- * which valley to go and look at. So it is built from every line that passed the hard constraints,
- * not from the capped and deduped candidate list -- a place where 400 near-identical spans work is
- * more interesting than one where a single line does, and the candidate list deliberately throws
- * that difference away.
+ * which valley to go and look at. So it is built from every walkable line, not from the capped and
+ * deduped candidate list -- a place where 400 near-identical spans work is more interesting than
+ * one where a single line does, and the candidate list deliberately throws that difference away.
+ *
+ * "Walkable" here means clearing the canopy as well as the terrain, which is stricter than the
+ * search's own definition of feasible. Everywhere else canopy is scored rather than enforced, on
+ * purpose -- a line through the trees is still worth reporting, with its blockage stated. But this
+ * layer answers "is there anything here", and answering yes on the strength of a thousand lines
+ * that all run through 20 m of pine is answering a different question than the one being asked. In
+ * closed-canopy Brandenburg that is the difference between a map of relief and a map of highlines.
  *
  * Data volume is the point. Two AOIs produce ~79k endpoints and about 300 spots at a 50 m radius,
  * a few tens of kilobytes, and the count grows with *terrain* rather than with area searched --
@@ -22,6 +28,13 @@ export interface Endpoint {
   e: number
   n: number
   score: number
+  /** Fraction of the span's interior that intersects canopy. */
+  blocked: number
+}
+
+/** Whether a line is clear enough of vegetation to actually be walked as found. */
+export function isWalkable(p: Endpoint): boolean {
+  return p.blocked === 0
 }
 
 export interface Hotspot {

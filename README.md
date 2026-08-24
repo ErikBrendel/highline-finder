@@ -59,7 +59,8 @@ the link goes stale rather than broken.
 
 ### Reading it at scale
 
-The `hotspots` layer, on by default, draws a red heatmap of every place where *any* feasible line was found, with
+The `hotspots` layer, on by default, draws a red heatmap of every place where a *walkable* line was
+found — one clearing the canopy as well as the terrain — with
 the endpoints of all of them collapsed at a 50 m radius and weighted by how many collapsed into
 each spot. It answers a different question from the candidate list — not "which line should I walk"
 but "which valley is worth a trip" — and it is the layer built to survive a much larger search

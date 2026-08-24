@@ -88,9 +88,9 @@ export interface FindResult {
   /** Deduplicated but not capped; run.ts refines and caps. */
   candidates: Candidate[]
   /**
-   * Both anchors of every feasible line, before dedup. Kept as bare positions because the full
-   * candidates would be tens of thousands of 120-sample profiles; this is what the hotspot layer
-   * is built from, and density is exactly what dedup destroys.
+   * Both anchors of every feasible line, before dedup, with the canopy figure the hotspot layer
+   * filters on. Kept as bare positions because the full candidates would be tens of thousands of
+   * 120-sample profiles; density is exactly what dedup destroys.
    */
   endpoints: Endpoint[]
   pairsInRange: number
@@ -223,8 +223,8 @@ export function findLines(
       if (!c) continue
       feasible.push(c)
       endpoints.push(
-        { e: c.a.e, n: c.a.n, score: c.score },
-        { e: c.b.e, n: c.b.n, score: c.score },
+        { e: c.a.e, n: c.a.n, score: c.score, blocked: c.canopyBlockedFraction },
+        { e: c.b.e, n: c.b.n, score: c.score, blocked: c.canopyBlockedFraction },
       )
     }
   }

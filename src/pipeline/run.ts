@@ -3,7 +3,7 @@ import { toWgs84 } from '../shared/geo.js'
 import { loadProduct } from './raster.js'
 import { packSectors, scanAnchors, type Anchor } from './openness.js'
 import { dedupe, findLines, refine } from './lines.js'
-import { clusterEndpoints, type Endpoint } from './hotspots.js'
+import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
 import type {
@@ -283,7 +283,8 @@ async function main() {
   await writeFile(ANCHORS_OUT, JSON.stringify(dump))
 
   // Clustered across all regions at once, so a spot straddling two of them is one spot.
-  const spots = clusterEndpoints(endpoints, HOTSPOT_RADIUS)
+  const walkable = endpoints.filter(isWalkable)
+  const spots = clusterEndpoints(walkable, HOTSPOT_RADIUS)
   spots.sort((a, b) => b.count - a.count)
   const hotspots: Hotspots = {
     radius: HOTSPOT_RADIUS,
@@ -302,8 +303,9 @@ async function main() {
   await writeFile(HOTSPOTS_OUT, JSON.stringify(hotspots))
   const hotKb = (JSON.stringify(hotspots).length / 1024).toFixed(0)
   console.log(
-    `hotspots: ${endpoints.length} feasible endpoints -> ${spots.length} spots ` +
-      `@${HOTSPOT_RADIUS}m (${hotKb} KB), busiest ${spots[0]?.count ?? 0} endpoints`,
+    `hotspots: ${endpoints.length} feasible endpoints, ${walkable.length} clear of canopy ` +
+      `-> ${spots.length} spots @${HOTSPOT_RADIUS}m (${hotKb} KB), ` +
+      `busiest ${spots[0]?.count ?? 0} endpoints`,
   )
   const anchorKb = (JSON.stringify(dump).length / 1024).toFixed(0)
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)

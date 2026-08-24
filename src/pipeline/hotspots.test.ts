@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { clusterEndpoints, type Endpoint } from './hotspots.js'
+import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 
-const at = (e: number, n: number, score = 50): Endpoint => ({ e, n, score })
+const at = (e: number, n: number, score = 50, blocked = 0): Endpoint => ({ e, n, score, blocked })
+
+describe('isWalkable', () => {
+  it('accepts a line that clears the canopy and rejects one that clips it at all', () => {
+    expect(isWalkable(at(0, 0, 50, 0))).toBe(true)
+    expect(isWalkable(at(0, 0, 50, 0.01))).toBe(false)
+  })
+})
 
 describe('clusterEndpoints', () => {
   it('collapses everything within the radius into one spot', () => {
