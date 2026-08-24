@@ -64,6 +64,7 @@ export function App() {
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
+  const [showHotspots, setShowHotspots] = useState(true)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -114,6 +115,17 @@ export function App() {
       .map((c) => rescoreAtSag(c, sagPct / 100, data.meta.params))
       .filter((c): c is Candidate => c !== null)
   }, [data, sagPct])
+
+  /**
+   * The "where is anything possible at all" layer, loaded eagerly and shown by default: it is 6 KB,
+   * and at the zoom the map opens at it is the only layer that says anything useful.
+   */
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}hotspots.json`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(setHotspots)
+      .catch(() => setLayerError('hotspots.json missing — run `npm run pipeline`'))
+  }, [])
 
   const customUtm = useMemo(() => {
     if (!custom.a || !custom.b) return null
@@ -219,23 +231,6 @@ export function App() {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setAnchorDump)
       .catch(() => setLayerError('anchors.json missing — run `npm run pipeline`'))
-  }
-
-  /**
-   * The "where is anything possible at all" layer. Fetched on demand like the anchor dump, but
-   * unlike it this one ships: it is a few tens of kilobytes and is the only view that stays
-   * meaningful as the searched area grows.
-   */
-  const toggleHotspots = () => {
-    if (hotspots) {
-      setHotspots(null)
-      return
-    }
-    setLayerError(null)
-    fetch(`${import.meta.env.BASE_URL}hotspots.json`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(setHotspots)
-      .catch(() => setLayerError('hotspots.json missing — run `npm run pipeline`'))
   }
 
   const visible = useMemo(() => {
@@ -355,7 +350,7 @@ export function App() {
             <button data-active={showLines} onClick={() => setShowLines(!showLines)}>
               {visible.length} lines
             </button>
-            <button data-active={!!hotspots} onClick={toggleHotspots}>
+            <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
               {hotspots ? `${hotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
             </button>
             {/* anchors.json is gitignored, so this only exists where the pipeline has run.
@@ -420,7 +415,7 @@ export function App() {
             selected={selected}
             basemapMix={basemapMix}
             anchorDump={anchorDump}
-            hotspots={hotspots}
+            hotspots={showHotspots ? hotspots : null}
             initialBbox={initial.bbox}
             custom={custom}
             showLines={showLines}
