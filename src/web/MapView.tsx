@@ -274,7 +274,15 @@ export function MapView({
   const dragging = useRef<'a' | 'b' | null>(null)
   const onMoveAnchorRef = useRef(onMoveAnchor)
   onMoveAnchorRef.current = onMoveAnchor
-  const ready = useRef(false)
+  /**
+   * Whether the style has finished loading, as state rather than a ref.
+   *
+   * Every effect below both guards on this and lists it, so anything that arrived before the map
+   * was ready gets applied the moment it is. A ref cannot do that -- flipping it re-runs nothing,
+   * so state set once at mount and never touched again (a view restored from the URL, say) would
+   * be dropped silently.
+   */
+  const [ready, setReady] = useState(false)
   const removeOverlay = useRef<(() => void) | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
@@ -507,7 +515,7 @@ export function MapView({
         wedgeSrc?.setData(emptyCollection)
       })
 
-      ready.current = true
+      setReady(true)
       // Publish the opening view, so the URL is shareable before the user touches anything.
       const b = m.getBounds()
       onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()])
@@ -520,43 +528,43 @@ export function MapView({
       anchorMarkers.current = {}
       m.remove()
       map.current = null
-      ready.current = false
+      setReady(false)
     }
   }, [data])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
     const src = m.getSource('lines') as maplibregl.GeoJSONSource | undefined
     src?.setData(toGeoJson(visible))
-  }, [visible])
+  }, [visible, ready])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
     const v = showLines ? 'visible' : 'none'
     for (const id of ['lines', 'lines-hit']) m.setLayoutProperty(id, 'visibility', v)
-  }, [showLines])
+  }, [showLines, ready])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
 
     m.removeFeatureState({ source: 'lines' })
     const index = selected ? visible.findIndex((c) => c.id === selected.id) : -1
     if (index >= 0) m.setFeatureState({ source: 'lines', id: index }, { sel: true })
-  }, [selected, visible])
+  }, [selected, visible, ready])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
     const src = m.getSource('hotspots') as maplibregl.GeoJSONSource | undefined
     src?.setData(hotspotsGeoJson(hotspots))
-  }, [hotspots])
+  }, [hotspots, ready])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
     if (anchorDump) {
       sectorCount.current = anchorDump.sectorCount
       anchorRange.current = [anchorDump.aFrameMin, anchorDump.aFrameMax]
@@ -569,14 +577,14 @@ export function MapView({
     }
     const src = m.getSource('anchorDump') as maplibregl.GeoJSONSource | undefined
     src?.setData(anchorPointsGeoJson(anchorDump))
-  }, [anchorDump])
+  }, [anchorDump, ready])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
     const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
     src?.setData(custom.a && custom.b ? lineFeature(custom.a, custom.b) : emptyCollection)
-  }, [custom])
+  }, [custom, ready])
 
   /**
    * The two anchor handles, for whichever line is being looked at.
@@ -592,7 +600,7 @@ export function MapView({
    */
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
 
     const planning = !selected || selected.id === PLANNED_ID
     const at: Record<'a' | 'b', LatLon | null> = selected
@@ -639,18 +647,18 @@ export function MapView({
       })
       anchorMarkers.current[which] = marker
     }
-  }, [selected, custom])
+  }, [selected, custom, ready])
 
   useEffect(() => {
     const m = map.current
-    if (!m || !ready.current) return
+    if (!m || !ready) return
     BASEMAPS.forEach((_, i) => {
       const id = `base${i}`
       const visible = basemapVisible(i, basemapMix, BASEMAPS.length)
       m.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none')
       if (visible) m.setPaintProperty(id, 'raster-opacity', basemapOpacity(i, basemapMix))
     })
-  }, [basemapMix])
+  }, [basemapMix, ready])
 
   return (
     <>
