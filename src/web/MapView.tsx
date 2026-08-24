@@ -71,6 +71,15 @@ export function basemapVisible(index: number, mix: number, count: number): boole
   return true
 }
 
+/** Shared with the legend, so the swatches cannot drift from what the map draws. */
+export const DEBUG_COLORS = {
+  skipped: '#0b1220',
+  barren: '#f59e0b',
+  productive: '#22c55e',
+  maskBelow: '#0b1220',
+  maskAbove: '#38bdf8',
+} as const
+
 const SCORE_COLOR: maplibregl.ExpressionSpecification = [
   'interpolate', ['linear'], ['get', 'score'],
   35, '#64748b',
@@ -433,9 +442,9 @@ export function MapView({
           // tight.
           'fill-color': [
             'case',
-            ['==', ['get', 'fetched'], 0], '#0b1220',
-            ['==', ['get', 'anchors'], 0], '#f59e0b',
-            '#22c55e',
+            ['==', ['get', 'fetched'], 0], DEBUG_COLORS.skipped,
+            ['==', ['get', 'anchors'], 0], DEBUG_COLORS.barren,
+            DEBUG_COLORS.productive,
           ],
           'fill-opacity': ['case', ['==', ['get', 'fetched'], 0], 0.55, 0.22],
         },
@@ -720,7 +729,7 @@ export function MapView({
     src?.setData(maskGeoJson(mask))
     const t = mask?.minDrop ?? 0
     m.setPaintProperty('mask', 'fill-color', [
-      'case', ['<', ['get', 'drop'], t], '#0b1220', '#38bdf8',
+      'case', ['<', ['get', 'drop'], t], DEBUG_COLORS.maskBelow, DEBUG_COLORS.maskAbove,
     ])
     m.setPaintProperty('mask', 'fill-opacity', mask
       ? ['case',

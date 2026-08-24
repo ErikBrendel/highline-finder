@@ -47,7 +47,7 @@ header .spacer { flex: 1; }
   /* Above .details: the control column is narrow and the details card is wide, so on anything
      short of a desktop they overlap, and the controls are the ones you need to reach. */
   z-index: 4;
-  width: 232px;
+  width: 288px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -263,7 +263,7 @@ header .spacer { flex: 1; }
   left: 10px;
   bottom: 10px;
   z-index: 3;
-  width: min(560px, calc(100% - 264px));
+  width: min(560px, calc(100% - 320px));
   max-height: calc(100% - 20px);
   overflow-y: auto;
   background: rgba(15, 17, 21, 0.96);
@@ -353,7 +353,32 @@ header .spacer { flex: 1; }
 
 /* Narrow screens: the details card takes the width and the controls float over it. */
 @media (max-width: 720px) {
-  .controls { width: min(232px, calc(100% - 20px)); }
+  .controls { width: min(288px, calc(100% - 20px)); }
   .details { width: calc(100% - 20px); max-height: 55%; }
   .details .cols { gap: 6px; }
 }
+
+/* Legend for whichever debug view is active. */
+.legendbox {
+  padding: 9px 11px;
+  background: rgba(15, 17, 21, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.legendbox h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.legendbox .key { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 5px; }
+.legendbox .key i {
+  flex: none; width: 11px; height: 11px; margin-top: 2px; border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.legendbox .key span { line-height: 1.35; }
+.legendbox .about { color: var(--muted); line-height: 1.5; margin-top: 8px; }
+.legendbox .stat { color: var(--accent); font-variant-numeric: tabular-nums; margin-top: 6px; }

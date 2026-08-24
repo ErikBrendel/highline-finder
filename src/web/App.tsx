@@ -10,7 +10,7 @@ import type {
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
-import { BASEMAPS, MIX_MAX, MapView } from './MapView.js'
+import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
@@ -21,6 +21,90 @@ import { cacheStats, clearTileCache } from './tileCache.js'
 import { parseUrl, toSearch } from './urlState.js'
 import { optimizeStep } from './optimize.js'
 import { toWgs84 } from '../shared/geo.js'
+
+type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface'
+
+/**
+ * What each debug view means, beside the map that draws it.
+ *
+ * These views are of the pipeline rather than of the terrain, so a colour on its own says nothing.
+ * The figures live here rather than in the button because they are the reading, not the label.
+ */
+function DebugLegend({
+  layer, mask, tiles,
+}: {
+  layer: Exclude<DebugLayer, 'none'>
+  mask: MaskCells | null
+  tiles: TileUsage | null
+}) {
+  const key = (color: string, opacity: number, text: string) => (
+    <div className="key" key={text}>
+      <i style={{ background: color, opacity }} />
+      <span>{text}</span>
+    </div>
+  )
+
+  if (layer === 'coarse') {
+    if (!mask) return null
+    const below = mask.drop.filter((d) => d < mask.minDrop).length
+    return (
+      <div className="legendbox">
+        <h3>Coarse pre-pass</h3>
+        {key(DEBUG_COLORS.maskBelow, 0.62, `falls under ${mask.minDrop} m — judged not worth a look`)}
+        {key(DEBUG_COLORS.maskAbove, 0.16, 'falls further — kept, fading as it gets steeper')}
+        <div className="stat">
+          {below.toLocaleString()} of {mask.drop.length.toLocaleString()} cells below the threshold
+        </div>
+        <div className="about">
+          The greatest fall within {mask.sourceRes * 2} m of each point, measured on a{' '}
+          {mask.sourceRes} m grid that costs almost nothing to fetch. It is diagnostics only: source
+          data arrives in 1 km tiles, so a verdict at {mask.sourceRes} m cannot be acted on. Compare
+          it with the terrain view to see that gap.
+        </div>
+      </div>
+    )
+  }
+
+  if (!tiles) return null
+  const fetched = (layer === 'terrain' ? tiles.terrain : tiles.surface).filter(Boolean).length
+  const barren = tiles.terrain.filter((t, i) => t && tiles.anchors[i] === 0).length
+
+  if (layer === 'terrain') {
+    return (
+      <div className="legendbox">
+        <h3>Terrain tiles fetched</h3>
+        {key(DEBUG_COLORS.productive, 0.22, 'fetched, and the 1 m scan found anchors in it')}
+        {key(DEBUG_COLORS.barren, 0.22, 'fetched and yielded nothing — the filter being too loose')}
+        {key(DEBUG_COLORS.skipped, 0.55, 'skipped — dark beside green means too tight')}
+        <div className="stat">
+          {fetched} of {tiles.lat.length} fetched, {barren} of those barren (~
+          {Math.round(barren * 1.4)} MB for nothing)
+        </div>
+        <div className="about">
+          One square per 1 km source tile, at 1.4 MB each. This is the granularity every fetching
+          decision is actually taken at, whatever the coarse pass concluded.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="legendbox">
+      <h3>Surface tiles fetched</h3>
+      {key(DEBUG_COLORS.productive, 0.22, 'a line crosses it, so canopy had to be measured')}
+      {key(DEBUG_COLORS.skipped, 0.55, 'no line crosses it — skipped')}
+      <div className="stat">
+        {fetched} of {tiles.lat.length} fetched, {tiles.lat.length - fetched} skipped (~
+        {Math.round((tiles.lat.length - fetched) * 32)} MB saved)
+      </div>
+      <div className="about">
+        The surface model is 32 MB per tile against the terrain model&rsquo;s 1.4, and canopy is
+        only ever scored, never a gate — so it is fetched after the terrain search, for the
+        corridors that survived it. This is the one prefilter that pays.
+      </div>
+    </div>
+  )
+}
 
 /**
  * Basemap tiles are served with `no-cache`, so they are cached in IndexedDB instead. Showing the
@@ -82,7 +166,7 @@ export function App() {
    * One debug view at a time. A coarse field and a grid of tiles drawn together are unreadable, and
    * the useful comparison is between them rather than of both at once.
    */
-  const [debugLayer, setDebugLayer] = useState<'none' | 'coarse' | 'terrain' | 'surface'>('none')
+  const [debugLayer, setDebugLayer] = useState<DebugLayer>('none')
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -160,12 +244,11 @@ export function App() {
       .catch(() => setLayerError(`${file} missing — run \`npm run pipeline\``))
   }
 
-  const debugLabel = () => {
-    if (debugLayer === 'none') return 'debug layers'
-    if (debugLayer === 'coarse') return mask ? `coarse drop @${mask.sourceRes} m` : 'coarse drop'
-    if (!tiles) return `${debugLayer} tiles`
-    const on = debugLayer === 'terrain' ? tiles.terrain : tiles.surface
-    return `${debugLayer}: ${on.filter(Boolean).length}/${on.length} tiles`
+  const DEBUG_LABELS: Record<DebugLayer, string> = {
+    none: 'debug layers',
+    coarse: 'coarse pre-pass',
+    terrain: 'terrain tiles',
+    surface: 'surface tiles',
   }
 
   useEffect(() => {
@@ -512,13 +595,16 @@ export function App() {
               </button>
             )}
             <button data-active={debugLayer !== 'none'} onClick={cycleDebug}>
-              {debugLabel()}
+              {DEBUG_LABELS[debugLayer]}
             </button>
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>
           </div>
           {layerError && <div className="togglenote">{layerError}</div>}
+          {debugLayer !== 'none' && (
+            <DebugLegend layer={debugLayer} mask={mask} tiles={tiles} />
+          )}
 
           {showFilters && (
             <div className="filters">
