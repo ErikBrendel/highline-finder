@@ -3,7 +3,11 @@ import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '
 import type { Cover } from './landcover.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
-import { PLANNED_REFINE_RADIUS, PLANNED_REFINE_STEP } from './optimize.js'
+import {
+  PLANNED_REFINE_DIRECTIONS,
+  PLANNED_REFINE_RADIUS,
+  PLANNED_REFINE_STEP,
+} from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
 
 function scoreColor(score: number): string {
@@ -27,10 +31,12 @@ function optimizeHelp(offer: number | null): string {
   const lines = [
     'Hill-climb both anchors toward a better score, one at a time.',
     '',
-    'Each step tries anchor A in 8 compass directions, keeps the best move if any beats where it ' +
-      'stands, then does the same for B against A’s new position. 16 candidate lines per step, ' +
-      'not 64 — the two ends are searched separately, so a move only both ends together would ' +
-      'find is invisible to it.',
+    `Each step tries anchor A in ${PLANNED_REFINE_DIRECTIONS} compass directions ` +
+      `(${(360 / PLANNED_REFINE_DIRECTIONS).toFixed(2)}° apart), keeps the best move if any beats ` +
+      'where it stands, then does the same for B against A’s new position. That is ' +
+      `${PLANNED_REFINE_DIRECTIONS * 2} candidate lines per step, not ` +
+      `${PLANNED_REFINE_DIRECTIONS ** 2} — the two ends are searched separately, so a move only ` +
+      'both ends together would find is invisible to it.',
     '',
     `Steps start at ${(PLANNED_REFINE_STEP * reach).toFixed(1)} m and halve whenever the walk ` +
       `stalls, down to ${PLANNED_REFINE_STEP} m, so it finishes at full resolution however far it ` +
