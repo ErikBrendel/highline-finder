@@ -4,7 +4,7 @@ import { corridorTiles, loadProduct } from './raster.js'
 import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
-import { dedupe, evaluatePairs, refine, terrainPairs } from './lines.js'
+import { dedupe, evaluatePairs, locate, refine, terrainPairs } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
@@ -374,7 +374,7 @@ async function main() {
   // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
   // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
   // line found is stored.
-  const deduped = await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius))
+  const deduped = (await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius))).map(locate)
   const finalCandidates = p.storeProfiles
     ? deduped
     : deduped.map(({ profile: _profile, ...rest }) => rest)

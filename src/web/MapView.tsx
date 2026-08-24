@@ -337,7 +337,7 @@ interface Props {
   onSetCustom: (which: 'a' | 'b', at: LatLon | null) => void
   onClearCustom: () => void
   onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
-  onViewport: (bbox: [number, number, number, number]) => void
+  onViewport: (bbox: [number, number, number, number], zoom: number) => void
 }
 
 export function MapView({
@@ -626,7 +626,7 @@ export function MapView({
       })
       m.on('moveend', () => {
         const b = m.getBounds()
-        onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()])
+        onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], m.getZoom())
       })
       m.on('movestart', () => setMenu(null))
       m.on('click', () => setMenu(null))
@@ -670,7 +670,7 @@ export function MapView({
       setReady(true)
       // Publish the opening view, so the URL is shareable before the user touches anything.
       const b = m.getBounds()
-      onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()])
+      onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], m.getZoom())
     })
     return () => {
       removeOverlay.current?.()

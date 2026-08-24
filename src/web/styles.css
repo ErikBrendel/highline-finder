@@ -382,3 +382,9 @@ header .spacer { flex: 1; }
 .legendbox .key span { line-height: 1.35; }
 .legendbox .about { color: var(--muted); line-height: 1.5; margin-top: 8px; }
 .legendbox .stat { color: var(--accent); font-variant-numeric: tabular-nums; margin-top: 6px; }
+
+header .external {
+  font-size: 11px; color: var(--accent); text-decoration: none;
+  border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; white-space: nowrap;
+}
+header .external:hover { border-color: var(--accent); }

@@ -119,6 +119,11 @@ export function evaluateLine(
   ground: Grid,
   surface: Grid,
   p: Params,
+  /**
+   * Set when the caller has already run the terrain gate on this exact pair, which the pair search
+   * has: repeating it costs a full raster walk per surviving line and cannot change the answer.
+   */
+  terrainAlreadyChecked = false,
 ): Candidate | null {
   const gA = ground.nearest(a.e, a.n)
   const gB = ground.nearest(b.e, b.n)
@@ -138,7 +143,7 @@ export function evaluateLine(
   )
   if (!h) return null
 
-  if (!clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) return null
+  if (!terrainAlreadyChecked && !clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) return null
 
   // Round the scalars before anything is measured from them. The web app re-derives every
   // clearance from these serialised values, so measuring from the full-precision ones would let
@@ -149,13 +154,14 @@ export function evaluateLine(
   const hA = r2(h.hA)
   const hB = r2(h.hB)
   const bearing = bearingOf(dE, dN)
-  const wa = toWgs84(a.e, a.n)
-  const wb = toWgs84(b.e, b.n)
 
+  // Latitude and longitude are left unset here and filled in by `locate` once the line is known to
+  // be worth keeping. Projecting is two proj4 transforms, which over two million feasible lines is
+  // twenty seconds spent on coordinates that dedup is about to discard.
   const provisional: Candidate = {
     id: `${a.e.toFixed(1)}_${a.n.toFixed(1)}__${b.e.toFixed(1)}_${b.n.toFixed(1)}`,
-    a: { ...wa, e: a.e, n: a.n, ground: r2(gA), anchor: hA, aFrame: r2(hA - gA) },
-    b: { ...wb, e: b.e, n: b.n, ground: r2(gB), anchor: hB, aFrame: r2(hB - gB) },
+    a: { lat: NaN, lon: NaN, e: a.e, n: a.n, ground: r2(gA), anchor: hA, aFrame: r2(hA - gA) },
+    b: { lat: NaN, lon: NaN, e: b.e, n: b.n, ground: r2(gB), anchor: hB, aFrame: r2(hB - gB) },
     length: roundedLength,
     bearing: Math.round(((bearing * 180) / Math.PI) * 10) / 10,
     sag: 0,
@@ -261,6 +267,15 @@ export function terrainPairs(anchors: Anchor[], ground: Grid, p: Params): Terrai
   return { pairs, pairsInRange, pairsSectorPassed, pairsLevelEnough }
 }
 
+/** Fills in the WGS84 coordinates a candidate carries for display. */
+export function locate(c: Candidate): Candidate {
+  return {
+    ...c,
+    a: { ...c.a, ...toWgs84(c.a.e, c.a.n) },
+    b: { ...c.b, ...toWgs84(c.b.e, c.b.n) },
+  }
+}
+
 /** Scores terrain-passing pairs against the surface model, and collapses near-duplicates. */
 export function evaluatePairs(
   found: TerrainPairs,
@@ -271,7 +286,7 @@ export function evaluatePairs(
   const feasible: Candidate[] = []
   const endpoints: Endpoint[] = []
   for (const [a, b] of found.pairs) {
-    const c = evaluateLine(a, b, ground, surface, p)
+    const c = evaluateLine(a, b, ground, surface, p, true)
     if (!c) continue
     feasible.push(c)
     endpoints.push(

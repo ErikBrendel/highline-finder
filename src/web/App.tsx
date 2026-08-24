@@ -153,6 +153,8 @@ export function App() {
   const [maxOffLevel, setMaxOffLevel] = useState(100)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [bbox, setBbox] = useState(initial.bbox)
+  // Google's map zoom is the same web-mercator scale MapLibre uses, so it transfers directly.
+  const [zoom, setZoom] = useState(13)
   // OSM by default: paths, roads and place names orient you before you know where you are looking.
   const [basemapMix, setBasemapMix] = useState(
     Math.min(MIX_MAX, Math.max(0, initial.basemapMix ?? MIX_MAX)),
@@ -548,6 +550,19 @@ export function App() {
           {' · '}{areaKm2.toFixed(1)} km&sup2;
           {' · '}terrain {groundMin}&ndash;{groundMax} m
         </span>
+        {bbox && (
+          <a
+            className="external"
+            href={`https://www.google.com/maps/@${((bbox[0] + bbox[2]) / 2).toFixed(6)},${(
+              (bbox[1] + bbox[3]) / 2
+            ).toFixed(6)},${zoom.toFixed(2)}z/data=!3m1!1e3`}
+            target="_blank"
+            rel="noreferrer"
+            title="Open this view in Google Maps satellite imagery"
+          >
+            Google Maps &nearr;
+          </a>
+        )}
         <span className="spacer" />
         <span className="meta">
           {stats.anchorsKept.toLocaleString()} anchors {' · '}
@@ -673,7 +688,10 @@ export function App() {
             onSetCustom={setCustomPoint}
             onClearCustom={clearCustom}
             onMoveAnchor={moveAnchor}
-            onViewport={setBbox}
+            onViewport={(b, z) => {
+              setBbox(b)
+              setZoom(z)
+            }}
           />
 
           {(selected || planPending) && (
