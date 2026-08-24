@@ -44,7 +44,9 @@ header .spacer { flex: 1; }
   top: 10px;
   right: 10px;
   bottom: 10px;
-  z-index: 3;
+  /* Above .details: the control column is narrow and the details card is wide, so on anything
+     short of a desktop they overlap, and the controls are the ones you need to reach. */
+  z-index: 4;
   width: 232px;
   display: flex;
   flex-direction: column;
@@ -347,4 +349,11 @@ header .spacer { flex: 1; }
 @keyframes optimise-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
+}
+
+/* Narrow screens: the details card takes the width and the controls float over it. */
+@media (max-width: 720px) {
+  .controls { width: min(232px, calc(100% - 20px)); }
+  .details { width: calc(100% - 20px); max-height: 55%; }
+  .details .cols { gap: 6px; }
 }
