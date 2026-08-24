@@ -125,3 +125,27 @@ export function minFilter(src: Grid, radius: number): Grid {
   }
   return new Grid(out, w, h, src.e0, src.n1, src.res)
 }
+
+/**
+ * Copies `src` into `dest`, keeping the greater value where they overlap.
+ *
+ * Same rule as the GeoTIFF blitter, for the same reason: the tallest obstacle in a cell is the one
+ * that matters for clearance. Cells of `src` that fall outside `dest` are dropped.
+ */
+export function blitGrid(src: Grid, dest: Grid): void {
+  for (let sy = 0; sy < src.h; sy++) {
+    const n = src.n1 - (sy + 0.5) * src.res
+    const drow = Math.floor((dest.n1 - n) / dest.res)
+    if (drow < 0 || drow >= dest.h) continue
+    for (let sx = 0; sx < src.w; sx++) {
+      const v = src.data[sy * src.w + sx]!
+      if (Number.isNaN(v)) continue
+      const e = src.e0 + (sx + 0.5) * src.res
+      const dcol = Math.floor((e - dest.e0) / dest.res)
+      if (dcol < 0 || dcol >= dest.w) continue
+      const i = drow * dest.w + dcol
+      const cur = dest.data[i]!
+      if (Number.isNaN(cur) || v > cur) dest.data[i] = v
+    }
+  }
+}

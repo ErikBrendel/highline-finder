@@ -1,8 +1,7 @@
-import { readFile } from 'node:fs/promises'
 import { tilesForBounds } from '../shared/geo.js'
-import { Grid } from '../shared/grid.js'
-import { blitGeoTiff } from '../shared/geotiff.js'
-import { tileTiff, type Product } from './cache.js'
+import { blitGrid, Grid } from '../shared/grid.js'
+import { ensureDownsampled, loadTile } from './downsample.js'
+import type { Product } from './cache.js'
 
 /**
  * The 1 km tiles the corridors of these lines pass through, expanded by `margin`.
@@ -47,14 +46,12 @@ export async function loadProduct(
   const h = n1 - Math.floor(bounds.minN)
   const grid = Grid.filled(Math.ceil(w / res), Math.ceil(h / res), e0, n1, res)
 
-  for (const tile of tilesForBounds(bounds.minE, bounds.minN, bounds.maxE, bounds.maxN)) {
-    if (only && !only.has(tile)) continue
-    const buf = await readFile(await tileTiff(product, tile))
-    await blitGeoTiff(
-      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
-      grid,
-    )
-  }
+  const tiles = tilesForBounds(bounds.minE, bounds.minN, bounds.maxE, bounds.maxN).filter(
+    (t) => !only || only.has(t),
+  )
+  // Reduce whatever is not cached yet, several tiles at a time, then assemble from the cache.
+  await ensureDownsampled(product, tiles, res)
+  for (const tile of tiles) blitGrid(await loadTile(product, tile, res), grid)
   return grid
 }
 

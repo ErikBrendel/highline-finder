@@ -32,7 +32,14 @@ found crossing between them; further apart they are searched independently and t
 Overlapping areas are allowed — the dedup pass collapses whatever both of them find. See
 [`src/pipeline/regions.ts`](src/pipeline/regions.ts).
 
-Rasters are cached in `data/cache/`, so re-runs after a parameter change skip all downloads.
+Rasters are cached in `data/cache/`, so re-runs after a parameter change skip all downloads. The
+0.2 m surface model is also reduced to 1 m once per tile and kept, since decoding it was 43 % of a
+full run and always produces the same answer; that step spreads across processes. To fill the cache
+for particular tiles ahead of time:
+
+```bash
+npm run downsample -- bdom 1 33407-5784 33408-5784
+```
 Tunables all live in [`src/pipeline/params.ts`](src/pipeline/params.ts).
 
 ```bash

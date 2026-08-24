@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "downsample": "tsx src/pipeline/downsample.ts"
   },
   "dependencies": {
     "fflate": "^0.8.2",
