@@ -122,25 +122,53 @@ export function dropField(g: Grid, radius: number): Grid {
 /**
  * The 1 km tiles worth fetching at full resolution, from a coarse drop field.
  *
- * Dilated by one tile. A line reaches up to `maxLength` from its anchor, so it can cross into a
- * neighbouring tile; without the dilation an accepted anchor's line would run into unloaded terrain
- * and be silently dropped. One tile is 1 km, comfortably more than `maxLength`.
+ * Two rules, because a single passing cell means nothing. A tile qualifies only when `minCoverage`
+ * of its cells fall far enough -- a flat kilometre with three cells scraping past a threshold is a
+ * ditch, not terrain worth a search, and taking any single cell as evidence let exactly that pull
+ * in whole tiles. A fraction rather than a count so the rule does not change meaning when the
+ * coarse resolution does.
+ *
+ * The result is then everything within `reach` of a passing cell in a qualified tile, not every
+ * neighbour of a qualified tile. A line runs up to `maxLength` from its anchor and unloaded terrain
+ * reads as absent rather than as an error, so the margin has to exist -- but growing it from the
+ * cells that earned it keeps it far tighter than growing it from whole tiles.
  */
-export function tilesWorthLoading(drop: Grid, minDrop: number): Set<string> {
-  const seeds = new Set<string>()
+export function tilesWorthLoading(
+  drop: Grid,
+  minDrop: number,
+  minCoverage: number,
+  reach: number,
+): Set<string> {
+  const tileOf = (e: number, n: number) => `${Math.floor(e / 1000)}_${Math.floor(n / 1000)}`
+  const counts = new Map<string, { pass: number; total: number }>()
+  const passing: [number, number][] = []
+
   for (let y = 0; y < drop.h; y++) {
     for (let x = 0; x < drop.w; x++) {
       const v = drop.data[y * drop.w + x]!
-      if (Number.isNaN(v) || v < minDrop) continue
+      if (Number.isNaN(v)) continue
       const e = drop.e0 + (x + 0.5) * drop.res
       const n = drop.n1 - (y + 0.5) * drop.res
-      seeds.add(`${Math.floor(e / 1000)}_${Math.floor(n / 1000)}`)
+      const key = tileOf(e, n)
+      const rec = counts.get(key) ?? { pass: 0, total: 0 }
+      rec.total++
+      if (v >= minDrop) {
+        rec.pass++
+        passing.push([e, n])
+      }
+      counts.set(key, rec)
     }
   }
+
   const out = new Set<string>()
-  for (const key of seeds) {
-    const [e, n] = key.split('_').map(Number) as [number, number]
-    for (let de = -1; de <= 1; de++) for (let dn = -1; dn <= 1; dn++) out.add(`33${e + de}-${n + dn}`)
+  for (const [e, n] of passing) {
+    const rec = counts.get(tileOf(e, n))!
+    if (rec.pass < rec.total * minCoverage) continue
+    for (let te = Math.floor((e - reach) / 1000); te <= Math.floor((e + reach) / 1000); te++) {
+      for (let tn = Math.floor((n - reach) / 1000); tn <= Math.floor((n + reach) / 1000); tn++) {
+        out.add(`33${te}-${tn}`)
+      }
+    }
   }
   return out
 }

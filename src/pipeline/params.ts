@@ -85,12 +85,16 @@ export const DEFAULT_PARAMS: Params = {
   storeProfiles: false,
 
   // Coarse pre-pass. 16 m costs ~15 KB per square kilometre against 1.4 MB for the 1 m tiles, so
-  // screening at this resolution is effectively free. The 4 m threshold is deliberately timid --
-  // the real gate is 10 m within 25 m, and averaging to 16 m under-reports -- so this rejects only
-  // ground that is unambiguously flat. A measured dead-flat rectangle reads 1.8 m here.
+  // screening at this resolution is effectively free.
+  //
+  // The threshold matches the exact gate rather than guessing at slack for downsampling. Measured
+  // at 239,392 real anchors, the coarse drop reads 14.9 m at the median and 5.8 m at the first
+  // percentile, so averaging to 16 m costs far less than the 4 m this used to allow. At 10 m with
+  // the coverage rule, 78% of tiles are fetched and 99.99% of anchors stay reachable.
   maskRes: 16,
   maskRadius: 32,
-  maskMinDrop: 4,
+  maskMinDrop: 10,
+  maskMinCoverage: 0.02,
   maskExportRes: 128,
   // The web app re-derives clearances from this profile rather than the raster, so its resolution
   // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m
@@ -115,6 +119,6 @@ export const DEFAULT_AOIS: Aoi[] = [
   { south: 52.769741, west: 13.874750, north: 52.869081, east: 14.058569 },
   // Linthe: 4.6 km2 west of Berlin.
   { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
-  // Vehlen: 5.3 km2, further west again.
-  { south: 52.422160, west: 12.297235, north: 52.444399, east: 12.328746 },
+  // Vehlen: 10.6 km2, further west again.
+  { south: 52.422160, west: 12.297235, north: 52.444399, east: 12.360257 },
 ]

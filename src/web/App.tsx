@@ -57,9 +57,10 @@ function DebugLegend({
         </div>
         <div className="about">
           The greatest fall within {mask.sourceRes * 2} m of each point, measured on a{' '}
-          {mask.sourceRes} m grid that costs almost nothing to fetch. It is diagnostics only: source
-          data arrives in 1 km tiles, so a verdict at {mask.sourceRes} m cannot be acted on. Compare
-          it with the terrain view to see that gap.
+          {mask.sourceRes} m grid that costs almost nothing to fetch, and drawn here in{' '}
+          {mask.res} m squares that each take the steepest reading inside them. Source data arrives
+          in 1 km tiles, so this verdict is acted on a tile at a time: compare it with the terrain
+          view, whose squares are eight times wider, to see that gap.
         </div>
       </div>
     )
@@ -81,8 +82,9 @@ function DebugLegend({
           {Math.round(barren * 1.4)} MB for nothing)
         </div>
         <div className="about">
-          One square per 1 km source tile, at 1.4 MB each. This is the granularity every fetching
-          decision is actually taken at, whatever the coarse pass concluded.
+          One square per {tiles.size / 1000} km source tile, at 1.4 MB each. This is the
+          granularity every fetching decision is actually taken at, whatever the coarse pass
+          concluded at its own much finer scale.
         </div>
       </div>
     )
@@ -98,9 +100,9 @@ function DebugLegend({
         {Math.round((tiles.lat.length - fetched) * 32)} MB saved)
       </div>
       <div className="about">
-        The surface model is 32 MB per tile against the terrain model&rsquo;s 1.4, and canopy is
-        only ever scored, never a gate — so it is fetched after the terrain search, for the
-        corridors that survived it. This is the one prefilter that pays.
+        Same {tiles.size / 1000} km squares as the terrain view. The surface model is 32 MB per
+        tile against the terrain model&rsquo;s 1.4, and canopy is only ever scored, never a gate —
+        so it is fetched after the terrain search, for the corridors that survived it.
       </div>
     </div>
   )

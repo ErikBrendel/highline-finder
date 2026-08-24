@@ -127,6 +127,14 @@ export interface Params {
    * for half the area, and a 12 m threshold keeps ~84% for a quarter.
    */
   maskMinDrop: number
+  /**
+   * Fraction of a tile's coarse cells that must pass before the tile is worth fetching.
+   *
+   * A single passing cell is noise -- a ditch or a field edge -- and taking it as evidence pulled
+   * in whole flat kilometres. A fraction rather than a count so the rule keeps its meaning if
+   * `maskRes` changes.
+   */
+  maskMinCoverage: number
   /** Cell size the mask is aggregated to for the debug overlay, in metres. */
   maskExportRes: number
   /** Samples kept in the serialised profile, to bound output size. */

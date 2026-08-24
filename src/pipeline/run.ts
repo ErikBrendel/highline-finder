@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
+import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
-import { packSectors, scanAnchors, type Anchor } from './openness.js'
+import { packSectors, scanAnchors } from './openness.js'
 import { dedupe, evaluatePairs, refine, terrainPairs } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
@@ -42,27 +43,32 @@ const TILES_OUT = new URL('../web/public/tiles.json', import.meta.url).pathname
  */
 const HOTSPOT_RADIUS = 50
 
+/**
+ * Everything one region contributes, in a form that survives a round trip through JSON.
+ *
+ * Serialisable on purpose: regions are independent, so a region whose inputs have not changed is
+ * read back from disk instead of recomputed. Endpoints are parallel arrays rather than objects
+ * because there are millions of them and the key names would otherwise be most of the file.
+ */
 interface AreaResult {
   region: Region
-  /** Anchors inside the AOIs, for the debug dump. */
-  anchors: Anchor[]
   /** The coarse pre-pass, aggregated for the map overlay. */
   mask: MaskCells
   /** What was actually fetched per source tile, and what it yielded. */
   tiles: TileUsage
-  /** Anchors of every feasible line in this area, for the hotspot layer. */
-  endpoints: Endpoint[]
-  refined: {
-    candidates: Candidate[]
-    improved: number
-    totalGain: number
-    find: {
-      pairsInRange: number
-      pairsSectorPassed: number
-      pairsLevelEnough: number
-      pairsFeasible: number
-      candidatesAfterDedup: number
-    }
+  /** Anchors inside the AOIs, already in the shape the debug dump wants. */
+  anchors: { lat: number[]; lon: number[]; ground: number[]; drop: number[]; open: string[] }
+  /** Anchors of every feasible line, for the hotspot layer. */
+  endpoints: { e: number[]; n: number[]; score: number[]; blocked: number[] }
+  candidates: Candidate[]
+  improved: number
+  totalGain: number
+  find: {
+    pairsInRange: number
+    pairsSectorPassed: number
+    pairsLevelEnough: number
+    pairsFeasible: number
+    candidatesAfterDedup: number
   }
 }
 
@@ -96,7 +102,10 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   const coarse = await loadCoarse(bbox, p.maskRes)
   const drop = dropField(coarse, p.maskRadius)
   const allTiles = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
-  const wantedTiles = p.maskMinDrop > 0 ? tilesWorthLoading(drop, p.maskMinDrop) : null
+  const wantedTiles =
+    p.maskMinDrop > 0
+      ? tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, p.maxLength)
+      : null
   const groundTiles = wantedTiles ? allTiles.filter((t) => wantedTiles.has(t)) : allTiles
   const passing = [...drop.data].filter((v) => !Number.isNaN(v) && v >= p.maskMinDrop).length
   const valid = [...drop.data].filter((v) => !Number.isNaN(v)).length
@@ -195,6 +204,24 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
   }
 
+  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+  const dump = { lat: [], lon: [], ground: [], drop: [], open: [] } as AreaResult['anchors']
+  for (const a of anchors) {
+    const { lat, lon } = toWgs84(a.e, a.n)
+    dump.lat.push(r6(lat))
+    dump.lon.push(r6(lon))
+    dump.ground.push(Math.round(a.ground * 10) / 10)
+    dump.drop.push(Math.round(a.dropDepth * 10) / 10)
+    dump.open.push(packSectors(a.open))
+  }
+  const packed = { e: [], n: [], score: [], blocked: [] } as AreaResult['endpoints']
+  for (const e of r.endpoints) {
+    packed.e.push(e.e)
+    packed.n.push(e.n)
+    packed.score.push(e.score)
+    packed.blocked.push(e.blocked)
+  }
+
   return {
     region: {
       aois: area.aois,
@@ -206,21 +233,19 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       anchorsScanned: scan.scanned,
       anchorsKept: anchors.length,
     },
-    anchors,
     mask: exportMask(drop, p),
     tiles,
-    endpoints: r.endpoints,
-    refined: {
-      candidates: ref.candidates,
-      improved: ref.improved,
-      totalGain: ref.totalGain,
-      find: {
-        pairsInRange: r.pairsInRange,
-        pairsSectorPassed: r.pairsSectorPassed,
-        pairsLevelEnough: r.pairsLevelEnough,
-        pairsFeasible: r.pairsFeasible,
-        candidatesAfterDedup: r.candidatesAfterDedup,
-      },
+    anchors: dump,
+    endpoints: packed,
+    candidates: ref.candidates,
+    improved: ref.improved,
+    totalGain: ref.totalGain,
+    find: {
+      pairsInRange: r.pairsInRange,
+      pairsSectorPassed: r.pairsSectorPassed,
+      pairsLevelEnough: r.pairsLevelEnough,
+      pairsFeasible: r.pairsFeasible,
+      candidatesAfterDedup: r.candidatesAfterDedup,
     },
   }
 }
@@ -253,7 +278,7 @@ async function main() {
   }
 
   const regions: Region[] = []
-  const dumpAnchors: Anchor[] = []
+  const dumpAnchors: AreaResult['anchors'] = { lat: [], lon: [], ground: [], drop: [], open: [] }
   const refinedAll: Candidate[] = []
   const endpoints: Endpoint[] = []
   const maskCells: MaskCells[] = []
@@ -270,29 +295,60 @@ async function main() {
     refineGain: 0,
   }
 
+  let reused = 0
   for (const [index, area] of areas.entries()) {
     const label = `region ${index + 1}/${areas.length}`
-    console.log(`\n=== ${label} ===`)
-    const found = await searchArea(area, p, label)
-    const { anchors, region, refined } = found
+    const key = await regionKey(area.aois, p)
+    const cached = await readRegion<AreaResult>(key)
+    let found: AreaResult
+    if (cached) {
+      reused++
+      console.log(
+        `\n=== ${label} (unchanged, reused) ===\n` +
+          `  ${cached.region.anchorsKept} anchors, ${cached.find.pairsFeasible} feasible, ` +
+          `${cached.candidates.length} distinct`,
+      )
+      found = cached
+    } else {
+      console.log(`\n=== ${label} ===`)
+      found = await searchArea(area, p, label)
+      const bytes = await writeRegion(key, found)
+      console.log(`  cached as region_${key}.json (${(bytes / 1e6).toFixed(1)} MB)`)
+    }
+
+    const { region } = found
     regions.push(region)
     // Appended one at a time rather than spread: a 141 km2 area produces 3.2 million endpoints,
     // and passing those as arguments exceeds the call stack.
-    for (const a of anchors) dumpAnchors.push(a)
-    for (const e of found.endpoints) endpoints.push(e)
-    for (const c of refined.candidates) refinedAll.push(c)
+    for (let i = 0; i < found.anchors.lat.length; i++) {
+      dumpAnchors.lat.push(found.anchors.lat[i]!)
+      dumpAnchors.lon.push(found.anchors.lon[i]!)
+      dumpAnchors.ground.push(found.anchors.ground[i]!)
+      dumpAnchors.drop.push(found.anchors.drop[i]!)
+      dumpAnchors.open.push(found.anchors.open[i]!)
+    }
+    for (let i = 0; i < found.endpoints.e.length; i++) {
+      endpoints.push({
+        e: found.endpoints.e[i]!,
+        n: found.endpoints.n[i]!,
+        score: found.endpoints.score[i]!,
+        blocked: found.endpoints.blocked[i]!,
+      })
+    }
+    for (const c of found.candidates) refinedAll.push(c)
     maskCells.push(found.mask)
     tileUse.push(found.tiles)
     totals.anchorsScanned += region.anchorsScanned
     totals.anchorsKept += region.anchorsKept
-    totals.pairsInRange += refined.find.pairsInRange
-    totals.pairsSectorPassed += refined.find.pairsSectorPassed
-    totals.pairsLevelEnough += refined.find.pairsLevelEnough
-    totals.pairsFeasible += refined.find.pairsFeasible
-    totals.candidatesAfterDedup += refined.find.candidatesAfterDedup
-    totals.refinedCount += refined.improved
-    totals.refineGain += refined.totalGain
+    totals.pairsInRange += found.find.pairsInRange
+    totals.pairsSectorPassed += found.find.pairsSectorPassed
+    totals.pairsLevelEnough += found.find.pairsLevelEnough
+    totals.pairsFeasible += found.find.pairsFeasible
+    totals.candidatesAfterDedup += found.find.candidatesAfterDedup
+    totals.refinedCount += found.improved
+    totals.refineGain += found.totalGain
   }
+  if (reused) console.log(`\n${reused} of ${areas.length} region(s) reused unchanged`)
 
   // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
   // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
@@ -346,7 +402,6 @@ async function main() {
   await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
   await writeFile(OUT, JSON.stringify(dataset))
 
-  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
   const dump: AnchorDump = {
     sectorCount: p.sectorCount,
     aFrameMin: p.aFrameMin,
@@ -355,22 +410,11 @@ async function main() {
     nearProbeLength: p.nearProbeLength,
     minDropDepth: p.minDropDepth,
     dropSearchRadius: p.dropSearchRadius,
-    lat: [],
-    lon: [],
-    ground: [],
-    drop: [],
-    open: [],
-  }
-  for (const a of dumpAnchors) {
-    const { lat, lon } = toWgs84(a.e, a.n)
-    dump.lat.push(r6(lat))
-    dump.lon.push(r6(lon))
-    dump.ground.push(Math.round(a.ground * 10) / 10)
-    dump.drop.push(Math.round(a.dropDepth * 10) / 10)
-    dump.open.push(packSectors(a.open))
+    ...dumpAnchors,
   }
   await writeFile(ANCHORS_OUT, JSON.stringify(dump))
 
+  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
   const mask: MaskCells = {
     res: p.maskExportRes,
     sourceRes: p.maskRes,
@@ -431,7 +475,7 @@ async function main() {
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
   console.log(
     `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB), ` +
-      `anchors.json (${anchorKb} KB, ${dumpAnchors.length} points)`,
+      `anchors.json (${anchorKb} KB, ${dumpAnchors.lat.length} points)`,
   )
 
   if (finalCandidates.length) {
