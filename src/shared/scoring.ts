@@ -1,5 +1,4 @@
-import type { Candidate, Params, ProfileSample, ScoreParts, StoredProfile } from './types.js'
-import { unpackProfile } from './profile.js'
+import type { Candidate, Params, ScoreParts, StoredProfile } from './types.js'
 
 /**
  * Sag geometry, clearance metrics and scoring, shared by the pipeline and the web app.
@@ -65,32 +64,31 @@ export function lineHeightAt(hA: number, hB: number, sag: number, t: number): nu
   return hA + (hB - hA) * t - 4 * sag * t * (1 - t)
 }
 
-/** Line height at every profile sample, for a given sag as a fraction of span. */
-export function lineOverProfile(
-  profile: ProfileSample[],
+const r2 = (v: number) => Math.round(v * 100) / 100
+
+/**
+ * Clearance metrics read straight off a stored profile, without materialising it.
+ *
+ * The single implementation, because it is on the hot path twice over: every feasible line is
+ * measured once for its own metrics and about sixteen more times while bisecting for the loosest
+ * sag it survives. Expanding the profile into objects for each of those was 61% of the scoring
+ * stage -- two million lines times sixteen expansions is thirty-two million allocations of a
+ * hundred and twenty-one objects, to read each one once and throw it away.
+ *
+ * Sample distance and line height are rounded exactly as unpackProfile rounds them, so this agrees
+ * with what a materialised profile would have given down to the last decimal rather than
+ * approximately. A test holds the two together.
+ */
+export function rawMetricsAt(
+  sp: StoredProfile,
   length: number,
   hA: number,
   hB: number,
   sagRatio: number,
-): number[] {
-  const sag = sagRatio * length
-  return profile.map((s) => lineHeightAt(hA, hB, sag, length > 0 ? s.d / length : 0))
-}
-
-/**
- * Clearance metrics over a profile, or null when the line fails a hard constraint.
- *
- * Clearance is only required on the interior of the span, outside `anchorZone` at each end. At an
- * anchor the line may sit at ground level, so a whole-span requirement would reject everything.
- * The ISA's own guidance points the same way: mount a few metres in from the edge rather than
- * walking straight off it.
- */
-export function rawMetrics(
-  profile: ProfileSample[],
-  line: number[],
-  length: number,
   p: Params,
 ): Metrics | null {
+  const last = sp.ground.length - 1
+  const sag = sagRatio * length
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
   let clearanceMin = Infinity
@@ -99,26 +97,39 @@ export function rawMetrics(
   let blocked = 0
   let samples = 0
 
-  for (let i = 0; i < profile.length; i++) {
-    const s = profile[i]!
-    const clear = line[i]! - s.ground
+  for (let i = 0; i <= last; i++) {
+    const t = last > 0 ? i / last : 0
+    const ground = sp.ground[i]!
+    const line = r2(lineHeightAt(hA, hB, sag, t))
+    const clear = line - ground
     if (clear > exposure) exposure = clear
-    if (s.d < inner0 || s.d > inner1) continue
+    const d = r2(t * length)
+    if (d < inner0 || d > inner1) continue
 
     if (clear < clearanceMin) clearanceMin = clear
-    const canopyClear = line[i]! - s.surface
+    const canopyClear = line - (sp.surface[i] ?? ground)
     if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
     if (canopyClear < 0) blocked++
     samples++
   }
 
   if (samples === 0) return null
-  return {
-    clearanceMin,
-    exposure,
-    canopyClearanceMin,
-    canopyBlockedFraction: blocked / samples,
-  }
+  return { clearanceMin, exposure, canopyClearanceMin, canopyBlockedFraction: blocked / samples }
+}
+
+/** The same, plus the validity gate. Null when the line is not a candidate. */
+export function metricsAt(
+  sp: StoredProfile,
+  length: number,
+  hA: number,
+  hB: number,
+  sagRatio: number,
+  p: Params,
+): Metrics | null {
+  const m = rawMetricsAt(sp, length, hA, hB, sagRatio, p)
+  if (!m) return null
+  if (m.clearanceMin < p.minClearance || m.exposure < p.minExposure) return null
+  return m.canopyBlockedFraction > p.maxCanopyBlocked ? null : m
 }
 
 /**
@@ -164,19 +175,6 @@ export function violationsOf(
   return out
 }
 
-/** Measurement plus the validity gate, for the pipeline. Null when the line is not a candidate. */
-export function metricsOf(
-  profile: ProfileSample[],
-  line: number[],
-  length: number,
-  p: Params,
-): Metrics | null {
-  const m = rawMetrics(profile, line, length, p)
-  if (!m) return null
-  if (m.clearanceMin < p.minClearance || m.exposure < p.minExposure) return null
-  return m.canopyBlockedFraction > p.maxCanopyBlocked ? null : m
-}
-
 /**
  * 0-100. Weights are a judgement call, not a derivation, so the components are stored on every
  * candidate for the UI to show.
@@ -213,8 +211,6 @@ export function scoreOf(
   return { score, parts }
 }
 
-const r2 = (v: number) => Math.round(v * 100) / 100
-
 /**
  * Loosest sag at which a line still clears the terrain, as a fraction of span.
  *
@@ -233,15 +229,13 @@ export function maxFeasibleSag(
   hB: number,
   p: Params,
 ): number {
-  const feasible = (sag: number) => {
-    const profile = unpackProfile(sp, length, hA, hB, sag)
-    return metricsOf(profile, profile.map((s) => s.line), length, p) !== null
-  }
+  const feasible = (sag: number) => metricsAt(sp, length, hA, hB, sag, p) !== null
   let lo = 0
   let hi = 0.25
   if (!feasible(lo)) return 0
   if (feasible(hi)) return hi
-  for (let i = 0; i < 14; i++) {
+  // 12 halvings of a 0.25 range lands inside 1e-4, which is the precision the result is stored at.
+  for (let i = 0; i < 12; i++) {
     const mid = (lo + hi) / 2
     if (feasible(mid)) lo = mid
     else hi = mid
@@ -263,8 +257,7 @@ export function maxFeasibleSag(
 export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candidate | null {
   if (!c.profile) return sagRatio <= c.maxSagRatio + 1e-9 ? c : null
 
-  const profile = unpackProfile(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio)
-  const m = metricsOf(profile, profile.map((s) => s.line), c.length, p)
+  const m = metricsAt(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio, p)
   if (!m) return null
 
   const { score, parts } = scoreOf(c.length, c.offLevel, m, p)

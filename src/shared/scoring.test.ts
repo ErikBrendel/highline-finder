@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   lineHeightAt,
-  lineOverProfile,
   maxFeasibleSag,
-  metricsOf,
+  metricsAt,
+  rawMetricsAt,
   rescoreAtSag,
   scoreOf,
 } from './scoring.js'
@@ -35,12 +35,11 @@ describe('lineHeightAt', () => {
   })
 })
 
-describe('metricsOf', () => {
-  const profile = flatSpan()
+describe('metricsAt', () => {
+  const profile = packProfile(flatSpan())
 
   it('reports the deepest air gap as exposure and the tightest as clearance', () => {
-    const line = lineOverProfile(profile, 200, 52, 52, 0.05)
-    const m = metricsOf(profile, line, 200, p)!
+    const m = metricsAt(profile, 200, 52, 52, 0.05, p)!
     // Midspan: 52 - 4 * (0.05 * 200) * 0.25 = 42, over a floor at 20.
     expect(m.clearanceMin).toBeCloseTo(22, 1)
     expect(m.exposure).toBeGreaterThan(m.clearanceMin)
@@ -49,23 +48,22 @@ describe('metricsOf', () => {
 
   it('rejects the line once sag brings it into the ground', () => {
     // A floor 4 m below the anchors cannot take a 200 m span at any sag in range.
-    const shallow = flatSpan(50, 46)
-    const line = lineOverProfile(shallow, 200, 52, 52, 0.05)
-    expect(metricsOf(shallow, line, 200, p)).toBeNull()
+    const shallow = packProfile(flatSpan(50, 46))
+    expect(metricsAt(shallow, 200, 52, 52, 0.05, p)).toBeNull()
   })
 
   it('ignores clearance inside anchorZone, where the line is necessarily low', () => {
-    const line = lineOverProfile(profile, 200, 52, 52, 0.05)
-    const m = metricsOf(profile, line, 200, p)!
-    // The endpoint samples sit at the anchor with ~2 m of clearance, well under minClearance.
-    expect(line[0]! - profile[0]!.ground).toBeLessThan(p.minClearance)
+    const m = metricsAt(profile, 200, 52, 52, 0.05, p)!
+    // The endpoint sample sits at the anchor with ~2 m of clearance, well under minClearance.
+    expect(52 - profile.ground[0]!).toBeLessThan(p.minClearance)
     expect(m.clearanceMin).toBeGreaterThanOrEqual(p.minClearance)
   })
 
   it('counts canopy the line passes through without rejecting it', () => {
-    const treed = flatSpan().map((s) => ({ ...s, surface: s.d === 0 || s.d === 200 ? s.ground : 45 }))
-    const line = lineOverProfile(treed, 200, 52, 52, 0.05)
-    const m = metricsOf(treed, line, 200, p)!
+    const treed = packProfile(
+      flatSpan().map((s) => ({ ...s, surface: s.d === 0 || s.d === 200 ? s.ground : 45 })),
+    )
+    const m = metricsAt(treed, 200, 52, 52, 0.05, p)!
     expect(m.canopyBlockedFraction).toBeGreaterThan(0)
     expect(m.canopyClearanceMin).toBeLessThan(0)
   })
@@ -91,8 +89,8 @@ describe('scoreOf', () => {
 
 describe('rescoreAtSag', () => {
   const profile = flatSpan()
-  const line = lineOverProfile(profile, 200, 52, 52, 0.05)
-  const m = metricsOf(profile, line, 200, p)!
+  const packed = packProfile(profile)
+  const m = metricsAt(packed, 200, 52, 52, 0.05, p)!
   const candidate: Candidate = {
     id: 'x',
     a: { lat: 0, lon: 0, e: 0, n: 0, ground: 50, anchor: 52, aFrame: 1.5 },
@@ -108,8 +106,8 @@ describe('rescoreAtSag', () => {
     canopyBlockedFraction: m.canopyBlockedFraction,
     score: scoreOf(200, 0, m, p).score,
     scoreParts: scoreOf(200, 0, m, p).parts,
-    maxSagRatio: maxFeasibleSag(packProfile(profile), 200, 52, 52, p),
-    profile: packProfile(profile),
+    maxSagRatio: maxFeasibleSag(packed, 200, 52, 52, p),
+    profile: packed,
   }
 
   /** The line height at midspan, as the browser derives it. */
@@ -153,5 +151,59 @@ describe('rescoreAtSag', () => {
     expect(looser.length).toBe(candidate.length)
     expect(looser.offLevel).toBe(candidate.offLevel)
     expect(looser.a).toEqual(candidate.a)
+  })
+})
+
+describe('rawMetricsAt', () => {
+  /** The definition it replaced: materialise the profile, then measure the objects. */
+  function throughObjects(
+    sp: { ground: number[]; surface: number[] },
+    length: number,
+    hA: number,
+    hB: number,
+    sagRatio: number,
+  ) {
+    const samples = unpackProfile(sp, length, hA, hB, sagRatio)
+    const inner0 = p.anchorZone
+    const inner1 = length - p.anchorZone
+    let clearanceMin = Infinity
+    let exposure = -Infinity
+    let canopyClearanceMin = Infinity
+    let blocked = 0
+    let n = 0
+    for (const s of samples) {
+      const clear = s.line - s.ground
+      if (clear > exposure) exposure = clear
+      if (s.d < inner0 || s.d > inner1) continue
+      if (clear < clearanceMin) clearanceMin = clear
+      const canopy = s.line - s.surface
+      if (canopy < canopyClearanceMin) canopyClearanceMin = canopy
+      if (canopy < 0) blocked++
+      n++
+    }
+    return { clearanceMin, exposure, canopyClearanceMin, canopyBlockedFraction: blocked / n }
+  }
+
+  it('measures exactly what materialising the profile would have measured', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+    for (let trial = 0; trial < 40; trial++) {
+      const n = 40 + Math.floor(rnd() * 90)
+      const ground: number[] = []
+      const surface: number[] = []
+      for (let i = 0; i < n; i++) {
+        const g = Math.round((30 + rnd() * 40) * 100) / 100
+        ground.push(g)
+        surface.push(Math.round((g + rnd() * 25) * 100) / 100)
+      }
+      const sp = { ground, surface }
+      const length = 60 + Math.round(rnd() * 440)
+      const hA = 70 + rnd() * 5
+      const hB = 70 + rnd() * 5
+      const sag = 0.03 + rnd() * 0.07
+      expect(rawMetricsAt(sp, length, hA, hB, sag, p)).toEqual(
+        throughObjects(sp, length, hA, hB, sag),
+      )
+    }
   })
 })

@@ -2,9 +2,8 @@ import type { Pos, Sampler } from './grid.js'
 import { buildProfile, packProfile } from './profile.js'
 import {
   chooseHeights,
-  lineOverProfile,
   maxFeasibleSag,
-  rawMetrics,
+  rawMetricsAt,
   scoreOf,
   violationsOf,
 } from './scoring.js'
@@ -79,12 +78,11 @@ export function planLine(
   const profile = buildProfile(a, b, h.hA, h.hB, length, ground, surface, p)
   if (profile.some((s) => Number.isNaN(s.ground))) return null
 
-  const line = lineOverProfile(profile, length, h.hA, h.hB, sagRatio)
-  const m = rawMetrics(profile, line, length, p)
+  const stored = packProfile(profile)
+  const m = rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p)
   if (!m) return null
 
   const r2 = (v: number) => Math.round(v * 100) / 100
-  const stored = packProfile(profile)
   const { score, parts } = scoreOf(length, h.offLevel, m, p)
   const wa = toWgs84(a.e, a.n)
   const wb = toWgs84(b.e, b.n)
