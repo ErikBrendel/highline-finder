@@ -560,7 +560,7 @@ export function App() {
             rel="noreferrer"
             title="Open this view in Google Maps satellite imagery"
           >
-            Google Maps &nearr;
+            Google Maps ↗
           </a>
         )}
         <span className="spacer" />
