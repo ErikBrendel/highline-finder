@@ -447,7 +447,12 @@ export function MapView({
         id: 'aoi',
         type: 'line',
         source: 'aoi',
-        paint: { 'line-color': '#38bdf8', 'line-width': 1, 'line-dasharray': [3, 3], 'line-opacity': 0.5 },
+        paint: {
+          'line-color': '#38bdf8',
+          'line-width': 2.5,
+          'line-dasharray': [3, 2],
+          'line-opacity': 0.9,
+        },
       })
 
       m.addSource('anchorWedge', { type: 'geojson', data: emptyCollection })
