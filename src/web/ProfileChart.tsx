@@ -1,8 +1,14 @@
 import { useState } from 'react'
 import type { Candidate, ProfileSample } from '../shared/types.js'
+import { COVER_BUILDING, coverRuns } from './landcover.js'
 
 /**
  * Side elevation of one candidate: terrain, canopy band, and the sagging line.
+ *
+ * The surface model does not know what it measured, so the band above ground is drawn as canopy
+ * until a second source says otherwise -- see landcover.ts. Where it does, the same band is
+ * restated as a building and the ground under a lake is restated as water. Both are annotation
+ * over the unchanged geometry: nothing here moves a line or changes a number.
  *
  * Marker positions come from the resampled profile, but their labels come from the candidate's
  * stored metrics, which were measured on a finer step. Labelling from the profile instead would
@@ -18,7 +24,14 @@ const W = 900
 const H = 200
 const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 
-export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSample[] }) {
+interface Props {
+  c: Candidate
+  profile: ProfileSample[]
+  /** One class per profile sample, or null while the land cover is still loading or unavailable. */
+  cover: Uint8Array | null
+}
+
+export function ProfileChart({ c, profile, cover }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const p = profile
   const lo = Math.min(...p.map((s) => s.ground)) - 2
@@ -38,6 +51,29 @@ export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSam
     .reverse()
     .map((s) => `L${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
     .join('')}Z`
+
+  /**
+   * One filled shape per stretch of a single cover class. A building is the band between ground
+   * and surface, exactly the strip the canopy fill would otherwise claim; water is the ground
+   * itself, filled down to the axis so a crossing reads as a section through the lake.
+   */
+  const runs = cover && cover.length === p.length ? coverRuns(cover) : []
+  const coverFill = (from: number, to: number, kind: number) => {
+    const span = p.slice(from, to + 1)
+    const top = kind === COVER_BUILDING ? 'surface' : 'ground'
+    const forward = span
+      .map((s, i) => `${i ? 'L' : 'M'}${x(s.d).toFixed(1)},${y(s[top]).toFixed(1)}`)
+      .join('')
+    if (kind === COVER_BUILDING) {
+      return `${forward}${span
+        .slice()
+        .reverse()
+        .map((s) => `L${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
+        .join('')}Z`
+    }
+    const base = PAD.top + ih
+    return `${forward}L${x(span[span.length - 1]!.d).toFixed(1)},${base}L${x(span[0]!.d).toFixed(1)},${base}Z`
+  }
 
   // Mark the two numbers the score actually turns on.
   const deepest = p.reduce((a, s) => (s.line - s.ground > a.line - a.ground ? s : a), p[0]!)
@@ -86,6 +122,14 @@ export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSam
 
       <path d={canopyFill} fill="var(--canopy)" opacity="0.5" />
       <path d={groundFill} fill="var(--ground)" opacity="0.9" />
+      {runs.map((r) => (
+        <path
+          key={`${r.kind}-${r.from}`}
+          d={coverFill(r.from, r.to, r.kind)}
+          fill={r.kind === COVER_BUILDING ? 'var(--building)' : 'var(--water)'}
+          opacity={r.kind === COVER_BUILDING ? 0.85 : 0.65}
+        />
+      ))}
       <path d={path('ground')} stroke="#a08a72" strokeWidth="1.25" fill="none" />
 
       <line

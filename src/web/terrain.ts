@@ -27,7 +27,7 @@ const LAYERS = {
 } as const
 
 /** Window size in metres. 256 keeps a request near 256 KB per layer and reuses well while dragging. */
-const TILE = 256
+export const WINDOW = 256
 
 type Layer = keyof typeof LAYERS
 
@@ -43,7 +43,7 @@ const keyOf = (tx: number, ty: number) => `${tx}_${ty}`
 
 /** The UTM 33N square one window covers, for drawing it on the map. */
 export function windowBounds(tx: number, ty: number): { e0: number; n0: number; size: number } {
-  return { e0: tx * TILE, n0: ty * TILE, size: TILE }
+  return { e0: tx * WINDOW, n0: ty * WINDOW, size: WINDOW }
 }
 
 export interface WindowEvent {
@@ -72,15 +72,15 @@ function url(layer: Layer, e0: number, n0: number): string {
   return (
     `${WCS}/${service}?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage` +
     `&COVERAGEID=${coverage}&FORMAT=image/tiff` +
-    `&SUBSET=x(${e0},${e0 + TILE})&SUBSET=y(${n0},${n0 + TILE})`
+    `&SUBSET=x(${e0},${e0 + WINDOW})&SUBSET=y(${n0},${n0 + WINDOW})`
   )
 }
 
 async function loadWindow(tx: number, ty: number): Promise<void> {
-  const e0 = tx * TILE
-  const n0 = ty * TILE
-  const ground = Grid.filled(TILE, TILE, e0, n0 + TILE, 1)
-  const surface = Grid.filled(TILE, TILE, e0, n0 + TILE, 1)
+  const e0 = tx * WINDOW
+  const n0 = ty * WINDOW
+  const ground = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
+  const surface = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
   emit({ tx, ty, state: 'loading' })
   try {
     await Promise.all(
@@ -107,14 +107,14 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
  * the same line with no gap: consecutive steps land at most half a window apart, so their
  * neighbourhoods always overlap.
  */
-export function windowsFor(a: Pos, b: Pos, margin = TILE): [number, number][] {
-  const steps = Math.ceil(Math.hypot(b.e - a.e, b.n - a.n) / (TILE / 2))
-  const reach = Math.ceil(margin / TILE)
+export function windowsFor(a: Pos, b: Pos, margin = WINDOW): [number, number][] {
+  const steps = Math.ceil(Math.hypot(b.e - a.e, b.n - a.n) / (WINDOW / 2))
+  const reach = Math.ceil(margin / WINDOW)
   const out = new Map<string, [number, number]>()
   for (let i = 0; i <= steps; i++) {
     const t = steps === 0 ? 0 : i / steps
-    const cx = Math.floor((a.e + (b.e - a.e) * t) / TILE)
-    const cy = Math.floor((a.n + (b.n - a.n) * t) / TILE)
+    const cx = Math.floor((a.e + (b.e - a.e) * t) / WINDOW)
+    const cy = Math.floor((a.n + (b.n - a.n) * t) / WINDOW)
     for (let dx = -reach; dx <= reach; dx++) {
       for (let dy = -reach; dy <= reach; dy++) out.set(`${cx + dx}_${cy + dy}`, [cx + dx, cy + dy])
     }
@@ -147,7 +147,7 @@ export async function ensureTerrain(a: Pos, b: Pos): Promise<boolean> {
 }
 
 function cellOf(layer: Layer, e: number, n: number): number {
-  const win = loaded.get(keyOf(Math.floor(e / TILE), Math.floor(n / TILE)))
+  const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
   return win ? win[layer].nearest(e, n) : NaN
 }
 

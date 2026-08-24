@@ -15,6 +15,7 @@ import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, surfaceSampler } from './terrain.js'
+import { coverAlong, ensureLandcover } from './landcover.js'
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -490,6 +491,43 @@ export function App() {
     )
   }, [detailed, sagPct])
 
+  const shownEnds = useMemo(
+    () =>
+      detailed && { a: { e: detailed.a.e, n: detailed.a.n }, b: { e: detailed.b.e, n: detailed.b.n } },
+    [detailed],
+  )
+
+  /**
+   * Land cover along whatever line is on screen, for the chart only.
+   *
+   * Debounced because dragging an anchor moves the line many times a second and one of the two
+   * sources is a public Overpass instance; the elevation behind it is cached per 256 m window and
+   * survives a drag, but a fresh query per frame would not be a polite thing to do. Everything here
+   * fails soft -- no cover means the chart draws exactly as it did before.
+   */
+  const [coverVersion, setCoverVersion] = useState(0)
+  useEffect(() => {
+    if (!shownEnds) return
+    let stale = false
+    const timer = setTimeout(() => {
+      ensureLandcover(shownEnds.a, shownEnds.b)
+        .then((arrived) => {
+          if (!stale && arrived) setCoverVersion((v) => v + 1)
+        })
+        .catch(() => undefined)
+    }, 300)
+    return () => {
+      stale = true
+      clearTimeout(timer)
+    }
+  }, [shownEnds])
+
+  const cover = useMemo(() => {
+    if (!shownEnds || !shownProfile) return null
+    void coverVersion
+    return coverAlong(shownEnds.a, shownEnds.b, shownProfile.length)
+  }, [shownEnds, shownProfile, coverVersion])
+
   /**
    * The URL, rewritten in place as the view changes.
    *
@@ -698,6 +736,7 @@ export function App() {
             <Details
               c={detailed}
               profile={shownProfile}
+              cover={cover}
               optimizing={optimizing}
               onOptimize={() => setOptimizing(!optimizing)}
               planned={planned}

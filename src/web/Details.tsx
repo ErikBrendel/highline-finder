@@ -25,6 +25,8 @@ interface Props {
    * profiles has its figures immediately but its chart a moment later.
    */
   profile: ProfileSample[] | null
+  /** Land cover per profile sample, or null when it is still loading or unavailable. */
+  cover: Uint8Array | null
   planned: PlannedLine | null
   /** Endpoints to fall back on before there is a measurement to read them from. */
   at: { a: LatLon; b: LatLon } | null
@@ -37,7 +39,7 @@ interface Props {
 }
 
 export function Details({
-  c, profile, planned, at, failed, optimizing, onOptimize, rig, onRig, onClose,
+  c, profile, cover, planned, at, failed, optimizing, onOptimize, rig, onRig, onClose,
 }: Props) {
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
@@ -117,7 +119,7 @@ export function Details({
       <div className="cols">
         <div className="chart">
           {c && profile ? (
-            <ProfileChart c={c} profile={profile} />
+            <ProfileChart c={c} profile={profile} cover={cover} />
           ) : (
             <div className="chartwait">
               {failed ? (
@@ -132,7 +134,9 @@ export function Details({
           )}
           <div className="legend">
             <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m)</span>
-            <span><i style={{ background: 'var(--canopy)' }} />canopy / structures (bDOM)</span>
+            <span><i style={{ background: 'var(--canopy)' }} />canopy (bDOM)</span>
+            <span><i style={{ background: 'var(--building)' }} />building (ALKIS, Brandenburg only)</span>
+            <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
             <span><i style={{ background: 'var(--line)' }} />line with sag</span>
           </div>
         </div>

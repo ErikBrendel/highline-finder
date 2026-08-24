@@ -17,7 +17,15 @@ anchors only, one AOI, static viewer.
   which canopy is ignored, and enforce canopy clearance as a hard constraint outside it. This is
   what turns the canopy column from a score into a real filter.
 - **Buildings as anchors.** `3d_gebaeude` LoD1/LoD2 CityGML gives per-building geometry and
-  heights. Opens up urban highlines and is the point of extending to Berlin.
+  heights. Opens up urban highlines and is the point of extending to Berlin. The viewer already
+  tells a building apart from a tree — ALKIS footprints, see `src/web/landcover.ts` — but only in
+  the profile chart; the search still treats both as canopy, and treats a building as an obstacle
+  rather than as somewhere to rig.
+- **Land cover in the pipeline.** The viewer fetches footprints and water per line. The pipeline
+  cannot: it would be a WMS request per corridor. The bulk equivalents are
+  `alkis/Vektordaten/shape/` (80–100 MB per Landkreis, both buildings and water as polygons) and
+  the ALKIS NAS files. Rasterising those once per AOI to a 1 m mask would give the search the same
+  distinction for free — and would let canopy blockage stop counting roofs as forest.
 - **Anchor quality.** Rock vs. sand vs. loose spoil changes whether a ground anchor is riggable at
   all. Partly derivable from `alkis` land cover and geological maps.
 - **Terrain-dependent attachment range.** Every ground anchor currently gets the same 0–2 m range.
