@@ -76,16 +76,26 @@ const SCORE_COLOR: maplibregl.ExpressionSpecification = [
  * Feature ids must be numeric: MapLibre cannot use a non-numeric string id with feature-state, and
  * a paint expression that reads feature-state on such a source silently fails to render. So the id
  * is the array index and the candidate's own id travels in `properties.cid`.
+ *
+ * Emitted worst-first, because MapLibre draws later features over earlier ones, so the best line in
+ * a bundle of overlapping ones is the one you see and can click. Sorted here rather than relying on
+ * the order the caller passes -- and after the index is assigned, so ids still line up with the
+ * array the selection effect searches.
  */
 function toGeoJson(cs: Candidate[]): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
-    features: cs.map((c, i) => ({
-      type: 'Feature',
-      id: i,
-      properties: { cid: c.id, score: c.score, length: c.length },
-      geometry: { type: 'LineString', coordinates: [[c.a.lon, c.a.lat], [c.b.lon, c.b.lat]] },
-    })),
+    features: cs
+      .map((c, i) => ({
+        type: 'Feature' as const,
+        id: i,
+        properties: { cid: c.id, score: c.score, length: c.length },
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: [[c.a.lon, c.a.lat], [c.b.lon, c.b.lat]],
+        },
+      }))
+      .sort((x, y) => x.properties.score - y.properties.score),
   }
 }
 
