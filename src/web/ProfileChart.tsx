@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Candidate, ProfileSample } from '../shared/types.js'
 
 /**
@@ -18,6 +19,7 @@ const H = 200
 const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 
 export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSample[] }) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const p = profile
   const lo = Math.min(...p.map((s) => s.ground)) - 2
   const hi = Math.max(...p.map((s) => Math.max(s.surface, s.line))) + 3
@@ -46,8 +48,33 @@ export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSam
 
   const ticks = [lo, (lo + hi) / 2, hi].map((v) => Math.round(v))
 
+  /** Nearest sample to the pointer, in SVG space rather than pixels so zoom does not matter. */
+  const trackPointer = (e: React.MouseEvent<SVGSVGElement>) => {
+    const box = e.currentTarget.getBoundingClientRect()
+    const at = ((e.clientX - box.left) / box.width) * W
+    const d = ((at - PAD.left) / iw) * c.length
+    let nearest = 0
+    for (let i = 1; i < p.length; i++) {
+      if (Math.abs(p[i]!.d - d) < Math.abs(p[nearest]!.d - d)) nearest = i
+    }
+    setHoverIndex(nearest)
+  }
+
+  const hover = hoverIndex === null ? null : p[hoverIndex]!
+  // Flip the readout to the left of the guide near the right edge, so it never runs off.
+  const hoverX = hover ? x(hover.d) : 0
+  const readoutFlipped = hoverX > W - 150
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="elevation profile">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width="100%"
+      role="img"
+      aria-label="elevation profile"
+      style={{ cursor: 'crosshair' }}
+      onMouseMove={trackPointer}
+      onMouseLeave={() => setHoverIndex(null)}
+    >
       {ticks.map((t) => (
         <g key={t}>
           <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="#2a2f3a" strokeWidth="1" />
@@ -80,6 +107,34 @@ export function ProfileChart({ c, profile }: { c: Candidate; profile: ProfileSam
       <path d={path('line')} stroke="var(--line)" strokeWidth="2" fill="none" />
       <circle cx={x(0)} cy={y(p[0]!.line)} r="3.5" fill="#f43f5e" />
       <circle cx={x(c.length)} cy={y(p[p.length - 1]!.line)} r="3.5" fill="#f43f5e" />
+
+      {hover && (
+        <g pointerEvents="none">
+          <line
+            x1={hoverX} x2={hoverX} y1={PAD.top} y2={PAD.top + ih}
+            stroke="#e6e8ec" strokeWidth="1" strokeDasharray="2 2" opacity="0.7"
+          />
+          <circle cx={hoverX} cy={y(hover.line)} r="3" fill="#e6e8ec" />
+          <circle cx={hoverX} cy={y(hover.ground)} r="3" fill="#e6e8ec" />
+          <rect
+            x={readoutFlipped ? hoverX - 138 : hoverX + 6} y={PAD.top + 2}
+            width="132" height="34" rx="4"
+            fill="rgba(15,17,21,0.92)" stroke="#2a2f3a"
+          />
+          <text
+            x={readoutFlipped ? hoverX - 130 : hoverX + 14} y={PAD.top + 15}
+            fill="#e6e8ec" fontSize="11"
+          >
+            {(hover.line - hover.ground).toFixed(1)} m above ground
+          </text>
+          <text
+            x={readoutFlipped ? hoverX - 130 : hoverX + 14} y={PAD.top + 29}
+            fill="#8b93a3" fontSize="11"
+          >
+            ground at {hover.ground.toFixed(1)} m
+          </text>
+        </g>
+      )}
 
       <text x={PAD.left} y={H - 6} fill="#8b93a3" fontSize="10">A</text>
       <text x={W - PAD.right} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="end">
