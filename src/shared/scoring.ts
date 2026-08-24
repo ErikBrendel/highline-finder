@@ -149,6 +149,12 @@ export function violationsOf(
         `${p.minExposure} m that makes it a highline`,
     )
   }
+  if (m.canopyBlockedFraction > p.maxCanopyBlocked) {
+    out.push(
+      `inside canopy for ${(m.canopyBlockedFraction * 100).toFixed(0)} % of the span, over the ` +
+        `${(p.maxCanopyBlocked * 100).toFixed(0)} % that still counts as a line`,
+    )
+  }
   const budget = p.maxOffLevelRatio * length
   if (offLevel > budget) {
     out.push(
@@ -167,7 +173,8 @@ export function metricsOf(
 ): Metrics | null {
   const m = rawMetrics(profile, line, length, p)
   if (!m) return null
-  return m.clearanceMin < p.minClearance || m.exposure < p.minExposure ? null : m
+  if (m.clearanceMin < p.minClearance || m.exposure < p.minExposure) return null
+  return m.canopyBlockedFraction > p.maxCanopyBlocked ? null : m
 }
 
 /**

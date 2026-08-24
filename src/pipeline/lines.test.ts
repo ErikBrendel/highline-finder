@@ -99,12 +99,20 @@ describe('findLines', () => {
 
   it('scores canopy the line passes through without rejecting it', () => {
     const g = canyon(20)
-    // 30 m of trees on the canyon floor, whose tops reach above the line's midspan height.
-    const surface = gridFrom(400, 400, () => 50)
+    // A stand of trees over part of the canyon floor, reaching above the line's height there.
+    const surface = gridFrom(400, 400, (e) => (e > 110 && e < 190 ? 50 : 0))
     const c = findLines(rimsOf(g), g, surface, p).candidates[0]!
-    expect(c.canopyBlockedFraction).toBeGreaterThan(0.5)
+    expect(c.canopyBlockedFraction).toBeGreaterThan(0.2)
+    expect(c.canopyBlockedFraction).toBeLessThan(p.maxCanopyBlocked)
     expect(c.canopyClearanceMin).toBeLessThan(0)
-    expect(c.scoreParts.canopy).toBeLessThan(0.5)
+    expect(c.scoreParts.canopy).toBeLessThan(0.8)
+  })
+
+  it('rejects a line that is inside the canopy for most of its span', () => {
+    const g = canyon(20)
+    // Trees the height of the rims across the whole floor: the line never leaves them.
+    const surface = gridFrom(400, 400, () => 50)
+    expect(findLines(rimsOf(g), g, surface, p).candidates).toHaveLength(0)
   })
 
   it('collapses near-duplicate lines and keeps the best-scoring one', () => {

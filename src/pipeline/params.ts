@@ -77,6 +77,11 @@ export const DEFAULT_PARAMS: Params = {
   // Off: profiles were 89% of the dataset and every one is recoverable from the WCS the planner
   // already uses, so the file scales with the number of lines rather than with 2.5 KB each. The
   // cost is a couple of elevation windows when a line is opened. See Candidate.profile.
+  // Deliberately loose. This exists to drop lines buried in forest, not to enforce a clean line --
+  // the score already handles the difference between 5% and 40% blocked, and 0.2% of feasible
+  // endpoints in the current data are canopy-clear, so a strict gate here would empty the dataset.
+  maxCanopyBlocked: 0.8,
+
   storeProfiles: false,
 
   // Coarse pre-pass. 16 m costs ~15 KB per square kilometre against 1.4 MB for the 1 m tiles, so
@@ -108,8 +113,8 @@ export const DEFAULT_AOIS: Aoi[] = [
   // Niederfinow: 141 km2 north-east of Berlin, 151 m of relief, and a strict superset of the
   // 18 km2 rectangle this started as.
   { south: 52.769741, west: 13.874750, north: 52.869081, east: 14.058569 },
-  // Linthe: 0.36 km2 west of Berlin, 19.5 m of relief in a single steep feature.
-  { south: 52.143650, west: 12.786734, north: 52.148558, east: 12.795793 },
-  // Vehlen: 0.25 km2, further west again.
-  { south: 52.426806, west: 12.313895, north: 52.430913, east: 12.321964 },
+  // Linthe: 4.6 km2 west of Berlin.
+  { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
+  // Vehlen: 5.3 km2, further west again.
+  { south: 52.422160, west: 12.297235, north: 52.444399, east: 12.328746 },
 ]

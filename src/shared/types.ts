@@ -99,6 +99,16 @@ export interface Params {
    * chart for a line costs a couple of 256 m windows when it is opened; on, everything is instant
    * and offline but the file grows by ~2.5 KB per line.
    */
+  /**
+   * Most canopy a line may run through before it is rejected outright, as a fraction of the span's
+   * interior.
+   *
+   * Canopy is otherwise scored rather than enforced, on purpose: a line clipping the tops of a few
+   * trees is still worth reporting, with its blockage stated, because the surface model is a single
+   * epoch and trees get felled. But a line that is inside a forest for most of its length is not a
+   * highline anyone could rig, and reporting it as a candidate is noise rather than information.
+   */
+  maxCanopyBlocked: number
   storeProfiles: boolean
   /**
    * Resolution the coarse pre-pass measures terrain at, in metres. Fetched from the survey's WCS

@@ -41,6 +41,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
       expect(c.length).toBeLessThanOrEqual(params.maxLength)
       expect(c.clearanceMin).toBeGreaterThanOrEqual(params.minClearance)
       expect(c.exposure).toBeGreaterThanOrEqual(params.minExposure)
+      expect(c.canopyBlockedFraction).toBeLessThanOrEqual(params.maxCanopyBlocked + 1e-9)
       expect(c.offLevelRatio).toBeLessThanOrEqual(params.maxOffLevelRatio + 1e-9)
       expect(c.offLevel).toBeCloseTo(Math.abs(c.a.anchor - c.b.anchor), 1)
     }
