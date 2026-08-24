@@ -9,15 +9,15 @@ import { bareGround, onBuilding } from './terrain.js'
  * grain silo are the same measurement, and without a second source the app has to call both
  * "canopy". Two sources fix that, and they live in different places for a reason:
  *
- *   buildings -- ALKIS, the cadastre. Loaded with the elevation in terrain.ts, because a roof is
+ *   buildings -- the LoD1 city model. Loaded with the elevation in terrain.ts, because a roof is
  *     not decoration: it is what an anchor stands on and what a line has to clear. This module
  *     only reads the result back for drawing.
  *
  *   water -- OpenStreetMap via Overpass, here. It genuinely is decoration: a lake changes nothing
  *     about a line over it, it just makes the picture legible. The survey has no usable source --
  *     `adv_alkis_gewaesser` renders bank lines and labels, not filled polygons, so the middle of
- *     a lake comes back blank. Checked, not assumed. OSM also covers Berlin, where ALKIS
- *     Brandenburg does not.
+ *     a lake comes back blank. Checked, not assumed. OSM also covers Berlin, where the
+ *     Brandenburg city model does not.
  *
  * The water half fails soft: a dead Overpass means the chart looks exactly as it did before.
  */

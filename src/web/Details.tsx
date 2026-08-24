@@ -198,7 +198,7 @@ export function Details({
           <div className="legend">
             <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m)</span>
             <span><i style={{ background: 'var(--canopy)' }} />canopy (bDOM)</span>
-            <span><i style={{ background: 'var(--building)' }} />building, counted as ground (ALKIS, Brandenburg only)</span>
+            <span><i style={{ background: 'var(--building)' }} />building, counted as ground (LoD1, Brandenburg only)</span>
             <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
             <span><i style={{ background: 'var(--line)' }} />line with sag</span>
           </div>

@@ -30,7 +30,7 @@ describe('windowsFor', () => {
 })
 
 describe('standingGround', () => {
-  /** Four metres of flat terrain, a 9 m roof on the right half, and the mask agreeing with it. */
+  /** Four metres of flat terrain with a 9 m roof over the right half. */
   const win = (() => {
     const make = (fill: (col: number) => number) => {
       const g = Grid.filled(4, 1, 1000, 5_000_001, 1)
@@ -39,8 +39,7 @@ describe('standingGround', () => {
     }
     return {
       ground: make(() => 4),
-      surface: make((col) => (col >= 2 ? 9 : 4)),
-      building: make((col) => (col >= 2 ? 1 : 0)),
+      roof: make((col) => (col >= 2 ? 9 : NaN)),
     }
   })()
 
@@ -49,9 +48,9 @@ describe('standingGround', () => {
     expect(standingGround(win, 1002.5, 5_000_000.5)).toBe(9)
   })
 
-  it('keeps the terrain when the surface model is stale and sits below it', () => {
-    const demolished = { ...win, surface: Grid.filled(4, 1, 1000, 5_000_001, 1) }
-    demolished.surface.data.fill(2)
-    expect(standingGround(demolished, 1002.5, 5_000_000.5)).toBe(4)
+  it('keeps the terrain where a flattened roof sits below the slope under it', () => {
+    const steep = { ...win, ground: Grid.filled(4, 1, 1000, 5_000_001, 1) }
+    steep.ground.data.fill(11)
+    expect(standingGround(steep, 1002.5, 5_000_000.5)).toBe(11)
   })
 })

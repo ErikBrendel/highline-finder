@@ -1,5 +1,8 @@
+import { unzipSync } from 'fflate'
 import { Grid, type Pos, type Sampler } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
+import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
+import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
 
 /**
@@ -12,25 +15,24 @@ import { fetchCached } from './tileCache.js'
  * region is. Bundling the raster instead would have cost ~939 KB per square kilometre, or roughly
  * 28 GB for Brandenburg.
  *
- * A roof counts as ground. The third layer here is the ALKIS building footprint mask, fetched per
- * window alongside the two elevation ones, and where it is set the ground sampler returns the
- * surface model instead of the terrain model -- so an anchor dropped on a building stands on the
- * building, and a line passing over one has to clear it. That is the physical truth the two
- * elevation products cannot express on their own: the terrain model is bare earth and goes
- * straight through a house, and the surface model knows the roof is there but not that it is a
- * roof rather than a tree.
+ * A roof counts as ground. The third layer is the LoD1 city model, rasterised into each window
+ * alongside the two elevation ones, and where a roof covers a cell the ground sampler returns it --
+ * so an anchor dropped on a building stands on the building, and a line passing over one has to
+ * clear it. That is the physical truth the two elevation products cannot express on their own: the
+ * terrain model is bare earth and goes straight through a house, and the surface model knows the
+ * roof is there but not that it is a roof rather than a tree. Same source and same rule as the
+ * pipeline, so a planned line and a found one stand on the same buildings.
  *
- * Two honest differences from the pipeline, both of which make a planned line's numbers slightly
- * different from a found one's:
+ * The city model is published per 1 km tile rather than per window, which is why it is cached a
+ * level up from everything else here. A tile is 5-50 KB, so a window costs at most four small
+ * requests the first time it touches new tiles and none after that.
  *
- *   1. The pipeline reads the 0.2 m surface model and reduces it to 1 m by taking the *maximum* of
- *      each block, so the tallest obstacle in a cell wins. The WCS resamples server side instead,
- *      and measured against the pipeline's rule it under-reports canopy by more than a metre on
- *      16 % of cells, occasionally by much more at canopy edges.
- *   2. The pipeline has no building mask at all, so it still runs its lines through houses. Only
- *      the browser knows better for now -- see ROADMAP.
- *
- * Bare terrain, which is the hard constraint away from buildings, matches exactly.
+ * One honest difference from the pipeline remains. The pipeline reads the 0.2 m surface model and
+ * reduces it to 1 m by taking the *maximum* of each block, so the tallest obstacle in a cell wins.
+ * The WCS resamples server side instead, and measured against the pipeline's rule it under-reports
+ * canopy by more than a metre on 16 % of cells, occasionally by much more at canopy edges. So a
+ * planned line's canopy figures are slightly optimistic compared with a found candidate's. Terrain
+ * and roofs, which are the hard constraints, match exactly.
  */
 
 const WCS = 'https://isk.geobasis-bb.de/ows'
@@ -38,7 +40,7 @@ const LAYERS = {
   ground: { service: 'dgm_wcs', coverage: 'bb_dgm' },
   surface: { service: 'bdom_wcs', coverage: 'bb_bdom' },
 } as const
-const ALKIS_WMS = 'https://isk.geobasis-bb.de/ows/alkis_wms'
+const LOD1 = 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml'
 
 /** Window size in metres. 256 keeps a request near 256 KB per layer and reuses well while dragging. */
 export const WINDOW = 256
@@ -49,11 +51,11 @@ interface Window {
   ground: Grid
   surface: Grid
   /**
-   * 1 inside a building footprint, 0 outside. A Grid rather than a byte array purely so it shares
-   * the elevation grids' indexing -- getting the two out of step by one cell would put a roof next
-   * to the building it belongs to.
+   * Roof height where a building covers the cell, NaN elsewhere. A Grid so it shares the elevation
+   * grids' indexing -- getting the two out of step by one cell would put a roof next to the
+   * building it belongs to.
    */
-  building: Grid
+  roof: Grid
 }
 
 const loaded = new Map<string, Window>()
@@ -97,40 +99,32 @@ function url(layer: Layer, e0: number, n0: number): string {
 }
 
 /**
- * The building footprints under one window, as a transparent PNG at exactly 1 m per pixel.
+ * Level building faces per 1 km tile, parsed once and kept for the session.
  *
- * EPSG:25833 is an easting/northing axis-order CRS, so WMS 1.3.0 wants BBOX in that order despite
- * 1.3.0's reputation for the opposite -- reversed, the service returns a blank image rather than
- * an error. The layer also stops drawing above 1:8000, which one metre per pixel is comfortably
- * inside.
+ * A tile with no buildings has no file at all, so a 404 is the answer rather than a failure -- and
+ * it is cached here as an empty list so the same empty tile is not asked for again while dragging
+ * across it. Any other failure is cached the same way: buildings are worth having, but not worth
+ * blocking the elevation over.
  */
-function buildingUrl(e0: number, n0: number): string {
-  return (
-    `${ALKIS_WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=adv_alkis_gebaeude&STYLES=` +
-    `&CRS=EPSG:25833&BBOX=${e0},${n0},${e0 + WINDOW},${n0 + WINDOW}` +
-    `&WIDTH=${WINDOW}&HEIGHT=${WINDOW}&FORMAT=image/png&TRANSPARENT=TRUE`
-  )
+const roofFaces = new Map<string, Promise<LevelFace[]>>()
+
+function facesFor(tile: string): Promise<LevelFace[]> {
+  let job = roofFaces.get(tile)
+  if (job) return job
+  job = (async () => {
+    const zip = await fetchCached(`${LOD1}/lod1_${tile}.zip`)
+    const entries = unzipSync(new Uint8Array(zip))
+    const name = Object.keys(entries).find((k) => k.endsWith('.gml'))
+    return name ? levelFaces(new TextDecoder().decode(entries[name]!)) : []
+  })().catch(() => [])
+  roofFaces.set(tile, job)
+  return job
 }
 
-/**
- * Decodes that PNG into the mask.
- *
- * Alpha alone, not colour: the cadastre draws footprints filled but in several greys, and the only
- * question here is covered or not. PNG rows run north to south, which is also Grid row order, so
- * the pixels drop straight in.
- *
- * Outside Brandenburg -- the Mueggelberge AOI is Berlin -- the service answers with a valid, fully
- * transparent image, so there is nothing to distinguish "no buildings" from "not surveyed here".
- */
-async function loadBuildingMask(e0: number, n0: number, into: Grid): Promise<void> {
-  const bytes = await fetchCached(buildingUrl(e0, n0))
-  const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
-  const canvas = new OffscreenCanvas(WINDOW, WINDOW)
-  const ctx = canvas.getContext('2d')!
-  ctx.drawImage(bitmap, 0, 0)
-  bitmap.close()
-  const { data } = ctx.getImageData(0, 0, WINDOW, WINDOW)
-  for (let i = 0; i < into.data.length; i++) into.data[i] = data[i * 4 + 3]! > 64 ? 1 : 0
+/** Draws whatever buildings stand in this window into its roof grid. */
+async function loadRoofs(e0: number, n0: number, into: Grid): Promise<void> {
+  const tiles = tilesForBounds(e0, n0, e0 + WINDOW, n0 + WINDOW)
+  for (const faces of await Promise.all(tiles.map(facesFor))) rasteriseFaces(faces, into)
 }
 
 async function loadWindow(tx: number, ty: number): Promise<void> {
@@ -138,7 +132,7 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   const n0 = ty * WINDOW
   const ground = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
   const surface = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
-  const building = new Grid(new Float32Array(WINDOW * WINDOW), WINDOW, WINDOW, e0, n0 + WINDOW, 1)
+  const roof = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
   emit({ tx, ty, state: 'loading' })
   try {
     await Promise.all(
@@ -151,10 +145,10 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
     emit({ tx, ty, state: 'failed' })
     throw e
   }
-  // Separately, and after: a cadastre outage must cost the buildings, never the elevation. The
-  // mask starts all zero, which is the same answer as open ground.
-  await loadBuildingMask(e0, n0, building).catch(() => undefined)
-  loaded.set(keyOf(tx, ty), { ground, surface, building })
+  // Separately, and after: an outage on the city model must cost the buildings, never the
+  // elevation. The roof grid starts all NaN, which is the same answer as open ground.
+  await loadRoofs(e0, n0, roof)
+  loaded.set(keyOf(tx, ty), { ground, surface, roof })
   emit({ tx, ty, state: 'loaded' })
 }
 
@@ -224,25 +218,26 @@ function cellOf(layer: Layer, e: number, n: number): number {
 /**
  * The height something actually stands at: terrain, or the roof where there is a building.
  *
- * The max rather than the surface outright, because the two products are from different epochs and
- * a building demolished since the aerial survey would otherwise pull the standing surface *below*
- * the terrain. Exported for its test; used through `cellOf`, which is what puts it under the
- * bilinear sampler so a roof edge reads as a one-metre ramp instead of a vertical step -- and that
- * is what stops the anchor optimiser chattering across it.
+ * The max rather than the roof outright, because a LoD1 roof is a single flattened height and the
+ * terrain under a building on a slope can sit above it at one corner. Exported for its test; used
+ * through `cellOf`, which is what puts it under the bilinear sampler so a roof edge reads as a
+ * one-metre ramp instead of a vertical step -- and that is what stops the anchor optimiser
+ * chattering across it.
  */
 export function standingGround(
-  win: { ground: Grid; surface: Grid; building: Grid },
+  win: { ground: Grid; roof: Grid },
   e: number,
   n: number,
 ): number {
-  if (win.building.nearest(e, n) !== 1) return win.ground.nearest(e, n)
-  return Math.max(win.ground.nearest(e, n), win.surface.nearest(e, n))
+  const roof = win.roof.nearest(e, n)
+  const ground = win.ground.nearest(e, n)
+  return Number.isNaN(roof) ? ground : Math.max(ground, roof)
 }
 
 /** Whether a point stands on a building. False where the window has not arrived. */
 export function onBuilding(e: number, n: number): boolean {
   const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
-  return !!win && win.building.nearest(e, n) === 1
+  return !!win && !Number.isNaN(win.roof.nearest(e, n))
 }
 
 /**
