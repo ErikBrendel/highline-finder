@@ -254,10 +254,12 @@ async function main() {
     const found = await searchArea(area, p, label)
     const { anchors, region, refined } = found
     regions.push(region)
-    dumpAnchors.push(...anchors)
+    // Appended one at a time rather than spread: a 141 km2 area produces 3.2 million endpoints,
+    // and passing those as arguments exceeds the call stack.
+    for (const a of anchors) dumpAnchors.push(a)
+    for (const e of found.endpoints) endpoints.push(e)
+    for (const c of refined.candidates) refinedAll.push(c)
     maskCells.push(found.mask)
-    endpoints.push(...found.endpoints)
-    refinedAll.push(...refined.candidates)
     totals.anchorsScanned += region.anchorsScanned
     totals.anchorsKept += region.anchorsKept
     totals.pairsInRange += refined.find.pairsInRange

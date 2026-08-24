@@ -429,9 +429,13 @@ export function App() {
   const areaKm2 = regions.reduce((s, r) => s + r.width * r.height, 0) / 1e6
   const groundMin = Math.min(...regions.map((r) => r.groundMin))
   const groundMax = Math.max(...regions.map((r) => r.groundMax))
-  const maxScore = Math.ceil(Math.max(...data.candidates.map((c) => c.score), 1))
-  const maxLen = Math.ceil(Math.max(...data.candidates.map((c) => c.length), 100))
-  const maxExp = Math.ceil(Math.max(...data.candidates.map((c) => c.exposure), 10))
+  // Reduced rather than spread into Math.max: the dataset is tens of thousands of lines now, and
+  // spreading that many arguments exceeds the call stack.
+  const highest = (pick: (c: Candidate) => number, floor: number) =>
+    Math.ceil(data.candidates.reduce((m, c) => Math.max(m, pick(c)), floor))
+  const maxScore = highest((c) => c.score, 1)
+  const maxLen = highest((c) => c.length, 100)
+  const maxExp = highest((c) => c.exposure, 10)
   // The pipeline already caps offlevel, so the slider only needs to reach that cap.
   const offLevelCap = Math.ceil(data.meta.params.maxOffLevelRatio * 100 * 10) / 10
   const sagFloor = data.meta.params.sagRatio * 100
