@@ -246,6 +246,18 @@ export function onBuilding(e: number, n: number): boolean {
 }
 
 /**
+ * Bare earth, ignoring anything standing on it. NaN where the window has not arrived.
+ *
+ * The terrain model is otherwise invisible once a building is involved, because everything above
+ * reads the composite. The chart wants it back to draw the building as a column of a known height
+ * rather than as one going down forever.
+ */
+export function bareGround(e: number, n: number): number {
+  const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
+  return win ? win.ground.nearest(e, n) : NaN
+}
+
+/**
  * Samples across window boundaries by looking each contributing cell up independently, so a line
  * crossing from one fetched window into the next reads continuously instead of hitting an edge.
  */

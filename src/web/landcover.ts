@@ -1,6 +1,6 @@
 import type { Pos } from '../shared/grid.js'
 import { toWgs84 } from '../shared/geo.js'
-import { onBuilding } from './terrain.js'
+import { bareGround, onBuilding } from './terrain.js'
 
 /**
  * What a profile sample is standing on, for the chart to draw.
@@ -114,30 +114,42 @@ export async function ensureWater(a: Pos, b: Pos): Promise<boolean> {
   return true
 }
 
+export interface Cover {
+  /** One of the COVER_* constants per sample. */
+  kind: Uint8Array
+  /**
+   * Bare earth per sample, which the profile itself no longer carries: its ground series is the
+   * roof wherever there is a building. This is the foot of that column.
+   */
+  bare: Float32Array
+}
+
 /**
- * Cover class at each of `count` evenly spaced points from `a` to `b` inclusive, matching the
- * spacing `buildProfile` uses so the two align index for index.
+ * Cover at each of `count` evenly spaced points from `a` to `b` inclusive, matching the spacing
+ * `buildProfile` uses so the two align index for index.
  *
  * Buildings win over water where the cadastre puts a boathouse on a lake: the built thing is the
  * one with height, and height is what the profile is drawing.
  */
-export function coverAlong(a: Pos, b: Pos, count: number): Uint8Array {
-  const out = new Uint8Array(count)
+export function coverAlong(a: Pos, b: Pos, count: number): Cover {
+  const kind = new Uint8Array(count)
+  const bare = new Float32Array(count)
   const rings = waterCache.get(waterKeyFor(a, b)) ?? []
   const last = count - 1
   for (let i = 0; i < count; i++) {
     const t = last > 0 ? i / last : 0
     const e = a.e + (b.e - a.e) * t
     const n = a.n + (b.n - a.n) * t
+    bare[i] = bareGround(e, n)
     if (onBuilding(e, n)) {
-      out[i] = COVER_BUILDING
+      kind[i] = COVER_BUILDING
       continue
     }
     if (!rings.length) continue
     const { lat, lon } = toWgs84(e, n)
-    if (rings.some((r) => inRing(r, lat, lon))) out[i] = COVER_WATER
+    if (rings.some((r) => inRing(r, lat, lon))) kind[i] = COVER_WATER
   }
-  return out
+  return { kind, bare }
 }
 
 /** Contiguous stretches of one class, for drawing. Skips {@link COVER_NONE}. */

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Candidate, ProfileSample } from '../shared/types.js'
-import { COVER_BUILDING, coverRuns } from './landcover.js'
+import { COVER_BUILDING, type Cover, coverRuns } from './landcover.js'
 
 /**
  * Side elevation of one candidate: terrain, canopy band, and the sagging line.
@@ -8,7 +8,8 @@ import { COVER_BUILDING, coverRuns } from './landcover.js'
  * The surface model does not know what it measured, so the band above ground is drawn as canopy
  * unless a second source says otherwise -- see landcover.ts. Over a building the ground series is
  * already the roof, because terrain.ts treats a roof as ground, so the building is drawn as the
- * solid column it is rather than as a band; water is drawn the same way, as a section through it.
+ * column between the roof and the bare earth underneath, with the terrain fill continuing below
+ * it. Water is a section through the body, filled to the axis.
  *
  * Marker positions come from the resampled profile, but their labels come from the candidate's
  * stored metrics, which were measured on a finer step. Labelling from the profile instead would
@@ -27,8 +28,8 @@ const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 interface Props {
   c: Candidate
   profile: ProfileSample[]
-  /** One class per profile sample, or null while the land cover is still loading or unavailable. */
-  cover: Uint8Array | null
+  /** Per profile sample, or null while the land cover is still loading or unavailable. */
+  cover: Cover | null
 }
 
 export function ProfileChart({ c, profile, cover }: Props) {
@@ -53,19 +54,28 @@ export function ProfileChart({ c, profile, cover }: Props) {
     .join('')}Z`
 
   /**
-   * One filled shape per stretch of a single cover class: the ground series over that stretch,
-   * closed down to the axis. Both classes are solid from below -- a building is a column standing
-   * on the terrain, water is a section through the body -- so they share a shape and differ only
-   * in colour. Drawn over the ground fill, so they replace the brown rather than tint it.
+   * One filled shape per stretch of a single cover class, drawn over the terrain fill so it
+   * replaces the brown rather than tinting it.
+   *
+   * Both start at the ground series, which over a building is the roof. A building closes on the
+   * bare earth underneath, so it reads as a structure of a definite height with terrain continuing
+   * below; water closes on the axis, as a section through the body. Bare earth is only known where
+   * a window has loaded, so a building over a gap falls back to the axis rather than to NaN.
    */
-  const runs = cover && cover.length === p.length ? coverRuns(cover) : []
-  const coverFill = (from: number, to: number) => {
-    const span = p.slice(from, to + 1)
-    const base = PAD.top + ih
-    const top = span
+  const runs = cover && cover.kind.length === p.length ? coverRuns(cover.kind) : []
+  const base = PAD.top + ih
+  const coverFill = (from: number, to: number, kind: number) => {
+    const under = (i: number) => {
+      const bare = cover!.bare[i]!
+      return kind === COVER_BUILDING && Number.isFinite(bare) ? y(bare) : base
+    }
+    const top = p
+      .slice(from, to + 1)
       .map((s, i) => `${i ? 'L' : 'M'}${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
       .join('')
-    return `${top}L${x(span[span.length - 1]!.d).toFixed(1)},${base}L${x(span[0]!.d).toFixed(1)},${base}Z`
+    const bottom: string[] = []
+    for (let i = to; i >= from; i--) bottom.push(`L${x(p[i]!.d).toFixed(1)},${under(i).toFixed(1)}`)
+    return `${top}${bottom.join('')}Z`
   }
 
   // Mark the two numbers the score actually turns on.
@@ -118,7 +128,7 @@ export function ProfileChart({ c, profile, cover }: Props) {
       {runs.map((r) => (
         <path
           key={`${r.kind}-${r.from}`}
-          d={coverFill(r.from, r.to)}
+          d={coverFill(r.from, r.to, r.kind)}
           fill={r.kind === COVER_BUILDING ? 'var(--building)' : 'var(--water)'}
           opacity="0.9"
         />

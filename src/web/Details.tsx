@@ -1,5 +1,6 @@
 import type { Candidate, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
+import type { Cover } from './landcover.js'
 import { ProfileChart } from './ProfileChart.js'
 import { Slider } from './Slider.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
@@ -26,7 +27,7 @@ interface Props {
    */
   profile: ProfileSample[] | null
   /** Land cover per profile sample, or null when it is still loading or unavailable. */
-  cover: Uint8Array | null
+  cover: Cover | null
   /** Which ends stand on a building rather than on terrain. */
   onRoof: { a: boolean; b: boolean } | null
   planned: PlannedLine | null
