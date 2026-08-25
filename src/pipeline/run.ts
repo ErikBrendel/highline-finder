@@ -222,7 +222,8 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   const roads = await stage('[5/6] roads under those corridors', () => loadRoads(used))
   console.log(
     `  ${roads.ways} ways in ${roads.index.segments} segments  ` +
-      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})`,
+      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})` +
+      (roads.fetched ? `, ${roads.fetched} block(s) fetched` : ', all cached'),
   )
   const scene = { roofs, roads: roads.index }
 

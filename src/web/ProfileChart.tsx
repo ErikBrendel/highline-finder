@@ -98,14 +98,12 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   const crossings = c.crossings ?? []
 
   /**
-   * Height of the thing a crossing's clearance is owed to, at any distance along the span.
+   * A profile series read at any distance along the span, not only at its samples.
    *
-   * The ground series for a road on the ground; the surface series for one on a bridge, because
-   * the terrain model is bare earth and runs straight underneath a deck. Linearly interpolated:
-   * a crossing lands where the road is, which is almost never on a profile sample.
+   * A crossing lands where the road is, which is almost never on a sample: at 120 points a 500 m
+   * line is sampled every four metres and a residential street is six wide.
    */
-  const carrierAt = (d: number, onBridge: boolean): number => {
-    const key = onBridge ? 'surface' : 'ground'
+  const seriesAt = (d: number, key: 'ground' | 'surface' | 'line'): number => {
     const last = p.length - 1
     const t = c.length > 0 ? Math.min(1, Math.max(0, d / c.length)) : 0
     const at = t * last
@@ -114,17 +112,13 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
     return f === 0 ? p[i]![key] : p[i]![key] * (1 - f) + p[Math.min(last, i + 1)]![key] * f
   }
 
-  /** The sagging line's height at any distance, on the same interpolation as the carrier. */
-  const lineAt = (d: number): number => {
-    const last = p.length - 1
-    const t = c.length > 0 ? Math.min(1, Math.max(0, d / c.length)) : 0
-    const at = t * last
-    const i = Math.min(last, Math.floor(at))
-    const f = at - i
-    return f === 0 ? p[i]!.line : p[i]!.line * (1 - f) + p[Math.min(last, i + 1)]!.line * f
-  }
+  /**
+   * What holds a crossing up: the ground for a road on the ground, the surface for one on a bridge.
+   * The terrain model is bare earth and runs straight underneath a deck.
+   */
+  const carrierAt = (d: number, onBridge: boolean) => seriesAt(d, onBridge ? 'surface' : 'ground')
 
-  /** The crossings covering a distance, widest requirement first. */
+  /** The most demanding crossing covering a distance, or null where nothing does. */
   const demandAt = (d: number) => {
     let worst: { extra: number; x: (typeof crossings)[number] } | null = null
     for (const x of crossings) {
@@ -316,7 +310,7 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
       {crossings.map((r, i) => {
         const carrier = carrierAt(r.d, r.onBridge)
         const half = Math.max(2, x(r.half) - x(0))
-        const short = params.minClearance + params.roadClearance[r.tier] - (lineAt(r.d) - carrier)
+        const short = params.minClearance + params.roadClearance[r.tier] - (seriesAt(r.d, 'line') - carrier)
         return (
           <g key={`${r.d}-${i}`}>
             {/* The carriageway itself, as a slab on whatever carries it. */}

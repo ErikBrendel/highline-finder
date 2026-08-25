@@ -3,6 +3,7 @@ import { toUtm33, toWgs84 } from '../shared/geo.js'
 import { classifyWay, RoadIndex, type Tags } from '../shared/roads.js'
 import type { Roads } from '../shared/scene.js'
 import { bareGround, onBuilding } from './terrain.js'
+import { fetchCached } from './tileCache.js'
 
 /**
  * What a profile sample is standing on, for the chart to draw.
@@ -25,6 +26,10 @@ import { bareGround, onBuilding } from './terrain.js'
  *     against the same bounding box. These are emphatically not decoration: a line over a road owes
  *     it a great deal more air than it owes bare ground, and that is a hard constraint. See
  *     shared/roads.ts.
+ *
+ * Both go through the same persistent store as the elevation windows and the basemap, so reopening
+ * the app on a line you looked at yesterday asks Overpass nothing. Everything this project fetches
+ * from anywhere is cached on both sides; see the README.
  *
  * Which is why the failure behaviour is split. Water fails soft -- a dead Overpass means the chart
  * looks as it did before. Roads cannot: silently reporting no roads would let the planner pass a
@@ -93,14 +98,14 @@ async function loadCover(key: string): Promise<void> {
     `way["highway"](${key});` +
     `way["railway"](${key});` +
     `);out geom;`
-  // GET rather than POST: a string body would go out as text/plain, which Overpass reads as the
-  // query itself rather than as a form field, and the encoded `data=` prefix would land in it.
+  // GET rather than POST for two reasons: a string body would go out as text/plain, which Overpass
+  // reads as the query itself rather than as a form field; and only a GET has a URL to cache under.
+  const url = `${OVERPASS}?${new URLSearchParams({ data: query })}`
   let last: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(`${OVERPASS}?${new URLSearchParams({ data: query })}`)
-      if (!res.ok) throw new Error(`overpass ${res.status}`)
-      const { elements } = (await res.json()) as { elements: OverpassElement[] }
+      const body = new TextDecoder().decode(await fetchCached(url))
+      const { elements } = JSON.parse(body) as { elements: OverpassElement[] }
       const rings: Ring[] = []
       const index = new RoadIndex()
       for (const el of elements) {

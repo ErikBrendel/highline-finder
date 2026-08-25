@@ -167,6 +167,30 @@ development-only overlay (bottom right of the map under `npm run dev`) that draw
 coloured by how many directions are open, with per-point detail on hover. It is gitignored and
 never deployed — it is diagnostics for the scan, not a feature.
 
+## Everything fetched is cached, on both sides
+
+A standing rule rather than an optimisation. Every external source this project touches is cached
+where it is used, so re-running the pipeline or reopening the browser on a line you looked at
+yesterday costs no request at all.
+
+| Source | Pipeline | Browser |
+|---|---|---|
+| `dgm` / `bdom` tiles | `data/cache/*.tif` | — |
+| `dgm` / `bdom` WCS windows | `data/cache/coarse*.tif` | IndexedDB |
+| `3d_gebaeude` LoD1 | `data/cache/lod1_*.gml` | IndexedDB |
+| OSM roads and water | `data/cache/roads_*.json` | IndexedDB |
+| Basemap tiles | — | IndexedDB |
+| Whole-region results | `data/cache/region_*.json` | — |
+
+Two consequences worth knowing. A 404 is an answer and is cached as one — an empty file — so a tile
+with no buildings on it is asked for once and never again. And the cache is what makes a failed run
+resumable: the road fetch is fatal by design, and restarting after one picks up where it stopped
+rather than starting over.
+
+The granularity is deliberately finer than the request. Roads are *fetched* per 5 km block, because
+a hundred one-kilometre queries got the machine refused by Overpass, but they are *cached* per 1 km
+tile — so growing an area of interest still only fetches what it added.
+
 ## The three height layers
 
 | Layer | Product | Resolution | Role |
