@@ -7,6 +7,15 @@
  */
 export interface Sampler {
   sample(e: number, n: number): number
+  /**
+   * The containing cell's own value, without interpolation.
+   *
+   * Used where the question is "is there anything here", not "how high is the ground at this
+   * point". Interpolating averages a thin wall with the ground beside it and reports neither, which
+   * is the wrong answer for an obstruction scan -- and four lookups instead of one for the
+   * privilege. See worstAcross in profile.ts.
+   */
+  nearest(e: number, n: number): number
 }
 
 /** A point in EPSG:25833. */

@@ -41,6 +41,11 @@ export function sideHalfWidthAt(t: number, length: number, p: Params): number {
  * A 16 m half-width on a long span is looking for hillsides and buildings, where metre resolution
  * buys nothing; the narrow urban bands, where it does, never reach the cap.
  *
+ * Read from the containing cell rather than interpolated, unlike the centreline. Two reasons, and
+ * they point the same way: the question here is whether anything stands in the strip, and bilinear
+ * interpolation averages a one-cell wall with the ground beside it and under-reports both -- and it
+ * costs four lookups where this needs one, on the stage that dominates the run.
+ *
  * A NaN off the side of the loaded data is ignored rather than propagated: the band reaching past
  * what has been fetched is not evidence of an obstruction. The centreline is not treated that way
  * -- it is the sample the caller checks for validity.
@@ -61,9 +66,9 @@ function worstAcross(
   let worst = centre
   for (let j = 1; j <= count; j++) {
     const off = j * step
-    const left = s.sample(e - pe * off, n - pn * off)
+    const left = s.nearest(e - pe * off, n - pn * off)
     if (left > worst) worst = left
-    const right = s.sample(e + pe * off, n + pn * off)
+    const right = s.nearest(e + pe * off, n + pn * off)
     if (right > worst) worst = right
   }
   return worst

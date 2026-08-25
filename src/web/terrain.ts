@@ -265,6 +265,10 @@ export function bareGround(e: number, n: number): number {
  */
 function samplerFor(layer: Layer): Sampler {
   return {
+    /** The composite cell itself -- roof where there is one, terrain otherwise. */
+    nearest(e: number, n: number): number {
+      return cellOf(layer, e, n)
+    },
     sample(e: number, n: number): number {
       const fx = e - 0.5
       const fy = n + 0.5

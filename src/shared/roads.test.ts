@@ -146,9 +146,10 @@ describe('crossingsAlong', () => {
     // and the street passes 8 m beside it at street level. Measuring down from the roof would say
     // the street has 30 m less air over it than it has.
     const alongside: RoadWay = { ...northSouth(0), pts: [80, 508, 320, 508] }
+    const height = (_e: number, n: number) => (n > 504 ? 12 : 42)
     const elevation = {
-      ground: { sample: (_e: number, n: number) => (n > 504 ? 12 : 42) },
-      surface: { sample: () => 0 },
+      ground: { sample: height, nearest: height },
+      surface: { sample: () => 0, nearest: () => 0 },
     }
     const [x] = crossingsAlong(a, b, [alongside], p, elevation)
     expect(x!.carrier).toBe(12)
