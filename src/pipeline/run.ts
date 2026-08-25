@@ -115,14 +115,29 @@ function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCell
  * hour while looking like a footnote in the log -- so where the time goes is worth stating rather
  * than guessing at.
  */
+/**
+ * Times a stage on the clock *and* on the processor, reporting the processor figure when the two
+ * disagree.
+ *
+ * Wall clock alone is a trap on a laptop. A run left overnight reported a stage at 1926s that had
+ * taken 597s of CPU -- the machine had slept -- and that number was taken at face value and
+ * diagnosed as a performance regression that did not exist. A stage that spends its time waiting on
+ * the network legitimately shows a gap too, which is worth seeing for its own sake.
+ */
 async function stage<T>(label: string, run: () => T | Promise<T>): Promise<T> {
   const started = Date.now()
+  const cpuBefore = process.cpuUsage()
   const out = await run()
   const seconds = (Date.now() - started) / 1000
-  // Summed across regions: which stage is expensive matters more than which region was.
+  const cpu = process.cpuUsage(cpuBefore)
+  const cpuSeconds = (cpu.user + cpu.system) / 1e6
+  // Summed across regions: which stage is expensive matters more than which region was. Summed on
+  // CPU time, so the report cannot be skewed by a sleep or a slow download.
   const key = label.replace(/ \(region[^)]*\)/, '')
-  timings.set(key, (timings.get(key) ?? 0) + seconds)
-  console.log(`${label}  [${seconds.toFixed(1)}s]`)
+  timings.set(key, (timings.get(key) ?? 0) + cpuSeconds)
+  // Only worth two numbers when they differ enough to change what you would conclude.
+  const split = seconds > cpuSeconds * 1.2 + 1 ? `, ${cpuSeconds.toFixed(1)}s cpu` : ''
+  console.log(`${label}  [${seconds.toFixed(1)}s${split}]`)
   return out
 }
 
@@ -660,7 +675,7 @@ async function main() {
   )
 
   const total = (Date.now() - started) / 1000
-  console.log('\nwhere the time went:')
+  console.log('\nwhere the time went (processor time, not clock):')
   for (const [label, seconds] of [...timings].sort((a, b) => b[1] - a[1])) {
     const share = (100 * seconds) / total
     if (share < 1) continue
