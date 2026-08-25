@@ -4,7 +4,6 @@ import { corridorTiles, loadProduct } from './raster.js'
 import { raiseOntoBuildings } from './buildings.js'
 import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
-import { trimProfile } from '../shared/profile.js'
 import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
@@ -462,9 +461,8 @@ async function main() {
   // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
   // line found is stored.
   const deduped = (await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius))).map(locate)
-  const finalCandidates = p.storeProfiles
-    ? deduped.map((c) => ({ ...c, profile: c.profile && trimProfile(c.profile, p) }))
-    : deduped.map(({ profile: _profile, ...rest }) => rest)
+  // evaluateLine already drops the profile unless it is wanted, so there is nothing left to strip.
+  const finalCandidates = deduped
   const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
   console.log(
     `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +

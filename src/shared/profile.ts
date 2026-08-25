@@ -164,19 +164,16 @@ export function canopyProfile(
 ): Pick<StoredProfile, 'surface' | 'surfaceMax'> {
   const { de, dn, pe, pn, steps } = stationsAlong(a, b, length, p)
   const centre: number[] = []
-  const top: number[] = []
+  const top: number[] | undefined = band ? [] : undefined
   for (let i = 0; i <= steps; i++) {
     const t = i / steps
     const e = a.e + de * t * length
     const n = a.n + dn * t * length
     const g = terrain.ground[i]!
-    const gMax = terrain.groundMax?.[i] ?? g
     const s = r2(Math.max(g, surface.sample(e, n) || g))
     centre.push(s)
-    if (!band) {
-      top.push(s)
-      continue
-    }
+    if (!top) continue
+    const gMax = terrain.groundMax?.[i] ?? g
     const half = sideHalfWidthAt(t, length, p)
     const sMax = worstAcross(surface, e, n, pe, pn, half, p) || gMax
     top.push(r2(Math.max(s, gMax, sMax)))

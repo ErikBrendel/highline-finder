@@ -14,7 +14,7 @@ import {
 } from '../shared/scoring.js'
 import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
-import { canopyProfile, groundProfile } from '../shared/profile.js'
+import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -265,7 +265,25 @@ export function evaluateLine(
 
   // Every measured field is filled in by the same function the web app uses, so the two cannot
   // disagree. It re-measures, which is one pass over the profile for a line already known to keep.
-  return { line: rescoreAtSag(provisional, p.sagRatio, p), reject: null, at: null }
+  const scored = rescoreAtSag(provisional, p.sagRatio, p)
+
+  /**
+   * The profile is dropped here unless it is going to be written out.
+   *
+   * Nothing downstream reads it -- refinement re-measures from the raster and dedup compares
+   * anchors -- so on a run that stores no profiles it is half a million arrays held from the moment
+   * they stop being useful until the pooled results are written. That was already over a gigabyte
+   * before the band added three more series to each of them, which is what finally ran the heap
+   * out. Trimmed rather than kept whole when it *is* wanted, so the optional series still cost
+   * nothing when they say nothing.
+   */
+  if (!scored) return failed('geometry')
+  const { profile, ...bare } = scored
+  return {
+    line: p.storeProfiles ? { ...bare, profile: trimProfile(profile!, p) } : bare,
+    reject: null,
+    at: null,
+  }
 }
 
 export interface TerrainPairs {

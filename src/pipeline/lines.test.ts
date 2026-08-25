@@ -10,6 +10,15 @@ import { unpackProfile } from '../shared/profile.js'
 
 const p: Params = DEFAULT_PARAMS
 
+/**
+ * Params that keep the profile on each candidate.
+ *
+ * The pipeline drops it otherwise, since nothing downstream reads it -- so a test that wants to
+ * look at the terrain under a line has to ask for it, exactly as a run that wants profiles in its
+ * output does.
+ */
+const withProfiles: Params = { ...DEFAULT_PARAMS, storeProfiles: true }
+
 /** The stored profile with its derived fields back, as the browser sees it. */
 const expand = (c: Candidate) =>
   unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, p.sagRatio, p)
@@ -52,7 +61,7 @@ const sagOf = (length: number) => p.sagRatio * length
 describe('findLines', () => {
   it('finds a line across a canyon and sags it by sagRatio at midspan', () => {
     const g = canyon(20)
-    const { candidates } = findLines(rimsOf(g), g, g, p)
+    const { candidates } = findLines(rimsOf(g), g, g, withProfiles)
     expect(candidates).toHaveLength(1)
     const c = candidates[0]!
     expect(c.length).toBeCloseTo(220, 0)
@@ -69,7 +78,7 @@ describe('findLines', () => {
     // The line is highest where it has only just left the anchor, so over a flat canyon floor
     // the biggest gap is the first sample past the edge, not the sagging middle.
     const g = canyon(20)
-    const c = findLines(rimsOf(g), g, g, p).candidates[0]!
+    const c = findLines(rimsOf(g), g, g, withProfiles).candidates[0]!
     const gaps = expand(c).map((s) => s.line - s.ground)
     expect(c.exposure).toBeCloseTo(Math.max(...gaps), 0)
     expect(Math.max(...gaps)).toBeGreaterThan(50 + p.aFrameMax - sagOf(220) - 20)
@@ -79,7 +88,7 @@ describe('findLines', () => {
     // The line leaves the anchor at most aFrameMax up, which is under minClearance. Without the
     // anchorZone exclusion this candidate -- and every other -- would be rejected.
     const g = canyon(20)
-    const c = findLines(rimsOf(g), g, g, p).candidates[0]!
+    const c = findLines(rimsOf(g), g, g, withProfiles).candidates[0]!
     const first = expand(c)[0]!
     expect(first.line - first.ground).toBeLessThanOrEqual(p.aFrameMax)
     expect(p.aFrameMax).toBeLessThan(p.minClearance)
