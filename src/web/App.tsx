@@ -23,7 +23,7 @@ import { coverAlong, coverFailed, ensureCover, roadsFor } from './landcover.js'
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
-import { parseUrl, toSearch } from './urlState.js'
+import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
 import { optimizeFrame } from './optimize.js'
 import { emitProbes } from './probeOverlay.js'
 
@@ -162,11 +162,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   // null until the dataset is loaded, because the floor comes from the pipeline's own sag.
   const [sagPct, setSagPct] = useState<number | null>(initial.sagPct)
-  const [minScore, setMinScore] = useState(0)
-  const [minLength, setMinLength] = useState(0)
-  const [minExposure, setMinExposure] = useState(0)
-  const [maxCanopy, setMaxCanopy] = useState(100)
-  const [maxOffLevel, setMaxOffLevel] = useState(100)
+  // Each slider starts where the link put it, or at the value where it filters nothing.
+  const filter = <K extends keyof typeof FILTER_DEFAULTS>(field: K) =>
+    initial.filters[field] ?? FILTER_DEFAULTS[field]
+  const [minScore, setMinScore] = useState(filter('minScore'))
+  const [minLength, setMinLength] = useState(filter('minLength'))
+  const [minExposure, setMinExposure] = useState(filter('minExposure'))
+  const [maxCanopy, setMaxCanopy] = useState(filter('maxCanopy'))
+  const [maxOffLevel, setMaxOffLevel] = useState(filter('maxOffLevel'))
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [bbox, setBbox] = useState(initial.bbox)
   // Google's map zoom is the same web-mercator scale MapLibre uses, so it transfers directly.
@@ -175,16 +178,16 @@ export function App() {
   const [basemapMix, setBasemapMix] = useState(
     Math.min(MIX_MAX, Math.max(0, initial.basemapMix ?? MIX_MAX)),
   )
-  const [showLines, setShowLines] = useState(true)
+  const [showLines, setShowLines] = useState(initial.showLines ?? true)
   /**
    * Which anchor classes are shown. All three by default: the split exists so a person can put the
    * town away when they want a forest line, not so the app decides for them which they wanted.
    */
-  const [kinds, setKinds] = useState<ReadonlySet<LineKind>>(new Set(LINE_KINDS))
+  const [kinds, setKinds] = useState<ReadonlySet<LineKind>>(new Set(initial.kinds ?? LINE_KINDS))
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
-  const [showHotspots, setShowHotspots] = useState(true)
+  const [showHotspots, setShowHotspots] = useState(initial.showHotspots ?? true)
   const [mask, setMask] = useState<MaskCells | null>(null)
   const [tiles, setTiles] = useState<TileUsage | null>(null)
   /**
@@ -671,6 +674,9 @@ export function App() {
   const search = useMemo(() => {
     const planning = selectedId === PLANNED_ID || !!custom.a || !!custom.b
     const fallback = planning ? null : selected
+    // The sag default is not a constant: the dataset was generated at some sag and the control
+    // cannot go below it, so that floor is the default and only a tightened sag belongs in a link.
+    const sagFloor = data ? data.meta.params.sagRatio * 100 : null
     return toSearch({
       bbox,
       lineId: selectedId && selectedId !== PLANNED_ID ? selectedId : null,
@@ -681,10 +687,19 @@ export function App() {
           }
         : custom,
       rig: fallback ? { a: fallback.a.aFrame, b: fallback.b.aFrame } : rig,
-      sagPct,
-      basemapMix,
+      sagPct: sagPct === null ? null : changed(sagPct, sagFloor),
+      basemapMix: changed(basemapMix, MIX_MAX),
+      showLines: changed(showLines, true),
+      showHotspots: changed(showHotspots, true),
+      // All three on is the default, so only a narrowed selection is worth a parameter.
+      kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
+      filters: movedFilters({ minScore, minLength, minExposure, maxCanopy, maxOffLevel }),
     })
-  }, [bbox, selectedId, selected, custom, rig, sagPct, basemapMix])
+  }, [
+    bbox, selectedId, selected, custom, rig, sagPct, basemapMix, data,
+    showLines, showHotspots, kinds,
+    minScore, minLength, minExposure, maxCanopy, maxOffLevel,
+  ])
 
   useEffect(() => {
     // replaceState, not pushState: panning the map should not fill the back button.
