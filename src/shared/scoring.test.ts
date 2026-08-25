@@ -140,6 +140,26 @@ describe('penaltyOf', () => {
   })
 })
 
+describe('violationsOf', () => {
+  const at = (clearanceMin: number): Metrics => ({
+    clearanceMin, exposure: 40, canopyClearanceMin: 5, canopyBlockedFraction: 0,
+    clearanceDeficit: 0, crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
+  })
+
+  it('quotes the shortfall when the line is merely too low', () => {
+    expect(violationsOf(at(1.4), 200, 0, p).join(' ')).toMatch(
+      /clears the ground by only 1.4 m, under the 3 m minimum/,
+    )
+  })
+
+  it('says the line is in the ground rather than quoting a negative clearance', () => {
+    // "Clears the ground by only -2.6 m" is arithmetic, not a description of anything.
+    const said = violationsOf(at(-2.6), 200, 0, p).join(' ')
+    expect(said).toContain('intersects the ground')
+    expect(said).not.toMatch(/-2\.6/)
+  })
+})
+
 describe('road crossings', () => {
   /**
    * The flat span, with the line 20 m over the floor at midspan once the sag is applied. Anything

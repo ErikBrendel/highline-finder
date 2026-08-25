@@ -250,9 +250,13 @@ export function violationsOf(
   if (length < p.minLength) out.push(`${length.toFixed(0)} m is under the ${p.minLength} m minimum`)
   if (length > p.maxLength) out.push(`${length.toFixed(0)} m is over the ${p.maxLength} m maximum`)
   if (m.clearanceMin < p.minClearance) {
+    // A negative clearance is not a small one. "Clears the ground by only -2.6 m" is arithmetic
+    // rather than a description: the line is inside the hill, and saying so is the whole answer.
     out.push(
-      `clears the ground by only ${m.clearanceMin.toFixed(1)} m, under the ` +
-        `${p.minClearance} m minimum`,
+      m.clearanceMin < 0
+        ? 'intersects the ground'
+        : `clears the ground by only ${m.clearanceMin.toFixed(1)} m, under the ` +
+          `${p.minClearance} m minimum`,
     )
   }
   if (m.exposure < p.minExposure) {
