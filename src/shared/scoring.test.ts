@@ -5,6 +5,7 @@ import {
   metricsAt,
   penaltyOf,
   rawMetricsAt,
+  rejectionOf,
   rescoreAtSag,
   scoreOf,
   violationsOf,
@@ -76,11 +77,54 @@ describe('metricsAt', () => {
   })
 })
 
+describe('anchor zone', () => {
+  /**
+   * The flat span sampled every metre, with a mound raised over the samples from `from` to `to`.
+   *
+   * Finer than the other fixtures here on purpose: the anchor zone is ten metres, so at the usual
+   * five-metre spacing it holds two samples and one of them sits on the anchor itself.
+   */
+  const mound = (from: number, to: number, top: number) =>
+    packProfile(
+      flatSpan(50, 20, 200, 1).map((sm) => (sm.d >= from && sm.d <= to ? { ...sm, ground: top } : sm)),
+      p,
+    )
+
+  const at = (sp: ReturnType<typeof mound>) => rawMetricsAt(sp, 200, 50, 50, 0.05, p)!
+
+  it('is zero for a line that stays above ground near its anchors', () => {
+    expect(at(mound(0, 0, 20)).anchorZoneDeficit).toBe(0)
+  })
+
+  it('reports how deep the line runs inside a mound beside the anchor', () => {
+    // A mound 5 m past the anchor, standing well above where the line is by then.
+    const m = at(mound(4, 8, 60))
+    expect(m.anchorZoneDeficit).toBeGreaterThan(0)
+    // Still a candidate: nothing inside the zone disqualifies a line.
+    expect(rejectionOf(m, p)).toBeNull()
+  })
+
+  it('costs score without costing candidacy', () => {
+    const clean = at(mound(0, 0, 20))
+    const buried = at(mound(4, 8, 60))
+    expect(violationsOf(buried, 200, 0, p)).toEqual([])
+    expect(scoreOf(200, 0, buried, p).score).toBeLessThan(scoreOf(200, 0, clean, p).score)
+    // A nudge, not a verdict: the clearance component is 5 points of the hundred.
+    expect(scoreOf(200, 0, clean, p).score - scoreOf(200, 0, buried, p).score).toBeLessThan(6)
+  })
+
+  it('weights a burial at the far edge of the zone above one at the anchor', () => {
+    const near = at(mound(1, 3, 60)).anchorZoneDeficit
+    const far = at(mound(7, 9, 60)).anchorZoneDeficit
+    expect(far).toBeGreaterThan(near)
+  })
+})
+
 describe('scoreOf', () => {
   const base: Metrics = {
     clearanceMin: 5, clearanceMargin: 2, exposure: 20, canopyClearanceMin: 2,
-    canopyBlockedFraction: 0, clearanceDeficit: 0, crossingDeficit: 0, worstCrossing: -1,
-    worstClearance: Infinity,
+    canopyBlockedFraction: 0, clearanceDeficit: 0, anchorZoneDeficit: 0, crossingDeficit: 0,
+    worstCrossing: -1, worstClearance: Infinity,
   }
 
   it('scales exposure logarithmically so big lines stay distinguishable', () => {
@@ -149,8 +193,8 @@ describe('penaltyOf', () => {
 describe('violationsOf', () => {
   const at = (clearanceMin: number): Metrics => ({
     clearanceMin, clearanceMargin: clearanceMin - p.minClearance, exposure: 40,
-    canopyClearanceMin: 5, canopyBlockedFraction: 0, clearanceDeficit: 0, crossingDeficit: 0,
-    worstCrossing: -1, worstClearance: Infinity,
+    canopyClearanceMin: 5, canopyBlockedFraction: 0, clearanceDeficit: 0, anchorZoneDeficit: 0,
+    crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
   })
 
   it('quotes the shortfall when the line is merely too low', () => {
@@ -348,16 +392,22 @@ describe('rawMetricsAt', () => {
     let n = 0
     let deficit = 0
     let weight = 0
+    let zoneDeficit = 0
+    let zoneWeight = 0
     for (const s of samples) {
       const clear = s.line - s.ground
       if (clear > exposure) exposure = clear
-      if (s.d < inner0 || s.d > inner1) continue
+      const central = Math.min(s.d, length - s.d) / (length / 2)
+      if (s.d < inner0 || s.d > inner1) {
+        zoneDeficit += central * Math.max(0, s.groundMax - s.line)
+        zoneWeight += central
+        continue
+      }
       if (clear < clearanceMin) clearanceMin = clear
       if (clear - s.needed < clearanceMargin) clearanceMargin = clear - s.needed
       const canopy = s.line - s.surface
       if (canopy < canopyClearanceMin) canopyClearanceMin = canopy
       if (canopy < 0) blocked++
-      const central = Math.min(s.d, length - s.d) / (length / 2)
       weight += central
       if (clear < p.minClearance) deficit += central * (p.minClearance - clear)
       n++
@@ -369,6 +419,7 @@ describe('rawMetricsAt', () => {
       canopyClearanceMin,
       canopyBlockedFraction: blocked / n,
       clearanceDeficit: weight > 0 ? deficit / weight : 0,
+      anchorZoneDeficit: zoneWeight > 0 ? zoneDeficit / zoneWeight : 0,
       // This reference walks the profile alone; crossings come from the road network and are
       // measured separately, so with none passed in these are what the real one must report.
       crossingDeficit: 0,

@@ -217,7 +217,7 @@ export function Details({
       ? []
       : [{ label: 'Rig height A / B', value: stat((c) => `+${c.a.aFrame.toFixed(1)} / +${c.b.aFrame.toFixed(1)} m`) }]),
     {
-      label: 'Score: exp / len / canopy / margin / level',
+      label: 'Score: exp / len / canopy / clear / level',
       value: stat((c) => {
         const s = c.scoreParts
         return [s.exposure, s.length, s.canopy, s.margin, s.level].map(pct).join('/')

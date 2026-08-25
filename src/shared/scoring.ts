@@ -99,6 +99,18 @@ export interface Metrics {
    */
   clearanceDeficit: number
   /**
+   * How deep the line runs inside the ground *within* `anchorZone`, averaged and weighted toward
+   * the far edge of the zone. 0 for a line that stays above ground there, which is most of them.
+   *
+   * The anchor zone exists because a line leaves its anchor at ground level and no clearance rule
+   * can hold there. But "no clearance required" was being read as "nothing here matters", and a
+   * line that ploughs through a hillock ten metres from its anchor is worse than one that does not
+   * -- not disqualifying, since the terrain right by an anchor can be cleared or rigged around, but
+   * not free either. Weighted toward the far edge because the anchor end of the zone is where the
+   * line is *supposed* to be on the ground.
+   */
+  anchorZoneDeficit: number
+  /**
    * Metres the worst road crossing is short of what it demands, 0 when every crossing is clear.
    *
    * The worst rather than the sum: a crossing is one place, and a line is stopped by the one it
@@ -175,6 +187,8 @@ export function rawMetricsAt(
   let samples = 0
   let deficit = 0
   let weight = 0
+  let zoneDeficit = 0
+  let zoneWeight = 0
 
   for (let i = 0; i <= last; i++) {
     const t = last > 0 ? i / last : 0
@@ -182,7 +196,16 @@ export function rawMetricsAt(
     const line = r2(lineHeightAt(hA, hB, sag, t))
     if (line - ground > exposure) exposure = line - ground
     const d = r2(t * length)
-    if (d < inner0 || d > inner1) continue
+    // Fraction of the way from the nearer anchor to midspan: 0 at the ends, 1 in the middle.
+    const central = Math.min(d, length - d) / (length / 2)
+    if (d < inner0 || d > inner1) {
+      // Inside the anchor zone nothing is required, but being buried is still worth knowing about.
+      // The same weighting as outside, which here reads as "how far from the anchor" -- and at the
+      // anchor itself the band has no width and the line sits on its own ground, so it is zero.
+      zoneDeficit += central * Math.max(0, band[i]! - line)
+      zoneWeight += central
+      continue
+    }
 
     const clear = line - band[i]!
     if (clear < clearanceMin) clearanceMin = clear
@@ -191,8 +214,6 @@ export function rawMetricsAt(
     const canopyClear = line - (sp.surface[i] ?? ground)
     if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
     if (canopyClear < 0) blocked++
-    // Fraction of the way from the nearer anchor to midspan: 0 at the ends, 1 in the middle.
-    const central = Math.min(d, length - d) / (length / 2)
     weight += central
     if (clear < need) deficit += central * (need - clear)
     samples++
@@ -258,6 +279,7 @@ export function rawMetricsAt(
     canopyClearanceMin,
     canopyBlockedFraction: blocked / samples,
     clearanceDeficit: weight > 0 ? deficit / weight : 0,
+    anchorZoneDeficit: zoneWeight > 0 ? zoneDeficit / zoneWeight : 0,
     crossingDeficit: Math.max(0, worstShort),
     worstCrossing,
     worstClearance,
@@ -450,7 +472,18 @@ export function scoreOf(
     exposure: clamp01(Math.log10(Math.max(m.exposure, 1) / 5) / Math.log10(200 / 5)),
     length: clamp01(length / p.maxLength),
     canopy: 1 - m.canopyBlockedFraction,
-    margin: clamp01(m.clearanceMargin / 10),
+    /**
+     * How comfortable the terrain clearance is, on both counts.
+     *
+     * The margin over what each sample is held to, discounted by how far the line runs inside the
+     * ground close to the anchors. Both are the same question -- how much room the terrain leaves
+     * -- so they share one component rather than adding a sixth with a weight taken off the others.
+     * Multiplied rather than subtracted so a burial cannot push a clean line's margin below zero
+     * and flatten the gradient the anchor optimiser walks down.
+     */
+    margin:
+      clamp01(m.clearanceMargin / 10) *
+      clamp01(1 - m.anchorZoneDeficit / Math.max(p.minClearance, 0.01)),
     level: budget > 0 ? clamp01(1 - offLevel / budget) : 1,
   }
   const score =
