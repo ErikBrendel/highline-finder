@@ -95,7 +95,7 @@ export function planLine(
   if (profile.some((s) => Number.isNaN(s.ground))) return null
 
   const stored = packProfile(profile)
-  const crossings = scene.roads?.crossings(a, b) ?? []
+  const crossings = scene.roads?.crossings(a, b, p, { ground, surface }) ?? []
   const m = rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings)
   if (!m) return null
 

@@ -1,4 +1,5 @@
-import type { Pos } from './grid.js'
+import type { Pos, Sampler } from './grid.js'
+import { sideHalfWidthAt } from './profile.js'
 import type { Roads } from './scene.js'
 import type { Crossing, Params, RoadTier } from './types.js'
 
@@ -25,6 +26,12 @@ export function requiredOver(x: Crossing, p: Params): number {
  * inventing a width, drawing the invention at 1 m and then measuring it back. Intersecting the span
  * with the segments uses the geometry that actually exists and returns the exact distance along the
  * span, which is also what the profile chart needs to draw.
+ *
+ * Proximity, not intersection. A road two metres to the side is still under the line once the wind
+ * gets up -- the same reason clearance is measured across a band rather than along a ray -- so a
+ * road counts when it comes within the band, and a road the span crosses outright is just the case
+ * where that distance is zero. This is why a road running *beside* the line for two hundred metres
+ * is no longer invisible, and why the answer is a stretch of the span rather than a point on it.
  */
 
 /**
@@ -163,47 +170,211 @@ function halfWidth(tags: Tags, tier: RoadTier): number {
   return DEFAULT_HALF[tier]
 }
 
+/** Where on a segment the nearest point to `p` lies. */
+function nearestOnSegment(
+  px: number,
+  py: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Pos {
+  const ex = x1 - x0
+  const ey = y1 - y0
+  const len2 = ex * ex + ey * ey
+  const u = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((px - x0) * ex + (py - y0) * ey) / len2))
+  return { e: x0 + ex * u, n: y0 + ey * u }
+}
+
+function distToSegment2(
+  px: number,
+  py: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): number {
+  const foot = nearestOnSegment(px, py, x0, y0, x1, y1)
+  return (px - foot.e) ** 2 + (py - foot.n) ** 2
+}
+
 /**
- * Where a span crosses each way, as a distance along it.
+ * The two elevation models, for reading a road's own height rather than the line's.
  *
- * Segment against segment, taking the parameter along the span. A way that touches the span more
- * than once -- a hairpin, or a road running beside it and turning across it -- yields one crossing
- * per touch, which is right: each is a separate place the line has to be high enough.
- *
- * Crossings outside the span are not clipped away by the caller, so the test is on both parameters
- * rather than only on the way's.
+ * Optional throughout: a caller with no raster to hand -- the unit tests, and anything measuring
+ * pure geometry -- gets crossings without a carrier, and the metrics fall back to the profile
+ * underneath the line.
  */
-export function crossingsAlong(a: Pos, b: Pos, ways: Iterable<RoadWay>): Crossing[] {
+export interface Elevation {
+  ground: Sampler
+  surface: Sampler
+}
+
+/**
+ * Where a span comes within the band of each way, as a stretch of distances along it.
+ *
+ * The test at fraction `t` along the span is `distance(t) <= halfWidth(t) + half`: the band only has
+ * to reach the near *kerb*, since the requirement already holds half a carriageway either side of
+ * the centreline. Intersection is the special case where the distance is zero, so a span crossing a
+ * road at right angles gives what it always did.
+ *
+ * The stretch is a single interval, and provably so rather than by assumption. Distance to a convex
+ * set is a convex function of the point, and a road segment is convex, so `distance(t)` is convex;
+ * the band half-width is `4t(1-t)` scaled, which is concave; so the difference is convex and the
+ * set where it is negative is an interval. That is what lets the two ends be found by bisection
+ * from the minimum instead of by marching along the span.
+ *
+ * A way touching the span more than once -- a hairpin, or a road running beside it and turning
+ * across it -- still yields one crossing per segment that reaches the band, which is right: each is
+ * a separate place the line has to be high enough. Segments of one way that overlap along the span
+ * collapse in the metrics, since only the tightest matters.
+ */
+export function crossingsAlong(
+  a: Pos,
+  b: Pos,
+  ways: Iterable<RoadWay>,
+  p: Params,
+  elevation?: Elevation,
+): Crossing[] {
   const out: Crossing[] = []
   const se = b.e - a.e
   const sn = b.n - a.n
   const length = Math.hypot(se, sn)
   if (length === 0) return out
+  const r1 = (v: number) => Math.round(v * 10) / 10
 
   for (const way of ways) {
     const { pts } = way
     for (let i = 0; i + 3 < pts.length; i += 2) {
-      const we = pts[i + 2]! - pts[i]!
-      const wn = pts[i + 3]! - pts[i + 1]!
-      const denom = se * wn - sn * we
-      // Parallel, including a zero-length segment. A road running exactly along the span is not a
-      // crossing, and the ways either side of it will be.
-      if (denom === 0) continue
-      const de = pts[i]! - a.e
-      const dn = pts[i + 1]! - a.n
-      const t = (de * wn - dn * we) / denom
-      const u = (de * sn - dn * se) / denom
-      if (t < 0 || t > 1 || u < 0 || u > 1) continue
+      const x0 = pts[i]!
+      const y0 = pts[i + 1]!
+      const x1 = pts[i + 2]!
+      const y1 = pts[i + 3]!
+      /** How far the near kerb is from the centreline at `t`, negative once the band reaches it. */
+      const shortfall = (t: number) =>
+        Math.sqrt(distToSegment2(a.e + se * t, a.n + sn * t, x0, y0, x1, y1)) -
+        way.half -
+        sideHalfWidthAt(t, length, p)
+
+      // Ternary search on a convex function: 40 rounds shrink the bracket by (2/3)^40, far past the
+      // decimetre the result is rounded to.
+      let lo = 0
+      let hi = 1
+      for (let k = 0; k < 40 && hi - lo > 1e-6; k++) {
+        const m1 = lo + (hi - lo) / 3
+        const m2 = hi - (hi - lo) / 3
+        if (shortfall(m1) < shortfall(m2)) hi = m2
+        else lo = m1
+      }
+      const tightest = (lo + hi) / 2
+      const gap = shortfall(tightest)
+      if (gap > 0) continue
+
+      // Convexity again: one root each side of the minimum, or the span end where there is none.
+      const root = (from: number, to: number) => {
+        if (shortfall(from) <= 0) return from
+        let inside = to
+        let outside = from
+        for (let k = 0; k < 24; k++) {
+          const mid = (inside + outside) / 2
+          if (shortfall(mid) <= 0) inside = mid
+          else outside = mid
+        }
+        return inside
+      }
+
+      const t0 = root(0, tightest)
+      const t1 = root(1, tightest)
       out.push({
-        d: Math.round(t * length * 10) / 10,
+        d: r1(tightest * length),
+        from: r1(t0 * length),
+        to: r1(t1 * length),
+        offset: r1(Math.max(0, gap + sideHalfWidthAt(tightest, length, p))),
         kind: way.kind,
         tier: way.tier,
-        half: way.half,
         onBridge: way.bridge,
+        carrier: elevation
+          ? carrierHeight(a, se, sn, [t0, tightest, t1], x0, y0, x1, y1, way.bridge, elevation)
+          : undefined,
       })
     }
   }
-  return out.sort((x, y) => x.d - y.d)
+  return mergeOverlapping(out)
+}
+
+/**
+ * How high the road runs, read at the road's own position.
+ *
+ * Sampled where the span is nearest it, at both ends of the stretch and at the tightest point, and
+ * the highest of the three kept -- one number, and the strictest reading of a road that climbs
+ * across the band. A bridge is read from the surface model, because the terrain model is bare earth
+ * and runs straight under a deck.
+ */
+function carrierHeight(
+  a: Pos,
+  se: number,
+  sn: number,
+  ts: number[],
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  bridge: boolean,
+  elevation: Elevation,
+): number | undefined {
+  const model = bridge ? elevation.surface : elevation.ground
+  let highest = -Infinity
+  for (const t of ts) {
+    const foot = nearestOnSegment(a.e + se * t, a.n + sn * t, x0, y0, x1, y1)
+    const h = model.sample(foot.e, foot.n)
+    if (h > highest) highest = h
+  }
+  return Number.isFinite(highest) ? Math.round(highest * 100) / 100 : undefined
+}
+
+/**
+ * Collapses crossings of the same kind whose stretches overlap, which are the same piece of road.
+ *
+ * A road is a chain of segments and each is tested separately, so one bending gently past the line
+ * used to arrive as a dozen crossings covering the same ground -- a dozen slabs stacked in the
+ * chart and a dozen entries in the dataset. Only *overlapping* ranges merge: two roads with a gap
+ * between them stay two crossings, because the ground in that gap is not a road and the line is
+ * entitled to be lower over it.
+ *
+ * The survivor keeps the closest approach of the group, which is the station the icon belongs at.
+ * Also what makes the order total, so the bucketed index and an exhaustive scan cannot disagree
+ * about which of two crossings at the same distance comes first.
+ */
+function mergeOverlapping(all: Crossing[]): Crossing[] {
+  const groups = new Map<string, Crossing[]>()
+  for (const x of all) {
+    const key = `${x.kind}|${x.tier}|${x.onBridge}`
+    const group = groups.get(key)
+    if (group) group.push(x)
+    else groups.set(key, [x])
+  }
+
+  const out: Crossing[] = []
+  for (const group of groups.values()) {
+    let open: Crossing | null = null
+    for (const x of group.sort((u, v) => u.from - v.from || u.to - v.to || u.d - v.d)) {
+      if (open && x.from <= open.to) {
+        open.to = Math.max(open.to, x.to)
+        // The highest of the merged pieces, for the same reason one piece keeps its highest probe.
+        if (x.carrier !== undefined && (open.carrier === undefined || x.carrier > open.carrier)) {
+          open.carrier = x.carrier
+        }
+        if (x.offset < open.offset) {
+          open.offset = x.offset
+          open.d = x.d
+        }
+        continue
+      }
+      open = { ...x }
+      out.push(open)
+    }
+  }
+  return out.sort((x, y) => x.d - y.d || x.from - y.from || x.to - y.to)
 }
 
 /**
@@ -226,6 +397,8 @@ export class RoadIndex implements Roads {
   /** Query number each segment was last returned for, so a repeat costs a comparison. */
   private stamps = new Int32Array(0)
   private query = 0
+  /** Widest carriageway held, so a query knows how far off the span a road can still count. */
+  private widest = 0
 
   constructor(private readonly cell = 100) {}
 
@@ -237,6 +410,7 @@ export class RoadIndex implements Roads {
 
   add(way: RoadWay): void {
     const { pts } = way
+    if (way.half > this.widest) this.widest = way.half
     for (let i = 0; i + 3 < pts.length; i += 2) {
       const id = this.pieces.length
       this.pieces.push({ ...way, pts: pts.slice(i, i + 4) })
@@ -256,17 +430,24 @@ export class RoadIndex implements Roads {
   }
 
   /**
-   * Every segment in a bucket the span passes through, each returned once.
+   * Every segment in a bucket within `margin` of the span, each returned once.
    *
    * Amanatides-Woo traversal: step to whichever of the next column or the next row boundary the
    * span reaches first, so exactly the buckets the segment enters are visited and none is stepped
    * over.
+   *
+   * The margin is served by dilating each visited bucket, which is exact rather than approximate: a
+   * point within `margin` of the span has a nearest point on the span in some visited bucket, and
+   * two points less than `reach` cells apart on each axis cannot differ by more than `reach` bucket
+   * indices. It costs `(2*reach+1)^2` map lookups per step -- irrelevant next to the raster work,
+   * and paid only by spans that have any road near them at all.
    */
-  near(a: Pos, b: Pos): RoadWay[] {
+  near(a: Pos, b: Pos, margin = 0): RoadWay[] {
     const out: RoadWay[] = []
     if (!this.buckets.size) return out
     if (this.stamps.length < this.pieces.length) this.stamps = new Int32Array(this.pieces.length)
     const stamp = ++this.query
+    const reach = Math.ceil(margin / this.cell)
 
     const { cell } = this
     let cx = Math.floor(a.e / cell)
@@ -289,12 +470,15 @@ export class RoadIndex implements Roads {
     // rather than on a floating-point comparison landing the right way.
     const visits = Math.abs(endX - cx) + Math.abs(endY - cy) + 1
     for (let visit = 0; visit < visits; visit++) {
-      const bucket = this.buckets.get(RoadIndex.key(cx, cy))
-      if (bucket) {
-        for (const id of bucket) {
-          if (this.stamps[id] === stamp) continue
-          this.stamps[id] = stamp
-          out.push(this.pieces[id]!)
+      for (let dx = -reach; dx <= reach; dx++) {
+        for (let dy = -reach; dy <= reach; dy++) {
+          const bucket = this.buckets.get(RoadIndex.key(cx + dx, cy + dy))
+          if (!bucket) continue
+          for (const id of bucket) {
+            if (this.stamps[id] === stamp) continue
+            this.stamps[id] = stamp
+            out.push(this.pieces[id]!)
+          }
         }
       }
       if (tMaxX < tMaxY) {
@@ -308,9 +492,12 @@ export class RoadIndex implements Roads {
     return out
   }
 
-  crossings(a: Pos, b: Pos): Crossing[] {
-    const ways = this.near(a, b)
-    return ways.length ? crossingsAlong(a, b, ways) : []
+  crossings(a: Pos, b: Pos, p: Params, elevation?: Elevation): Crossing[] {
+    // Widest the band ever gets on this span, plus the widest carriageway: past that, no road in the
+    // bucket could reach the line however the two are angled.
+    const margin = sideHalfWidthAt(0.5, Math.hypot(b.e - a.e, b.n - a.n), p) + this.widest
+    const ways = this.near(a, b, margin)
+    return ways.length ? crossingsAlong(a, b, ways, p, elevation) : []
   }
 
   /** Buckets holding at least one segment, for reporting how much road a region carries. */

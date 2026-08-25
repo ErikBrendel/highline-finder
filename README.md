@@ -94,10 +94,33 @@ parameters can move an anchor and orphan an id. That is why a shared candidate c
 too: if the id no longer resolves, the same line is rebuilt and measured live as a planned line, so
 the link goes stale rather than broken.
 
+### A band, not a ray
+
+A line is not a ray, and measuring it as one lets it thread between two pines three metres apart, or
+down a corridor between two buildings, and report clear air. Wind and the walker's own weight push
+it sideways, so clearance is measured across a lens: zero half-width at each anchor, where the line
+is pinned, widest at midspan.
+
+The half-width is a fraction of span — 4 % by default — because it is the same physics as the sag. A
+tensioned line deflects by `F·L/(4·T)` whichever direction the load points, so a side excursion is a
+sag turned through ninety degrees and belongs in the same units. 4 % against the 5 % sag asserts a
+side load about 80 % of body weight, more than wind alone but about what a walker leaning or falling
+sideways puts in. It scales the way the problem does: a 60 m urban line gets ±2.4 m, which is what
+stops it threading a gap between buildings, while a 400 m line over a valley gets ±16 m of air it
+was never going to touch anything with.
+
+Three things are deliberately *not* measured across the band. Exposure is how high the line is over
+what is directly beneath it, so it stays a centreline figure. Canopy stays a centreline figure too:
+it is scored rather than enforced, because the surface model carries a 21-month epoch mismatch, and
+widening a soft measurement only compounds it — the profile chart draws the band's vegetation
+instead, one shade lighter, so a line threading two pines is visible without being rejected for it.
+And the cheap terrain gate in the pair search still runs on the centreline, which costs nothing:
+a band always contains its centreline, so it can only ever remove candidates.
+
 ### What the line passes over
 
 Terrain clearance is a flat 3 m, which is the right number over a field and the wrong one over a
-motorway. So every line is intersected with the OSM road and rail network, and each crossing raises
+motorway. So every line is measured against the OSM road and rail network, and each crossing raises
 the clearance owed at that point:
 
 | | extra | total | OSM |
@@ -114,10 +137,17 @@ over the rail. For scale, German law wants 4.50 m of clearance over a road and 4
 motorway structures — these run to five times that, because a bridge deck is rigid and surveyed
 while a slackline sags under a walker.
 
+A road counts when it comes within the band, not only when the span crosses it — a road two metres
+to the side is under the line as soon as the wind gets up, which is the same reason clearance is
+measured across a band at all. Crossing is then just the case where that distance is zero. So a road
+running *beside* the line for two hundred metres, which a segment-intersection test cannot see at
+all, is no longer invisible, and each entry covers the stretch of span the road is under the band
+for rather than a single point on it. There is no discount for being off to the side: inside the
+band, a road is owed its full clearance.
+
 Vectors rather than a raster, because OSM gives a centreline plus an optional width tag: rasterising
-would mean inventing a width, drawing the invention at 1 m and then measuring it back. Intersecting
-the span with the segments gives the exact distance along it, which is also what the profile chart
-draws. Tunnels are ignored — a road in a tunnel is under the ground the line is already measured
+would mean inventing a width, drawing the invention at 1 m and then measuring it back. Working with
+the segments gives exact distances along the span, which is also what the profile chart draws. Tunnels are ignored — a road in a tunnel is under the ground the line is already measured
 against — and a bridge is measured against its deck, which the terrain model has no idea exists but
 the photogrammetric surface model does.
 
@@ -262,7 +292,8 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
    on the parapet or the structure, both of which sit at roof level, so it attaches exactly where
    the roof is and the pair has to be level enough on its own. Height difference is hard-capped at 3 % of span — 1.5 m
    over 50 m, 15 m over 500 m. This is what stops the finder proposing badly tilted lines.
-6. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain and to canopy.
+6. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain across the band
+   and to canopy on the centreline.
 7. **Score and dedup** — filter, rank, then collapse near-duplicates: two lines are the same when
    *both* endpoints are within `dedupRadius`, so lines sharing one anchor survive as the different
    lines they are.

@@ -52,6 +52,23 @@ export interface Params {
   maxLength: number
   /** Midspan sag as a fraction of length. Fixed ratio, not a tension model. */
   sagRatio: number
+  /**
+   * Half-width at midspan of the band clearance is measured across, as a fraction of span.
+   *
+   * A line is not a ray. Wind and a walker's own weight push it sideways, and a tensioned line
+   * deflects by `F*L/(4*T)` whichever direction the load points -- so a side excursion is a sag
+   * turned through ninety degrees, and belongs in the same units as one. The band is a lens: zero
+   * half-width at each anchor, where the line is pinned, widest in the middle. That it shares the
+   * sag curve's shape is a consequence of both being pinned at the same two points, not a reason to
+   * derive one from the other; the loads differ, so the ratios do.
+   *
+   * 0 measures the bare centreline, which is what this did before.
+   */
+  sideClearanceRatio: number
+  /**
+   * Most lateral samples per side at one station. The step grows past this rather than the count.
+   */
+  sideSamplesPerSide: number
   /** Grid spacing of candidate anchor positions. */
   anchorStep: number
   /** Number of angular sectors in the openness bitmask. */
@@ -172,16 +189,45 @@ export const ROAD_TIERS = ['path', 'cycle', 'street', 'road', 'highway'] as cons
 
 export type RoadTier = (typeof ROAD_TIERS)[number]
 
-/** One place a line passes over something that carries traffic. */
+/** One place a line passes over -- or close beside -- something that carries traffic. */
 export interface Crossing {
-  /** Distance from anchor A along the span. */
+  /** Distance from anchor A along the span, at the tightest point. Where the chart puts the icon. */
   d: number
+  /**
+   * The stretch of the span this road is inside the band for, as distances from anchor A.
+   *
+   * A range rather than `d` plus a half-width, because two different things put a road under the
+   * line for a stretch of it: a shallow-angle crossing occupies far more of the span than the
+   * carriageway is wide, and a road running *beside* the line is under the band for as long as it
+   * stays there without ever crossing at all.
+   */
+  from: number
+  to: number
+  /**
+   * How far the road's near kerb sits from the centreline at `d`, in metres. 0 when the span
+   * actually passes over it.
+   *
+   * Not a discount: a road inside the band is owed its full clearance wherever in the band it is,
+   * because that is the whole reason for the band. It is here so the chart and the violation text
+   * can say the line passes *beside* something rather than over it.
+   */
+  offset: number
   /** The OSM value, so the chart can name what it drew. */
   kind: string
   /** Which clearance class it falls in. The metres come from `Params.roadClearance`. */
   tier: RoadTier
-  /** Half the carriageway: the requirement holds this far either side of `d`. */
-  half: number
+  /**
+   * Height of the road surface itself, sampled on the road rather than under the line.
+   *
+   * The clearance a road demands is owed to the road, and once a crossing can sit off to the side
+   * the two are not the same place: a span leaving a roof with a street passing three metres beside
+   * it would otherwise have its clearance over that street measured down from the roof. The highest
+   * point of the road within the stretch it is under the band for, so the tightest reading wins.
+   *
+   * Absent when the crossing was found without an elevation model to hand, as the unit tests do;
+   * the centreline profile is then read instead, which is what this used to do everywhere.
+   */
+  carrier?: number
   /**
    * Traffic on a bridge deck, so the clearance is owed to the deck rather than to the ground under
    * it. The terrain model is bare earth and has no bridge in it; the surface model does.
@@ -213,6 +259,21 @@ export interface StoredProfile {
   ground: number[]
   /** Top of vegetation / structures (bDOM), clamped to never fall below `ground`. */
   surface: number[]
+  /**
+   * Worst terrain anywhere across the band at each sample, which is what clearance is measured
+   * against. Absent when it is the centreline everywhere, so a run at `sideClearanceRatio: 0`
+   * stores exactly what it always did.
+   */
+  groundMax?: number[]
+  /**
+   * The same for the surface model. Drawn, never scored: canopy stays a centreline measurement.
+   *
+   * Vegetation beside the line is worth *seeing* -- it is how you tell a line threading two pines
+   * from one over a clearing -- but the surface model carries a 21-month epoch mismatch and
+   * photogrammetric noise, and canopy is a score rather than a gate for exactly that reason.
+   * Widening it would compound a soft measurement instead of sharpening a hard one.
+   */
+  surfaceMax?: number[]
 }
 
 export interface ProfileSample {
@@ -221,8 +282,14 @@ export interface ProfileSample {
   ground: number
   /** Top of vegetation / structures (bDOM), clamped to never fall below `ground`. */
   surface: number
+  /** Worst terrain across the band here. Equal to `ground` when the band has no width. */
+  groundMax: number
+  /** Worst surface across the band here. Equal to `surface` when the band has no width. */
+  surfaceMax: number
   /** Height of the sagging line. */
   line: number
+  /** Half-width of the band at this station, for drawing it. */
+  halfWidth: number
 }
 
 export interface ScoreParts {

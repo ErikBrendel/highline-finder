@@ -55,8 +55,24 @@ export function chooseHeights(
 }
 
 export interface Metrics {
+  /**
+   * Smallest gap between the line and the worst thing anywhere across the band, on the interior.
+   *
+   * The band, not the centreline: a line does not stay on its own axis, and a measurement that
+   * assumed it did happily threaded corridors between buildings. See shared/profile.ts.
+   */
   clearanceMin: number
+  /**
+   * Deepest air gap anywhere. Measured on the *centreline*, unlike the clearance: this answers how
+   * high the line is, and what a walker is over is what is directly beneath them.
+   */
   exposure: number
+  /**
+   * Canopy, measured on the centreline as well, and deliberately so. The surface model carries a
+   * 21-month epoch mismatch and photogrammetric noise and is already only a score rather than a
+   * gate; widening it would compound a soft measurement rather than sharpen a hard one. The band's
+   * vegetation is drawn in the profile chart instead, where a person can judge it.
+   */
   canopyClearanceMin: number
   canopyBlockedFraction: number
   /**
@@ -135,6 +151,9 @@ export function rawMetricsAt(
   const sag = sagRatio * length
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
+  // Absent means the band said nothing the centreline did not, which is the whole of a run at
+  // sideClearanceRatio 0 and most samples of a line over open ground.
+  const band = sp.groundMax ?? sp.ground
   let clearanceMin = Infinity
   let exposure = -Infinity
   let canopyClearanceMin = Infinity
@@ -147,11 +166,11 @@ export function rawMetricsAt(
     const t = last > 0 ? i / last : 0
     const ground = sp.ground[i]!
     const line = r2(lineHeightAt(hA, hB, sag, t))
-    const clear = line - ground
-    if (clear > exposure) exposure = clear
+    if (line - ground > exposure) exposure = line - ground
     const d = r2(t * length)
     if (d < inner0 || d > inner1) continue
 
+    const clear = line - band[i]!
     if (clear < clearanceMin) clearanceMin = clear
     const canopyClear = line - (sp.surface[i] ?? ground)
     if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
@@ -168,26 +187,41 @@ export function rawMetricsAt(
   /**
    * Road crossings, measured on their own terms.
    *
-   * Three probes per crossing -- the centreline and both kerbs -- rather than whichever profile
-   * samples happen to fall inside it, because a residential street is narrower than the sample
-   * spacing and would otherwise be checked nowhere. The line is a smooth parabola and the ground
-   * under a carriageway is close to flat, so three points find the worst of it.
+   * Probed at the two ends of the stretch the road is under the band for, and at the lowest point
+   * of the line if that falls inside it -- rather than at whichever profile samples happen to land
+   * there, because a residential street is narrower than the sample spacing and would otherwise be
+   * checked nowhere. The line is a parabola, so its minimum over an interval is at one of exactly
+   * those three places and the worst of them is the worst there is.
    *
    * A crossing on a bridge is owed its clearance to the deck, and the deck is in the surface model
    * rather than the terrain -- the terrain model is bare earth and runs straight under it.
+   *
+   * The carrier is the road's own height, sampled on the road when the crossing was found -- not the
+   * profile under the line, which for a span leaving a roof with a street passing beside it would
+   * measure the street's clearance down from the roof. Only where no elevation model was to hand
+   * does it fall back to the centreline series.
+   *
+   * Note this is emphatically not the band maximum. What a road demands is owed to the road; a
+   * building standing next to it is a clearance problem in its own right and is already counted as
+   * one, and adding the two would charge a line twice for the same metres of air.
    */
   // Ranked on the shortfall including its sign, so the crossing reported is the tightest one rather
   // than the first: with a floor at zero every clear crossing looks equally clear.
+  //
+  // Where the line bottoms out, in fractions of span: the vertex of the parabola, which sits at
+  // midspan for a level line and moves toward the lower anchor for an offlevel one.
+  const vertex = sag > 0 ? 0.5 - (hB - hA) / (8 * sag) : 0.5
   let worstShort = -Infinity
   let worstCrossing = -1
   let worstClearance = Infinity
   for (let c = 0; c < crossings.length; c++) {
     const x = crossings[c]!
     const carrier = x.onBridge ? sp.surface : sp.ground
+    const t0 = Math.min(1, Math.max(0, x.from / length))
+    const t1 = Math.min(1, Math.max(0, x.to / length))
     let clear = Infinity
-    for (const at of [x.d - x.half, x.d, x.d + x.half]) {
-      const t = Math.min(1, Math.max(0, at / length))
-      const under = seriesAt(carrier, t)
+    for (const t of [t0, t1, Math.min(t1, Math.max(t0, vertex))]) {
+      const under = x.carrier ?? seriesAt(carrier, t)
       if (Number.isNaN(under)) continue
       const gap = r2(lineHeightAt(hA, hB, sag, t)) - under
       if (gap < clear) clear = gap
@@ -288,8 +322,14 @@ export function violationsOf(
   }
   const worst = crossings[m.worstCrossing]
   if (worst && m.crossingDeficit > 0) {
+    // "Over" would be a lie for a road the span never crosses, and the distance is the reason it
+    // counts at all -- the band is what puts it under the line.
+    const where =
+      worst.offset > 0
+        ? `a ${worst.kind.replace(/_/g, ' ')} running ${worst.offset.toFixed(1)} m to the side at`
+        : `a ${worst.kind.replace(/_/g, ' ')} at`
     out.push(
-      `passes ${m.worstClearance.toFixed(1)} m over a ${worst.kind.replace(/_/g, ' ')} at ` +
+      `passes ${m.worstClearance.toFixed(1)} m over ${where} ` +
         `${worst.d.toFixed(0)} m, under the ${requiredOver(worst, p).toFixed(0)} m it needs`,
     )
   }

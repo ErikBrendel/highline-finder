@@ -83,7 +83,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
     'has profiles that start at A, end at B, and never dip below the terrain',
     () => {
       for (const c of candidates.slice(0, 40)) {
-        const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, params.sagRatio)
+        const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, params.sagRatio, params)
         const first = samples[0]!
         const last = samples[samples.length - 1]!
         expect(first.d).toBe(0)

@@ -63,7 +63,7 @@ describe('classifyWay', () => {
 describe('requiredOver', () => {
   it('is the base clearance plus the class surcharge', () => {
     const at = (tier: 'path' | 'highway') =>
-      requiredOver({ d: 0, kind: 'x', tier, half: 1, onBridge: false }, p)
+      requiredOver({ d: 0, from: 0, to: 0, offset: 0, kind: 'x', tier, onBridge: false }, p)
     expect(at('path')).toBe(p.minClearance)
     expect(at('highway')).toBe(p.minClearance + p.roadClearance.highway)
   })
@@ -83,7 +83,7 @@ describe('crossingsAlong', () => {
   const b = { e: 400, n: 500 }
 
   it('reports the distance along the span where the way is', () => {
-    const [x] = crossingsAlong(a, b, [northSouth(120)])
+    const [x] = crossingsAlong(a, b, [northSouth(120)], p)
     expect(x!.d).toBeCloseTo(120, 1)
     expect(x!.tier).toBe('street')
   })
@@ -94,17 +94,52 @@ describe('crossingsAlong', () => {
       ...northSouth(0),
       pts: [100, 400, 100, 600, 200, 600, 200, 400, 300, 400, 300, 600],
     }
-    expect(crossingsAlong(a, b, [zigzag]).map((x) => Math.round(x.d))).toEqual([100, 200, 300])
+    expect(crossingsAlong(a, b, [zigzag], p).map((x) => Math.round(x.d))).toEqual([100, 200, 300])
   })
 
-  it('ignores a way that stops short of the span or runs alongside it', () => {
+  it('ignores a way that stops short of the band', () => {
+    // 100 m off the span, against a band that reaches 16 m at midspan plus a 3 m half-carriageway.
     const short: RoadWay = { ...northSouth(0), pts: [120, 0, 120, 400] }
-    const parallel: RoadWay = { ...northSouth(0), pts: [0, 500, 400, 500] }
-    expect(crossingsAlong(a, b, [short, parallel])).toEqual([])
+    expect(crossingsAlong(a, b, [short], p)).toEqual([])
+  })
+
+  it('reports a way running alongside the span, which never crosses it at all', () => {
+    // The case a segment-intersection test cannot see, and the reason for the band: this road is
+    // under the line for most of its length once the wind gets up.
+    const alongside: RoadWay = { ...northSouth(0), pts: [80, 508, 320, 508] }
+    const [x] = crossingsAlong(a, b, [alongside], p)
+    expect(x).toBeDefined()
+    expect(x!.offset).toBeCloseTo(5, 1)
+    // The stretch reaches a little past the road's own ends, because the band reaches it
+    // diagonally before the span draws level with it.
+    expect(x!.from).toBeLessThan(80)
+    expect(x!.to).toBeGreaterThan(320)
+  })
+
+  it('reads the road\'s own height, not the ground under the line', () => {
+    // The case that matters once a crossing can sit off to the side: the span leaves a roof at 30 m
+    // and the street passes 8 m beside it at street level. Measuring down from the roof would say
+    // the street has 30 m less air over it than it has.
+    const alongside: RoadWay = { ...northSouth(0), pts: [80, 508, 320, 508] }
+    const elevation = {
+      ground: { sample: (_e: number, n: number) => (n > 504 ? 12 : 42) },
+      surface: { sample: () => 0 },
+    }
+    const [x] = crossingsAlong(a, b, [alongside], p, elevation)
+    expect(x!.carrier).toBe(12)
+  })
+
+  it('leaves the carrier unset when there is no elevation model to read it from', () => {
+    expect(crossingsAlong(a, b, [northSouth(120)], p)[0]!.carrier).toBeUndefined()
+  })
+
+  it('leaves a road outside the band alone however long it runs beside the span', () => {
+    const far: RoadWay = { ...northSouth(0), pts: [0, 530, 400, 530] }
+    expect(crossingsAlong(a, b, [far], p)).toEqual([])
   })
 
   it('ignores a way beyond the far anchor', () => {
-    expect(crossingsAlong(a, b, [northSouth(500)])).toEqual([])
+    expect(crossingsAlong(a, b, [northSouth(500)], p)).toEqual([])
   })
 })
 
@@ -119,13 +154,13 @@ describe('RoadIndex', () => {
     const ways = [northSouth(120), northSouth(275), northSouth(900)]
     const a = { e: 0, n: 500 }
     const b = { e: 400, n: 500 }
-    expect(build(...ways).crossings(a, b)).toEqual(crossingsAlong(a, b, ways))
+    expect(build(...ways).crossings(a, b, p)).toEqual(crossingsAlong(a, b, ways, p))
   })
 
   it('reports a crossing once however many buckets its segment was filed in', () => {
     // A single long segment spans many 100 m buckets, and a diagonal span visits several of them.
     const index = build({ ...northSouth(0), pts: [250, 0, 250, 1000] })
-    expect(index.crossings({ e: 0, n: 0 }, { e: 600, n: 900 })).toHaveLength(1)
+    expect(index.crossings({ e: 0, n: 0 }, { e: 600, n: 900 }, p)).toHaveLength(1)
   })
 
   it('finds a road in a bucket the span only just enters', () => {
@@ -138,7 +173,7 @@ describe('RoadIndex', () => {
      * of them and rare enough that no fixture written by hand happens to catch it.
      */
     const index = build({ ...northSouth(0), pts: [790, 805, 799, 805] })
-    const found = index.crossings({ e: 541.6, n: 216.9 }, { e: 800.7, n: 812.4 })
+    const found = index.crossings({ e: 541.6, n: 216.9 }, { e: 800.7, n: 812.4 }, p)
     expect(found).toHaveLength(1)
     expect(found[0]!.d).toBeCloseTo(641.4, 0)
   })
@@ -169,11 +204,11 @@ describe('RoadIndex', () => {
     for (let trial = 0; trial < 300; trial++) {
       const a = { e: rnd() * 1000, n: rnd() * 1000 }
       const b = { e: rnd() * 1000, n: rnd() * 1000 }
-      expect(index.crossings(a, b)).toEqual(crossingsAlong(a, b, ways))
+      expect(index.crossings(a, b, p)).toEqual(crossingsAlong(a, b, ways, p))
     }
   })
 
   it('answers nothing, cheaply, where there is no road at all', () => {
-    expect(build(northSouth(900)).crossings({ e: 0, n: 0 }, { e: 400, n: 0 })).toEqual([])
+    expect(build(northSouth(900)).crossings({ e: 0, n: 0 }, { e: 400, n: 0 }, p)).toEqual([])
   })
 })

@@ -21,7 +21,9 @@ function flatSpan(anchor = 50, floor = 20, length = 200, step = 5): ProfileSampl
   const out: ProfileSample[] = []
   for (let d = 0; d <= length; d += step) {
     const ground = d === 0 || d === length ? anchor : floor
-    out.push({ d, ground, surface: ground, line: 0 })
+    out.push({
+      d, ground, surface: ground, groundMax: ground, surfaceMax: ground, line: 0, halfWidth: 0,
+    })
   }
   return out
 }
@@ -167,7 +169,7 @@ describe('road crossings', () => {
    */
   const packed = packProfile(flatSpan())
   const cross = (tier: 'path' | 'street' | 'highway', extra: Partial<Crossing> = {}): Crossing => ({
-    d: 100, kind: 'test', tier, half: 4, onBridge: false, ...extra,
+    d: 100, from: 96, to: 104, offset: 0, kind: 'test', tier, onBridge: false, ...extra,
   })
   const at = (crossings: Crossing[]) => rawMetricsAt(packed, 200, 50, 50, 0.05, p, crossings)!
 
@@ -195,7 +197,7 @@ describe('road crossings', () => {
   })
 
   it('reports the tightest crossing rather than the first', () => {
-    const m = at([cross('path'), cross('highway', { d: 60 })])
+    const m = at([cross('path'), cross('highway', { d: 60, from: 56, to: 64 })])
     expect(m.worstCrossing).toBe(1)
   })
 
@@ -211,14 +213,36 @@ describe('road crossings', () => {
     expect(onDeck.crossingDeficit).toBeCloseTo(6, 1)
   })
 
-  it('finds a road narrower than the profile spacing, by probing its own kerbs', () => {
-    // A hump under one kerb only, between two samples: checking the centreline alone would miss it.
+  it('finds a road narrower than the profile spacing, by probing the ends of its stretch', () => {
+    // A hump under one end only, between two samples: checking the tightest point alone would miss
+    // it.
     const humped = packProfile(
       flatSpan().map((sm) => (sm.d === 105 ? { ...sm, ground: 38 } : sm)),
     )
-    const m = rawMetricsAt(humped, 200, 50, 50, 0.05, p, [cross('street', { d: 101, half: 4 })])!
+    const m = rawMetricsAt(humped, 200, 50, 50, 0.05, p, [
+      cross('street', { d: 101, from: 97, to: 105 }),
+    ])!
     expect(m.worstClearance).toBeLessThan(5)
     expect(m.crossingDeficit).toBeGreaterThan(0)
+  })
+
+  it('measures a crossing against the road rather than the ground under the line', () => {
+    // The floor is at 20 m and the line 20 m over it. A road on an embankment at 32 m has only 8 m,
+    // and reading the profile under the line instead would report the full 20 and pass it.
+    const m = at([cross('street', { carrier: 32 })])
+    expect(m.worstClearance).toBeCloseTo(8, 1)
+    expect(m.crossingDeficit).toBeCloseTo(3, 1)
+  })
+
+  it('does not charge a road for a building standing beside it', () => {
+    // A band full of building -- 25 m over the floor, and above the sagging line -- with a street
+    // underneath at floor level. The building is a clearance problem in its own right and is counted
+    // as one; the street's requirement is still measured from the street.
+    const beside = { ...packed, groundMax: packed.ground.map((g) => (g === 20 ? 45 : g)) }
+    const m = rawMetricsAt(beside, 200, 50, 50, 0.05, p, [cross('street', { carrier: 20 })])!
+    expect(m.clearanceMin).toBeLessThan(0)
+    expect(m.worstClearance).toBeCloseTo(20, 1)
+    expect(m.crossingDeficit).toBe(0)
   })
 
   it('shrinks the feasible sag, since more sag is less air over the road', () => {
@@ -255,7 +279,7 @@ describe('rescoreAtSag', () => {
 
   /** The line height at midspan, as the browser derives it. */
   const midLine = (c: Candidate, sagRatio: number) => {
-    const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, sagRatio)
+    const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, sagRatio, p)
     return samples[Math.floor(samples.length / 2)]!.line
   }
 
@@ -306,7 +330,7 @@ describe('rawMetricsAt', () => {
     hB: number,
     sagRatio: number,
   ) {
-    const samples = unpackProfile(sp, length, hA, hB, sagRatio)
+    const samples = unpackProfile(sp, length, hA, hB, sagRatio, p)
     const inner0 = p.anchorZone
     const inner1 = length - p.anchorZone
     let clearanceMin = Infinity

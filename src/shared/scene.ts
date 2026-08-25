@@ -1,6 +1,7 @@
 import type { Pos } from './grid.js'
 import type { Roofs } from './anchoring.js'
-import type { Crossing } from './types.js'
+import type { Elevation } from './roads.js'
+import type { Crossing, Params } from './types.js'
 
 /**
  * Everything besides the two elevation rasters that a line is measured against.
@@ -24,7 +25,14 @@ export interface Scene {
   roads?: Roads | null
 }
 
-/** Whatever can say where a span passes over something that carries traffic. */
+/**
+ * Whatever can say where a span passes over -- or close beside -- something that carries traffic.
+ *
+ * Takes the parameters because how close counts is the band width, which is a parameter: the same
+ * two points have more roads under them at a wider `sideClearanceRatio`. Takes the elevation models
+ * because a road off to the side is owed its clearance from its own height, not from the ground
+ * under the line -- see `Crossing.carrier`.
+ */
 export interface Roads {
-  crossings(a: Pos, b: Pos): Crossing[]
+  crossings(a: Pos, b: Pos, p: Params, elevation?: Elevation): Crossing[]
 }

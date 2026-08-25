@@ -40,17 +40,16 @@ anchors only, one AOI, static viewer.
 
 ## Physics
 
-- **A band, not a ray.** Clearance is measured along a single line sampled every 2 m, which can
-  thread between two pines 3 m apart and report clear air. The line a walker occupies is wider than
-  that: leash and swing put them off the centreline, most at midspan and not at all at the anchors.
-  So the measurement should be a lens — zero half-width at each anchor, widest in the middle —
-  taking the worst obstruction across it. Note the shape it shares with the sag curve is a
-  coincidence of both being pinned at the anchors; the width is its own parameter, not a multiple of
-  `sagRatio`. Cheap in the right place: a band always contains its centreline, so widening can only
-  remove candidates, which makes the existing thin-line test a valid prefilter — 1.35 million lines
-  reach the profile stage against 40 million tested, so the band would run on 3 % of the work. It is
-  also the same mechanism as the no-fall-zone allowance above, since a width tapering to zero at the
-  anchors *is* the tolerance window.
+- **Coupling the band to the sag control.** The band's half-width is `sideClearanceRatio` of the
+  span, fixed at generation time. Physically it should follow the sag: both are `F·L/(4·T)` and
+  differ only in which way the load points, so loosening the tension widens the band as surely as it
+  deepens the sag — and the browser's sag slider does not move it. Invisible for now, because
+  `storeProfiles` is off and the browser re-samples the raster for whichever line is opened, but a
+  line with a stored profile under-reports its band at a loosened sag. Two ways to fix it, and the
+  choice is a UI question rather than a physics one: derive the band from the live sag, or expose
+  tension once and let both fall out of it. A third option is worth considering alongside — letting
+  the two be set independently, since "how much sag I rig at" and "how much side excursion I want
+  cleared" are separate appetites for risk.
 
 - **Real sag.** Replace the flat fraction-of-span constant with a catenary under tension,
   parameterised by webbing, pretension and walker mass, and evaluate the worst load case rather

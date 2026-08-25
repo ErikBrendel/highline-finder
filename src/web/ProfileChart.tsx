@@ -7,6 +7,15 @@ import { toWgs84 } from '../shared/geo.js'
 /**
  * Side elevation of one candidate: terrain, canopy band, and the sagging line.
  *
+ * Two sections in one, because the line is measured across a band rather than along a ray. The
+ * solid fill is the true section under the centreline; the outline above it is the worst of
+ * anything within the band's half-width at that station -- ground the line would meet if the wind
+ * pushed it sideways. Where the two coincide, which is most of a line over open ground, they
+ * collapse into the single line this chart has always drawn. Where they part, the gap *is* the
+ * reason a line was rejected, which is the only honest way to draw a rejection the centreline
+ * cannot show. The same is done for vegetation, one shade lighter and purely as information:
+ * canopy is scored on the centreline, so the band's trees are shown and not counted.
+ *
  * The surface model does not know what it measured, so the band above ground is drawn as canopy
  * unless a second source says otherwise -- see landcover.ts. Over a building the ground series is
  * already the roof, because terrain.ts treats a roof as ground, so the building is drawn as the
@@ -32,6 +41,8 @@ import { toWgs84 } from '../shared/geo.js'
 const W = 900
 const H = 200
 const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
+
+type SeriesKey = 'ground' | 'surface' | 'line' | 'groundMax' | 'surfaceMax'
 
 interface Props {
   c: Candidate
@@ -103,7 +114,7 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
    * A crossing lands where the road is, which is almost never on a sample: at 120 points a 500 m
    * line is sampled every four metres and a residential street is six wide.
    */
-  const seriesAt = (d: number, key: 'ground' | 'surface' | 'line'): number => {
+  const seriesAt = (d: number, key: SeriesKey): number => {
     const last = p.length - 1
     const t = c.length > 0 ? Math.min(1, Math.max(0, d / c.length)) : 0
     const at = t * last
@@ -113,16 +124,22 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   }
 
   /**
-   * What holds a crossing up: the ground for a road on the ground, the surface for one on a bridge.
-   * The terrain model is bare earth and runs straight underneath a deck.
+   * What holds a crossing up: the road's own surveyed height where the crossing carries one, and
+   * otherwise the profile under the line -- the ground for a road on the ground, the surface for
+   * one on a bridge, since the terrain model is bare earth and runs straight underneath a deck.
+   *
+   * The road's own height matters now that a crossing can sit off to the side: drawing a street
+   * three metres beside a rooftop span at the roof's height would put the slab in mid-air and the
+   * clearance line with it.
    */
-  const carrierAt = (d: number, onBridge: boolean) => seriesAt(d, onBridge ? 'surface' : 'ground')
+  const carrierOf = (x: (typeof crossings)[number], d: number) =>
+    x.carrier ?? seriesAt(d, x.onBridge ? 'surface' : 'ground')
 
   /** The most demanding crossing covering a distance, or null where nothing does. */
   const demandAt = (d: number) => {
     let worst: { extra: number; x: (typeof crossings)[number] } | null = null
     for (const x of crossings) {
-      if (d < x.d - x.half || d > x.d + x.half) continue
+      if (d < x.from || d > x.to) continue
       const extra = params.roadClearance[x.tier]
       if (!worst || extra > worst.extra) worst = { extra, x }
     }
@@ -140,7 +157,7 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   const requiredPoints = (() => {
     const ds = new Set<number>(p.map((s) => s.d))
     for (const x of crossings) {
-      for (const edge of [x.d - x.half, x.d + x.half]) {
+      for (const edge of [x.from, x.to]) {
         ds.add(Math.max(0, Math.min(c.length, edge - EDGE)))
         ds.add(Math.max(0, Math.min(c.length, edge + EDGE)))
       }
@@ -151,26 +168,32 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
         const worst = demandAt(d)
         return {
           d,
-          v: carrierAt(d, worst?.x.onBridge ?? false) + params.minClearance + (worst?.extra ?? 0),
+          v: worst
+            ? carrierOf(worst.x, d) + params.minClearance + worst.extra
+            : seriesAt(d, 'ground') + params.minClearance,
         }
       })
   })()
 
   const lo = Math.min(...p.map((s) => s.ground)) - 2
   // The required-clearance line is part of the picture, so a 23 m demand over a railway has to fit
-  // in it rather than run off the top.
+  // in it rather than run off the top. So is the band envelope, which is what a rejected line is
+  // usually rejected by.
   const hi =
     Math.max(
-      ...p.map((s) => Math.max(s.surface, s.line)),
+      ...p.map((s) => Math.max(s.surfaceMax, s.line)),
       ...requiredPoints.map((q) => q.v),
     ) + 3
+  /** Whether the band found anything the centreline did not, which is when it is worth drawing. */
+  const bandShows = p.some((s) => s.groundMax > s.ground + 0.05)
+  const canopyBandShows = p.some((s) => s.surfaceMax > s.surface + 0.05)
   const iw = W - PAD.left - PAD.right
   const ih = H - PAD.top - PAD.bottom
 
   const x = (d: number) => PAD.left + (d / c.length) * iw
   const y = (v: number) => PAD.top + ih - ((v - lo) / (hi - lo)) * ih
 
-  const path = (key: 'ground' | 'surface' | 'line') =>
+  const path = (key: SeriesKey) =>
     p.map((s, i) => `${i ? 'L' : 'M'}${x(s.d).toFixed(1)},${y(s[key]).toFixed(1)}`).join('')
 
   const groundFill = `${path('ground')}L${x(c.length)},${PAD.top + ih}L${PAD.left},${PAD.top + ih}Z`
@@ -205,11 +228,13 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
     return `${top}${bottom.join('')}Z`
   }
 
-  // Mark the two numbers the score actually turns on.
+  // Mark the two numbers the score actually turns on. Exposure is a centreline measurement -- how
+  // high the line is over what is directly beneath it -- and clearance is a band one, so the
+  // tightest marker has to be drawn against the envelope or it would contradict the panel's figure.
   const deepest = p.reduce((a, s) => (s.line - s.ground > a.line - a.ground ? s : a), p[0]!)
   const inner = p.filter((s) => s.d >= 10 && s.d <= c.length - 10)
   const tightest = inner.length
-    ? inner.reduce((a, s) => (s.line - s.ground < a.line - a.ground ? s : a), inner[0]!)
+    ? inner.reduce((a, s) => (s.line - s.groundMax < a.line - a.groundMax ? s : a), inner[0]!)
     : deepest
 
   const ticks = [lo, (lo + hi) / 2, hi].map((v) => Math.round(v))
@@ -266,6 +291,18 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
         </g>
       ))}
 
+      {/* Vegetation the band reaches but the centreline misses: shown, never scored. */}
+      {canopyBandShows && (
+        <path
+          d={`${path('surfaceMax')}${p
+            .slice()
+            .reverse()
+            .map((s) => `L${x(s.d).toFixed(1)},${y(s.surface).toFixed(1)}`)
+            .join('')}Z`}
+          fill="var(--canopy)"
+          opacity="0.22"
+        />
+      )}
       <path d={canopyFill} fill="var(--canopy)" opacity="0.5" />
       <path d={groundFill} fill="var(--ground)" opacity="0.9" />
       {runs.map((r) => (
@@ -277,6 +314,28 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
         />
       ))}
       <path d={path('ground')} stroke="#a08a72" strokeWidth="1.25" fill="none" />
+      {/* The worst the band reaches, which is what clearance is actually measured against. */}
+      {bandShows && (
+        <>
+          <path
+            d={`${path('groundMax')}${p
+              .slice()
+              .reverse()
+              .map((s) => `L${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
+              .join('')}Z`}
+            fill="var(--ground)"
+            opacity="0.45"
+          />
+          <path
+            d={path('groundMax')}
+            stroke="#a08a72"
+            strokeWidth="1"
+            strokeDasharray="4 3"
+            fill="none"
+            opacity="0.9"
+          />
+        </>
+      )}
 
       <line
         x1={x(deepest.d)} x2={x(deepest.d)} y1={y(deepest.line)} y2={y(deepest.ground)}
@@ -287,10 +346,10 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
       </text>
 
       <line
-        x1={x(tightest.d)} x2={x(tightest.d)} y1={y(tightest.line)} y2={y(tightest.ground)}
+        x1={x(tightest.d)} x2={x(tightest.d)} y1={y(tightest.line)} y2={y(tightest.groundMax)}
         stroke="#fbbf24" strokeWidth="1" strokeDasharray="3 2"
       />
-      <text x={x(tightest.d) + 5} y={y(tightest.ground) - 4} fill="#fbbf24" fontSize="10">
+      <text x={x(tightest.d) + 5} y={y(tightest.groundMax) - 4} fill="#fbbf24" fontSize="10">
         {c.clearanceMin.toFixed(1)} m
       </text>
 
@@ -308,18 +367,20 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
         />
       )}
       {crossings.map((r, i) => {
-        const carrier = carrierAt(r.d, r.onBridge)
-        const half = Math.max(2, x(r.half) - x(0))
+        const carrier = carrierOf(r, r.d)
+        const left = x(r.from)
+        const width = Math.max(4, x(r.to) - left)
         const short = params.minClearance + params.roadClearance[r.tier] - (seriesAt(r.d, 'line') - carrier)
         return (
           <g key={`${r.d}-${i}`}>
-            {/* The carriageway itself, as a slab on whatever carries it. */}
+            {/* The stretch of span the road is under the band for, as a slab on what carries it. */}
             <rect
-              x={x(r.d) - half}
+              x={left}
               y={y(carrier) - 2}
-              width={half * 2}
+              width={width}
               height="4"
               fill={short > 0 ? 'var(--bad)' : 'var(--road)'}
+              opacity={r.offset > 0 ? 0.55 : 1}
             />
             <g transform={`translate(${x(r.d)},${y(carrier) - 3})`}>
               <TrafficIcon tier={r.tier} />
@@ -341,22 +402,31 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
           <circle cx={hoverX} cy={y(hover.line)} r="3" fill="#e6e8ec" />
           <circle cx={hoverX} cy={y(hover.ground)} r="3" fill="#e6e8ec" />
           <rect
-            x={readoutFlipped ? hoverX - 138 : hoverX + 6} y={PAD.top + 2}
-            width="132" height="34" rx="4"
+            x={readoutFlipped ? hoverX - 148 : hoverX + 6} y={PAD.top + 2}
+            width="142" height={hover.halfWidth > 0 ? 48 : 34} rx="4"
             fill="rgba(15,17,21,0.92)" stroke="#2a2f3a"
           />
           <text
-            x={readoutFlipped ? hoverX - 130 : hoverX + 14} y={PAD.top + 15}
+            x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 15}
             fill="#e6e8ec" fontSize="11"
           >
             {(hover.line - hover.ground).toFixed(1)} m above ground
           </text>
           <text
-            x={readoutFlipped ? hoverX - 130 : hoverX + 14} y={PAD.top + 29}
+            x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 29}
             fill="#8b93a3" fontSize="11"
           >
             ground at {hover.ground.toFixed(1)} m
           </text>
+          {hover.halfWidth > 0 && (
+            <text
+              x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 43}
+              fill="#8b93a3" fontSize="11"
+            >
+              {(hover.line - hover.groundMax).toFixed(1)} m within &plusmn;
+              {hover.halfWidth.toFixed(1)} m
+            </text>
+          )}
         </g>
       )}
 

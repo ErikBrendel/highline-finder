@@ -6,6 +6,7 @@ import type {
   Dataset,
   HotspotArrays,
   MaskCells,
+  Params,
   TileUsage,
 } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
@@ -14,6 +15,8 @@ import type { CustomPoints, LatLon } from './planPoints.js'
 import { installLoadingOverlay } from './loadingOverlay.js'
 import { installProbeOverlay } from './probeOverlay.js'
 import { installHoverMarker } from './hoverMarker.js'
+import { toUtm33, toWgs84 } from '../shared/geo.js'
+import { sideHalfWidthAt } from '../shared/profile.js'
 
 /**
  * Basemaps come straight from the LGB WMS endpoints, which serve EPSG:3857 -- so MapLibre's
@@ -332,6 +335,40 @@ function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection
   }
 }
 
+/**
+ * The lens the line's clearance is actually measured across, as a polygon.
+ *
+ * Zero half-width at each anchor, widest at midspan -- see shared/profile.ts. Drawn because the
+ * band is otherwise invisible: a line rejected for what stands three metres to its side looks, on
+ * the map, like a line over open ground. Twenty-four points a side is smooth at any zoom the
+ * planner is usable at, and the shape is built in projected metres and converted once per point so
+ * the two edges stay parallel to the span rather than to the meridian.
+ */
+function bandFeature(a: LatLon, b: LatLon, p: Params): GeoJSON.FeatureCollection {
+  const [ae, an] = toUtm33(a.lat, a.lon)
+  const [be, bn] = toUtm33(b.lat, b.lon)
+  const length = Math.hypot(be - ae, bn - an)
+  if (!(length > 0) || p.sideClearanceRatio <= 0) return emptyCollection
+
+  const pe = -(bn - an) / length
+  const pn = (be - ae) / length
+  const STEPS = 24
+  const edge = (sign: number) =>
+    Array.from({ length: STEPS + 1 }, (_, i) => {
+      const t = i / STEPS
+      const half = sideHalfWidthAt(t, length, p) * sign
+      const w = toWgs84(ae + (be - ae) * t + pe * half, an + (bn - an) * t + pn * half)
+      return [w.lon, w.lat] as [number, number]
+    })
+  const ring = [...edge(1), ...edge(-1).reverse()]
+  return {
+    type: 'FeatureCollection',
+    features: [
+      { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [ring] } },
+    ],
+  }
+}
+
 function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -623,6 +660,21 @@ export function MapView({
         },
       })
 
+      // Under the lines, over everything else: it is context for the selected line, not a feature.
+      m.addSource('band', { type: 'geojson', data: emptyCollection })
+      m.addLayer({
+        id: 'band',
+        type: 'fill',
+        source: 'band',
+        paint: { 'fill-color': '#38bdf8', 'fill-opacity': 0.12 },
+      })
+      m.addLayer({
+        id: 'bandEdge',
+        type: 'line',
+        source: 'band',
+        paint: { 'line-color': '#38bdf8', 'line-width': 1, 'line-opacity': 0.5, 'line-dasharray': [3, 2] },
+      })
+
       m.addSource('lines', { type: 'geojson', data: toGeoJson(visible) })
       m.addLayer({
         id: 'lines-hit',
@@ -817,6 +869,19 @@ export function MapView({
     const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
     src?.setData(custom.a && custom.b ? lineFeature(custom.a, custom.b) : emptyCollection)
   }, [custom, ready])
+
+  /** The band, for whichever line is open -- found or planned, both measured across the same lens. */
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('band') as maplibregl.GeoJSONSource | undefined
+    const ends = selected
+      ? { a: { lat: selected.a.lat, lon: selected.a.lon }, b: { lat: selected.b.lat, lon: selected.b.lon } }
+      : custom.a && custom.b
+        ? { a: custom.a, b: custom.b }
+        : null
+    src?.setData(ends ? bandFeature(ends.a, ends.b, data.meta.params) : emptyCollection)
+  }, [selected, custom, data, ready])
 
   /**
    * The two anchor handles, for whichever line is being looked at.

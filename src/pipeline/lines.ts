@@ -195,7 +195,7 @@ export function evaluateLine(
   // clearance from these serialised values, so measuring from the full-precision ones would let
   // the dataset contain candidates the UI immediately rejects -- a line whose clearance is exactly
   // at minClearance flips either side of the boundary on the last decimal.
-  const crossings = scene.roads?.crossings(a, b)
+  const crossings = scene.roads?.crossings(a, b, p, { ground, surface })
   const r2 = (v: number) => Math.round(v * 100) / 100
   const roundedLength = Math.round(length * 10) / 10
   const hA = r2(h.hA)

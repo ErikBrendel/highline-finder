@@ -12,7 +12,7 @@ const p: Params = DEFAULT_PARAMS
 
 /** The stored profile with its derived fields back, as the browser sees it. */
 const expand = (c: Candidate) =>
-  unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, p.sagRatio)
+  unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, p.sagRatio, p)
 
 /**
  * An anchor that is open in every direction, so tests exercise lines.ts in isolation. Ground
@@ -200,6 +200,51 @@ describe('roof anchors', () => {
     const moved = refine([start], g, g, p, westRoof).candidates[0]!
     expect(moved.kind).toBe('mixed')
     expect(moved.a.aFrame).toBe(0)
+  })
+})
+
+describe('band clearance', () => {
+  /**
+   * The case the band exists for: two blocks with a corridor between them, and a line threaded
+   * straight down it. On the centreline there is nothing but floor; three metres either side there
+   * is fifty metres of building.
+   */
+  const corridor = (gap: number) =>
+    gridFrom(400, 400, (e, n) =>
+      e <= 45 || e >= 255 ? 50 : Math.abs(n - 200) <= gap / 2 ? 20 : 70,
+    )
+
+  it('rejects a line threading a corridor its centreline fits down', () => {
+    const g = corridor(6)
+    // The centreline runs 30 m over the floor for the whole span and sees nothing at all.
+    const thin = { ...p, sideClearanceRatio: 0 }
+    expect(evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, thin).line).not.toBeNull()
+
+    const banded = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, p)
+    expect(banded.line).toBeNull()
+    expect(banded.reject).toBe('clearance')
+  })
+
+  it('keeps the same line once the corridor is wider than the band', () => {
+    // 8.8 m of half-width at midspan on a 220 m span, so a 30 m corridor is clear of it.
+    const c = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, corridor(30), corridor(30), p).line
+    expect(c).not.toBeNull()
+    expect(c!.clearanceMin).toBeGreaterThan(p.minClearance)
+  })
+
+  it('measures exposure on the centreline even where the band is blocked', () => {
+    // What is beside the line does not change how high it is over what is beneath it.
+    const g = corridor(6)
+    const thin = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, {
+      ...p,
+      sideClearanceRatio: 0,
+    }).line!
+    const forced = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, {
+      ...p,
+      minClearance: -100,
+    }).line!
+    expect(forced.exposure).toBeCloseTo(thin.exposure, 1)
+    expect(forced.clearanceMin).toBeLessThan(0)
   })
 })
 

@@ -142,9 +142,9 @@ export function roadsFor(a: Pos, b: Pos): Roads | null {
   const keys = keysFor(a, b)
   if (!keys.every((k) => held.has(k))) return null
   return {
-    crossings: (from, to) =>
+    crossings: (from, to, p, elevation) =>
       keys
-        .flatMap((k) => held.get(k)!.roads.crossings(from, to))
+        .flatMap((k) => held.get(k)!.roads.crossings(from, to, p, elevation))
         .sort((x, y) => x.d - y.d),
   }
 }

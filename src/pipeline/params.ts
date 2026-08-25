@@ -64,6 +64,25 @@ export const DEFAULT_PARAMS: Params = {
   // tension model is in ROADMAP.
   sagRatio: 0.05,
 
+  // Half-width of the band clearance is measured across, at midspan, as a fraction of span.
+  //
+  // Same relation as the sag, because it is the same physics: a tensioned line deflects by
+  // F*L/(4*T) whichever way the load points, so a side load is a sag turned sideways and its
+  // excursion is a fraction of span rather than a fixed number of metres. 4% against the 5% sag
+  // asserts a side load about 80% of body weight -- more than wind alone, which is nearer 1% of
+  // span, and about what a walker leaning, catching or falling sideways puts in.
+  //
+  // Scales the right way for what it is for: a 60 m urban line gets +/-2.4 m at midspan, which is
+  // what stops a line threading a corridor between two buildings, while a 400 m line over a valley
+  // gets +/-16 m of air it was never going to touch anything with.
+  sideClearanceRatio: 0.04,
+
+  // Most lateral samples taken per side at any one station. Beyond this the step grows instead of
+  // the count, so a 16 m half-width costs the same as a 2 m one: a band that wide is looking for
+  // buildings and hillsides, and metre resolution buys nothing. Narrow bands, where resolution does
+  // matter, keep their 1 m step because the count never binds.
+  sideSamplesPerSide: 9,
+
   // 5 m quantisation of anchor positions. The true best anchor can therefore sit up to ~3.5 m
   // away from the one reported.
   anchorStep: 5,

@@ -661,15 +661,16 @@ export function App() {
   }, [selected, data, sagPct, fetchedProfile])
 
   const shownProfile = useMemo(() => {
-    if (!detailed?.profile || sagPct === null) return null
+    if (!detailed?.profile || sagPct === null || !data) return null
     return unpackProfile(
       detailed.profile,
       detailed.length,
       detailed.a.anchor,
       detailed.b.anchor,
       sagPct / 100,
+      data.meta.params,
     )
-  }, [detailed, sagPct])
+  }, [detailed, sagPct, data])
 
   const shownEnds = useMemo(
     () =>
