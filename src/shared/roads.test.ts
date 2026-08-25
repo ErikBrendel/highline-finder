@@ -14,9 +14,22 @@ describe('classifyWay', () => {
     expect(tierOf({ highway: 'motorway' })).toBe('highway')
   })
 
-  it('puts every railway at the top, electrified or not', () => {
+  it('puts every live railway at the top, electrified or not', () => {
     expect(classifyWay({ railway: 'rail', electrified: 'contact_line' })?.tier).toBe('highway')
     expect(classifyWay({ railway: 'tram' })?.tier).toBe('highway')
+    expect(classifyWay({ railway: 'preserved' })?.tier).toBe('highway')
+  })
+
+  it('ignores a railway that is not there any more, or is not track', () => {
+    // Five abandoned forest alignments took two thirds of the default area's candidates with them
+    // when the railway key was read as a yes/no. There is no rail, no train and no wire on any of
+    // them.
+    for (const railway of ['abandoned', 'disused', 'razed', 'construction', 'proposed']) {
+      expect(classifyWay({ railway })).toBeNull()
+    }
+    for (const railway of ['platform', 'station', 'switch', 'turntable', 'miniature']) {
+      expect(classifyWay({ railway })).toBeNull()
+    }
   })
 
   it('promotes a made-up track and demotes a driveway', () => {

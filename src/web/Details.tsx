@@ -1,3 +1,4 @@
+import { useEffect, useState, type CSSProperties } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import type { Cover } from './landcover.js'
@@ -114,10 +115,61 @@ const KIND_TEXT: Record<LineKind, string> = {
   urban: 'roof to roof',
 }
 
+/**
+ * Panel width in pixels, or null for whatever the stylesheet chooses.
+ *
+ * At module scope rather than in state so it survives the panel closing: picking a different line
+ * unmounts this component, and having the panel snap back to its default every time would make the
+ * setting useless. Not persisted -- it is a working preference for the session, not a setting.
+ */
+let preferredWidth: number | null = null
+
+/** Narrowest useful panel, and how much window has to stay visible beside the widest one. */
+const MIN_WIDTH = 360
+const KEEP_VISIBLE = 40
+
 export function Details({
   c, profile, cover, params, roadState, onRoof, planned, at, failed, optimizing, offer, onOptimize,
   rig, onRig, onClose,
 }: Props) {
+  const [width, setWidth] = useState(preferredWidth)
+  useEffect(() => {
+    preferredWidth = width
+  }, [width])
+
+  /**
+   * Drag the right edge to widen the panel.
+   *
+   * Set as a custom property rather than as `width`, so the narrow-screen rule in the stylesheet
+   * still wins outright: on a phone the panel is the width of the screen and dragging it is neither
+   * possible nor wanted. The chart inside is an SVG scaled to its container, so widening the panel
+   * enlarges the profile in both directions without anything here knowing about it.
+   */
+  const widthVar = { '--details-w': width === null ? undefined : `${width}px` } as CSSProperties
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const grip = e.currentTarget
+    const startX = e.clientX
+    const startWidth = grip.parentElement?.getBoundingClientRect().width ?? MIN_WIDTH
+    grip.setPointerCapture(e.pointerId)
+    const move = (ev: PointerEvent) =>
+      setWidth(
+        Math.max(
+          MIN_WIDTH,
+          Math.min(window.innerWidth - KEEP_VISIBLE, startWidth + ev.clientX - startX),
+        ),
+      )
+    const stop = () => {
+      grip.removeEventListener('pointermove', move)
+      grip.removeEventListener('pointerup', stop)
+      grip.removeEventListener('pointercancel', stop)
+    }
+    grip.addEventListener('pointermove', move)
+    grip.addEventListener('pointerup', stop)
+    grip.addEventListener('pointercancel', stop)
+  }
+
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
   const ends = c ? { a: c.a, b: c.b } : at
@@ -167,7 +219,16 @@ export function Details({
   ]
 
   return (
-    <div className="details">
+    <div className="details" style={widthVar}>
+      <div
+        className="grip"
+        role="separator"
+        aria-label="Resize panel"
+        title="Drag to widen — double-click to reset"
+        onPointerDown={startResize}
+        onDoubleClick={() => setWidth(null)}
+      />
+      <div className="body">
       <div className="head">
         <strong style={{ color: isPlanned ? '#22c55e' : scoreColor(c!.score) }}>
           {isPlanned && 'Planned line · '}
@@ -320,6 +381,7 @@ export function Details({
           </a>
         </div>
       )}
+      </div>
     </div>
   )
 }

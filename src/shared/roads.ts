@@ -69,6 +69,29 @@ const HIGHWAY_TIERS: Record<string, RoadTier> = {
   raceway: 'highway',
 }
 
+/**
+ * `railway=*` values that carry something a line has to stay clear of.
+ *
+ * An allowlist, because the key is mostly lifecycle and furniture: `abandoned`, `disused`, `razed`,
+ * `construction` and `proposed` are all places where a railway is not, and `platform`, `turntable`,
+ * `switch` and the rest are parts of a station rather than track. Treating the key as "railway =
+ * yes" cost the default area two thirds of its candidates over five abandoned alignments through a
+ * forest, which have no track, no train and no wire.
+ *
+ * `preserved` is in because heritage railways run trains. `miniature` is out because a 7¼ inch park
+ * railway is a garden feature.
+ */
+const LIVE_RAILWAYS = new Set([
+  'rail',
+  'light_rail',
+  'subway',
+  'tram',
+  'narrow_gauge',
+  'funicular',
+  'monorail',
+  'preserved',
+])
+
 /** Half the carriageway, in metres, where the tags do not say. */
 const DEFAULT_HALF: Record<RoadTier, number> = {
   path: 1,
@@ -108,11 +131,16 @@ export type Tags = Record<string, string | undefined>
 export function classifyWay(tags: Tags): { tier: RoadTier; kind: string; half: number } | null {
   if (tags.tunnel && tags.tunnel !== 'no') return null
 
-  const kind = tags.railway ?? tags.highway
+  if (tags.railway) {
+    // Every live railway sits at the top: a train cannot be stopped for a rigging day, and an
+    // electrified one carries 15 kV on a wire 5.5 m over the rail, which no permission makes safe.
+    if (!LIVE_RAILWAYS.has(tags.railway)) return null
+    return { tier: 'highway', kind: tags.railway, half: halfWidth(tags, 'highway') }
+  }
+
+  const kind = tags.highway
   if (!kind) return null
-  // Every railway sits at the top: a train cannot be stopped for a rigging day, and an electrified
-  // one carries 15 kV on a wire 5.5 m over the rail, which no amount of permission makes safe.
-  let tier = tags.railway ? ('highway' as RoadTier) : HIGHWAY_TIERS[kind]
+  let tier = HIGHWAY_TIERS[kind]
   if (!tier) return null
 
   // A grade1 or grade2 track is a made-up surface, which is what forestry lorries drive on.
