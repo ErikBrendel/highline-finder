@@ -106,6 +106,50 @@ describe('url state', () => {
   })
 })
 
+describe('viewport precision', () => {
+  const at = (s: string) => new URLSearchParams(s).get('at')!
+  const box = (bbox: [number, number, number, number]) => at(toSearch({ ...full, bbox }))
+
+  it('writes a small view finely and a large one coarsely', () => {
+    // A 900 m rectangle keeps five decimals; a whole region needs far fewer to land in the same
+    // place, and the digits it does not need are noise in a shared link.
+    expect(box([52.1977, 13.6513, 52.2066, 13.6681]).split(',')[0]).toBe('52.1977')
+    expect(box([52.1, 13.1, 53.1, 14.1]).split(',')[0]).toBe('52.1')
+  })
+
+  it('never writes more than a metre of precision, however small the view', () => {
+    for (const d of [0.00001, 0.0001, 0.001]) {
+      for (const part of box([52.2, 13.6, 52.2 + d, 13.6 + d]).split(',')) {
+        expect((part.split('.')[1] ?? '').length).toBeLessThanOrEqual(5)
+      }
+    }
+  })
+
+  it('rounds outward, so the stored rectangle always contains the real one', () => {
+    // Rounding to nearest would let each share-reopen-reshare cycle crop a sliver off the view.
+    const bbox: [number, number, number, number] = [52.10004, 13.10004, 52.59996, 13.59996]
+    const [south, west, north, east] = box(bbox).split(',').map(Number) as [number, number, number, number]
+    expect(south).toBeLessThanOrEqual(bbox[0])
+    expect(west).toBeLessThanOrEqual(bbox[1])
+    expect(north).toBeGreaterThanOrEqual(bbox[2])
+    expect(east).toBeGreaterThanOrEqual(bbox[3])
+  })
+
+  it('stays inside a hundredth of the view on every side', () => {
+    const bbox: [number, number, number, number] = [52.1977, 13.6513, 52.2066, 13.6681]
+    const side = Math.min(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    const back = box(bbox).split(',').map(Number)
+    for (const [i, v] of back.entries()) expect(Math.abs(v - bbox[i]!)).toBeLessThan(side * 0.01)
+  })
+
+  it('keeps a long thin view usable across its narrow side', () => {
+    // The tolerance follows the smaller side, or a corridor would be coarsened into a square.
+    const bbox: [number, number, number, number] = [52.2, 13.0, 52.201, 14.0]
+    const [south] = box(bbox).split(',').map(Number) as [number]
+    expect(Math.abs(south - 52.2)).toBeLessThan(0.00002)
+  })
+})
+
 describe('changed', () => {
   it('drops a value that equals the default and keeps one that does not', () => {
     expect(changed(2, 2)).toBeNull()

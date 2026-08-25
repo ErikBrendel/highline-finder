@@ -96,7 +96,58 @@ const EMPTY: UrlState = {
  * can land on a raster cell's centre rather than on the interpolation between four of them, and
  * rounding the link to 11 cm would move it back off.
  */
-const coord = (v: number) => v.toFixed(7).replace(/\.?0+$/, '')
+const trim = (text: string) => (text.includes('.') ? text.replace(/\.?0+$/, '') : text)
+
+const coord = (v: number) => trim(v.toFixed(7))
+
+/**
+ * How coarsely the viewport rectangle may be written, as a fraction of its own smaller side.
+ *
+ * The rectangle exists to put the recipient over the same ground at about the same zoom, so its
+ * precision only has to be fine relative to itself: a metre matters for a hundred-metre view and is
+ * absurd for a county. 1% of the smaller side is imperceptible on reopening -- roughly six pixels
+ * on a 600-pixel window -- and drops a link over a whole region from five decimals to two.
+ *
+ * The smaller side rather than the larger, so a long thin rectangle is not coarsened past
+ * recognition across its narrow axis.
+ */
+const BBOX_TOLERANCE = 0.01
+
+/**
+ * The viewport rectangle, rounded outward to a precision suited to its size.
+ *
+ * Outward rather than to nearest, so the stored rectangle always contains the real one. Rounding to
+ * nearest would let each share-reopen-reshare cycle crop a sliver off, and the view a link restores
+ * is already a superset of what was asked for -- growing slightly is harmless, shrinking repeatedly
+ * is not.
+ */
+function bboxText(bbox: [number, number, number, number]): string {
+  const [south, west, north, east] = bbox
+  const side = Math.min(north - south, east - west)
+  const wanted = side > 0 ? Math.ceil(-Math.log10(side * BBOX_TOLERANCE)) : 5
+  const digits = Math.min(5, Math.max(2, wanted))
+  const step = 10 ** -digits
+  /**
+   * Rounding outward, with a nudge for the division that gets there.
+   *
+   * `52.1977 / 1e-5` is 5219769.999999999, so a bare floor would round a coordinate already sitting
+   * exactly on the grid *down* a whole step -- and the round trip through a link would drift by one
+   * digit every time. The nudge is relative to the magnitude, so it survives coordinates of any
+   * size, and it is twelve orders below the value: microns of latitude.
+   */
+  const snap = (v: number, toward: (n: number) => number) => {
+    const scaled = v / step
+    const eps = Math.max(Math.abs(scaled), 1) * 1e-12
+    return toward(scaled + (toward === Math.floor ? eps : -eps)) * step
+  }
+  const out = [
+    snap(south, Math.floor),
+    snap(west, Math.floor),
+    snap(north, Math.ceil),
+    snap(east, Math.ceil),
+  ]
+  return out.map((v) => trim(v.toFixed(digits))).join(',')
+}
 
 function numbers(raw: string | null, count: number): number[] | null {
   if (!raw) return null
@@ -154,7 +205,7 @@ export function parseUrl(search: string): UrlState {
 
 export function toSearch(s: UrlState): string {
   const q = new URLSearchParams()
-  if (s.bbox) q.set('at', s.bbox.map((v) => v.toFixed(5)).join(','))
+  if (s.bbox) q.set('at', bboxText(s.bbox))
   if (s.lineId) q.set('line', s.lineId)
   if (s.custom.a) q.set('a', `${coord(s.custom.a.lat)},${coord(s.custom.a.lon)}`)
   if (s.custom.b) q.set('b', `${coord(s.custom.b.lat)},${coord(s.custom.b.lon)}`)
