@@ -495,7 +495,23 @@ export function MapView({
             type: 'raster' as const,
             source: `base${i}`,
             layout: { visibility: basemapVisible(i, stopAt(basemapMix), BLEND_STOPS.length) ? 'visible' as const : 'none' as const },
-            paint: { 'raster-opacity': basemapOpacity(i, stopAt(basemapMix)) },
+            paint: {
+              'raster-opacity': basemapOpacity(i, stopAt(basemapMix)),
+              /**
+               * Both fades off, or the dark background shows through the stack.
+               *
+               * Visibility is not animated but opacity is, and by default over 300 ms -- so a step
+               * that hides the covered layer and takes the covering one to full opacity does the
+               * first instantly and the second gradually, leaving a third of a second of
+               * half-transparent map over the background. Coming back the other way, a layer being
+               * shown again fades its tiles in from nothing and does it again.
+               *
+               * There is nothing to ease anyway: the slider is direct manipulation, and a
+               * transition on it only makes the map lag the thumb.
+               */
+              'raster-opacity-transition': { duration: 0, delay: 0 },
+              'raster-fade-duration': 0,
+            },
           })),
         ],
       },
