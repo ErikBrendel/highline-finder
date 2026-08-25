@@ -18,6 +18,66 @@ export interface Sampler {
   nearest(e: number, n: number): number
 }
 
+/**
+ * Enough of a raster's layout to say which cell a coordinate is in. Grid satisfies it, and so does
+ * anything else laid out the same way -- a bitmask, for one.
+ */
+export interface CellGeometry {
+  w: number
+  h: number
+  /** Easting of the left edge. */
+  e0: number
+  /** Northing of the top edge. */
+  n1: number
+  res: number
+}
+
+/**
+ * Visits every cell whose centre falls inside a closed ring, given as flat `[e, n, ...]`.
+ *
+ * Even-odd scanline: for each row, find where the ring crosses that row's centre line, sort the
+ * crossings, and fill between them in pairs. Cells outside the raster are clipped rather than
+ * wrapped, so a ring hanging over the edge fills the part that is there.
+ *
+ * Shared because there are two rasters made of polygons -- building footprints and water outlines
+ * -- and having them disagree about which cells a polygon covers would be a bug nobody would think
+ * to look for.
+ */
+export function fillPolygon(
+  ring: number[],
+  g: CellGeometry,
+  visit: (index: number, col: number, row: number) => void,
+): void {
+  let minN = Infinity
+  let maxN = -Infinity
+  for (let i = 1; i < ring.length; i += 2) {
+    if (ring[i]! < minN) minN = ring[i]!
+    if (ring[i]! > maxN) maxN = ring[i]!
+  }
+  const rowOf = (n: number) => (g.n1 - n) / g.res - 0.5
+  const row0 = Math.max(0, Math.ceil(rowOf(maxN)))
+  const row1 = Math.min(g.h - 1, Math.floor(rowOf(minN)))
+
+  const crossings: number[] = []
+  for (let row = row0; row <= row1; row++) {
+    const n = g.n1 - (row + 0.5) * g.res
+    crossings.length = 0
+    for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
+      const ay = ring[i + 1]!
+      const by = ring[j + 1]!
+      if (ay > n === by > n) continue
+      crossings.push(ring[i]! + ((n - ay) / (by - ay)) * (ring[j]! - ring[i]!))
+    }
+    crossings.sort((a, b) => a - b)
+    for (let k = 0; k + 1 < crossings.length; k += 2) {
+      const colOf = (e: number) => (e - g.e0) / g.res - 0.5
+      const col0 = Math.max(0, Math.ceil(colOf(crossings[k]!)))
+      const col1 = Math.min(g.w - 1, Math.floor(colOf(crossings[k + 1]!)))
+      for (let col = col0; col <= col1; col++) visit(row * g.w + col, col, row)
+    }
+  }
+}
+
 /** A point in EPSG:25833. */
 export interface Pos {
   e: number

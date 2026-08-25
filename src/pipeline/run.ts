@@ -3,6 +3,7 @@ import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
 import { raiseOntoBuildings } from './buildings.js'
 import { loadRoads } from './roads.js'
+import { WaterMask } from '../shared/water.js'
 import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
@@ -238,7 +239,19 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       `from ${roads.blocks}/${roads.wanted} blocks  ` +
       `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})`,
   )
-  const scene = { roofs, roads: roads.index }
+  /**
+   * Water, rasterised onto the terrain grid so a sample can ask about it as cheaply as it asks the
+   * elevation. Islands are punched back out -- a wooded island in a lake is ground with trees on
+   * it, and offering a line one metre of clearance over it would be exactly backwards.
+   */
+  const water = new WaterMask(ground)
+  water.add(roads.water)
+  console.log(
+    `  ${roads.water.rings.length.toLocaleString()} water outlines with ` +
+      `${roads.water.islands.length.toLocaleString()} islands, ` +
+      `${(water.cells / 1e6).toFixed(1)}M cells of the grid under water`,
+  )
+  const scene = { roofs, roads: roads.index, water }
 
   const r = await stage('[6/6] profiles and score', () =>
     evaluatePairs(found, ground, surface, p, scene),

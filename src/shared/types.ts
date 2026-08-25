@@ -32,6 +32,11 @@ export interface Params {
   /** Line must clear bare terrain by at least this much, on the interior of the span. */
   minClearance: number
   /**
+   * What it owes open water instead, which is less. A fall into a lake is the ordinary end of a
+   * session; a fall onto ground is not. Islands are ground -- see shared/water.ts.
+   */
+  waterClearance: number
+  /**
    * Extra clearance demanded above `minClearance` where the line passes over traffic, per class.
    *
    * A hard constraint, like terrain clearance and unlike canopy: a line six metres over a
@@ -274,6 +279,14 @@ export interface StoredProfile {
    * Widening it would compound a soft measurement instead of sharpening a hard one.
    */
   surfaceMax?: number[]
+  /**
+   * Clearance each sample is held to, where it is not the ordinary `minClearance` -- which in
+   * practice means the stretch over open water. Absent when the whole span owes the usual figure.
+   *
+   * Stored rather than re-derived because the browser rescores at a user-chosen sag without the
+   * water layer to hand, exactly as it cannot re-derive a road it does not know is there.
+   */
+  needed?: number[]
 }
 
 export interface ProfileSample {
@@ -290,6 +303,8 @@ export interface ProfileSample {
   line: number
   /** Half-width of the band at this station, for drawing it. */
   halfWidth: number
+  /** Clearance this sample is held to: less over open water. See shared/water.ts. */
+  needed: number
 }
 
 export interface ScoreParts {

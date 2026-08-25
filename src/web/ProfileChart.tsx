@@ -22,11 +22,11 @@ import { toWgs84 } from '../shared/geo.js'
  * column between the roof and the bare earth underneath, with the terrain fill continuing below
  * it. Water is a section through the body, filled to the axis.
  *
- * Roads get a required-clearance line rather than a marker: one series along the whole span, flat
- * at `minClearance` over open ground and stepping up wherever something carrying traffic passes
- * underneath. That is the entire clearance rule as one shape, and whether the line clears it is
- * then a matter of looking at the picture. The icon under each step says what the traffic is; the
- * dashed line says how much air it wants.
+ * The clearance rule is drawn as one series along the whole span rather than as markers: at
+ * `minClearance` over open ground, dropping over open water, and stepping up wherever something
+ * carrying traffic passes underneath. That is the entire rule as one shape, and whether the line
+ * clears it is then a matter of looking at the picture. The icon under each step says what the
+ * traffic is; the dashed line says how much air it wants.
  *
  * Marker positions come from the resampled profile, but their labels come from the candidate's
  * stored metrics, which were measured on a finer step. Labelling from the profile instead would
@@ -42,7 +42,7 @@ const W = 900
 const H = 200
 const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 
-type SeriesKey = 'ground' | 'surface' | 'line' | 'groundMax' | 'surfaceMax'
+type SeriesKey = 'ground' | 'surface' | 'line' | 'groundMax' | 'surfaceMax' | 'needed'
 
 interface Props {
   c: Candidate
@@ -166,12 +166,12 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
       .sort((u, v) => u - v)
       .map((d) => {
         const worst = demandAt(d)
-        return {
-          d,
-          v: worst
-            ? carrierOf(worst.x, d) + params.minClearance + worst.extra
-            : seriesAt(d, 'ground') + params.minClearance,
-        }
+        // Over open water the base figure drops -- falling in a lake is how a session ends -- and
+        // over traffic it climbs. Both are the same rule seen from either side, so the line is one
+        // series and the higher demand wins wherever they overlap.
+        const base = seriesAt(d, 'ground') + seriesAt(d, 'needed')
+        const road = worst ? carrierOf(worst.x, d) + params.minClearance + worst.extra : -Infinity
+        return { d, v: Math.max(base, road) }
       })
   })()
 

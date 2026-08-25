@@ -115,6 +115,29 @@ header .spacer { flex: 1; }
 .filter label span:last-child { color: var(--accent); font-variant-numeric: tabular-nums; }
 .filter input[type=range] { width: 100%; accent-color: var(--accent); }
 
+/* Two range inputs stacked on one track. Only the thumbs take pointer events, so whichever thumb
+   the pointer is over gets the drag regardless of which input is painted on top. */
+.range { position: relative; height: 20px; }
+.range input[type=range] {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  margin: 0;
+  background: none;
+  pointer-events: none;
+}
+.range input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+.range input[type=range]::-moz-range-thumb { pointer-events: auto; }
+.range input[type=range]::-moz-range-track { background: none; }
+.rangefill {
+  position: absolute;
+  top: 9px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+
 /* Three anchor-class toggles. Same affordance as the layer toggles above the panel, sized for a
    word and a count stacked rather than a single label. */
 .kinds {

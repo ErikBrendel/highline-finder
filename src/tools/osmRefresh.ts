@@ -161,16 +161,24 @@ async function main(): Promise<void> {
    * read the ways knowing it.
    */
   console.log('[1/3] relations, then ways')
-  const waterRelations: { id: number; members: number[] }[] = []
+  const waterRelations: { outer: number[]; inner: number[] }[] = []
   const memberOf = new Set<number>()
   readWaysAndRelations(PBF, () => {}, (rel) => {
     if (!waterKind(rel.tags)) return
-    const members = rel.members.filter((m) => m.type === MEMBER_WAY && m.role !== 'inner')
-    if (!members.length) return
-    waterRelations.push({ id: rel.id, members: members.map((m) => m.ref) })
-    for (const m of members) memberOf.add(m.ref)
+    const ways = rel.members.filter((m) => m.type === MEMBER_WAY)
+    const outer = ways.filter((m) => m.role !== 'inner')
+    if (!outer.length) return
+    // Inner rings are islands, and they used to be dropped here. A lake with a wooded island in it
+    // then read as water all the way across -- invisible while water was only ever drawn, and wrong
+    // the moment a line is allowed less clearance over water than over ground.
+    const inner = ways.filter((m) => m.role === 'inner')
+    waterRelations.push({ outer: outer.map((m) => m.ref), inner: inner.map((m) => m.ref) })
+    for (const m of ways) memberOf.add(m.ref)
   })
-  console.log(`  ${waterRelations.length.toLocaleString()} water multipolygons`)
+  console.log(
+    `  ${waterRelations.length.toLocaleString()} water multipolygons ` +
+      `(${waterRelations.filter((r) => r.inner.length).length.toLocaleString()} with islands)`,
+  )
 
   const kept = new Map<number, Kept>()
   /** Geometry of relation members, which are outlines rather than features in their own right. */
@@ -256,21 +264,40 @@ async function main(): Promise<void> {
   }
 
   let stitched = 0
+  let islands = 0
   let unstitched = 0
-  for (const { id: relationId, members } of waterRelations) {
+  /**
+   * Stitched rings get their own ids, counting down from -1.
+   *
+   * Way ids are positive, so nothing here can collide with one. They used to carry the relation id
+   * negated, which meant every ring of one relation shared an id -- and since blocks deduplicate by
+   * id, only the first ring of a multi-ring lake survived being read back. One id per ring fixes
+   * that as well as making room for the islands.
+   */
+  let ringId = 0
+  const ringsOf = (members: number[]) => {
     const geoms = members
       .map((id) => memberRefs.get(id))
       .filter((refs): refs is number[] => !!refs)
       .map(geometryOf)
       .filter((g): g is number[] => !!g)
-    if (!geoms.length) continue
-    const { rings, dropped } = stitch(geoms)
-    unstitched += dropped
-    for (const ring of rings) {
+    return geoms.length ? stitch(geoms) : { rings: [], dropped: 0 }
+  }
+
+  for (const { outer, inner } of waterRelations) {
+    const shell = ringsOf(outer)
+    unstitched += shell.dropped
+    for (const ring of shell.rings) {
       stitched++
-      // Rings carry the relation's own id, negated, so a stitched outline cannot collide with the
-      // way ids around it and still deduplicates against itself across blocks.
-      add({ id: -relationId, kind: 'water', name: 'water', half: 0, bridge: false, pts: ring })
+      add({ id: --ringId, kind: 'water', name: 'water', half: 0, bridge: false, pts: ring })
+    }
+    // No shell means no lake to put an island in: the outline did not survive the extract's edge.
+    if (!shell.rings.length) continue
+    const holes = ringsOf(inner)
+    unstitched += holes.dropped
+    for (const ring of holes.rings) {
+      islands++
+      add({ id: --ringId, kind: 'island', name: 'island', half: 0, bridge: false, pts: ring })
     }
   }
 
@@ -302,7 +329,10 @@ async function main(): Promise<void> {
   )
   console.log(`  ${[...byKind].map(([k, n]) => `${n.toLocaleString()} ${k}`).join(', ')} (with duplicates across blocks)`)
   if (incomplete) console.log(`  ${incomplete.toLocaleString()} ways dropped for missing nodes (clipped at the extract's edge)`)
-  console.log(`  ${stitched.toLocaleString()} multipolygon rings stitched, ${unstitched} would not close`)
+  console.log(
+    `  ${stitched.toLocaleString()} multipolygon rings stitched, ` +
+      `${islands.toLocaleString()} islands inside them, ${unstitched} would not close`,
+  )
   console.log(`done in ${((Date.now() - started) / 1000).toFixed(1)}s`)
 
   const listing = await readdir(OUT)

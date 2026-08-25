@@ -1,4 +1,4 @@
-import type { Grid } from './grid.js'
+import { fillPolygon, type Grid } from './grid.js'
 
 /**
  * Building outlines and heights, from the survey's LoD1 city model.
@@ -69,9 +69,9 @@ export function levelFaces(gml: string): LevelFace[] {
 /**
  * Draws level faces into a grid, keeping the greatest height where they overlap.
  *
- * Even-odd scanline fill on cell centres, which is the same rule a cadastre raster would use: a
- * cell belongs to the building if the building covers the middle of it. Buildings narrower than a
- * cell can fall between the scanlines and vanish, which at 1 m means a shed the size of a desk.
+ * Even-odd scanline fill on cell centres -- see fillPolygon, which water shares -- so a cell belongs
+ * to the building if the building covers the middle of it. Buildings narrower than a cell can fall
+ * between the scanlines and vanish, which at 1 m means a shed the size of a desk.
  *
  * Cells outside a face keep whatever they had, so a grid pre-filled with NaN comes back as a
  * roofs-only overlay that a `max` blit can merge into terrain without touching the rest.
@@ -79,40 +79,13 @@ export function levelFaces(gml: string): LevelFace[] {
 export function rasteriseFaces(faces: LevelFace[], into: Grid): number {
   let cells = 0
   for (const { ring, z } of faces) {
-    let minN = Infinity
-    let maxN = -Infinity
-    for (let i = 1; i < ring.length; i += 2) {
-      if (ring[i]! < minN) minN = ring[i]!
-      if (ring[i]! > maxN) maxN = ring[i]!
-    }
-    const rowOf = (n: number) => (into.n1 - n) / into.res - 0.5
-    const row0 = Math.max(0, Math.ceil(rowOf(maxN)))
-    const row1 = Math.min(into.h - 1, Math.floor(rowOf(minN)))
-
-    for (let row = row0; row <= row1; row++) {
-      const n = into.n1 - (row + 0.5) * into.res
-      const crossings: number[] = []
-      for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
-        const ay = ring[i + 1]!
-        const by = ring[j + 1]!
-        if (ay > n === by > n) continue
-        crossings.push(ring[i]! + ((n - ay) / (by - ay)) * (ring[j]! - ring[i]!))
-      }
-      crossings.sort((a, b) => a - b)
-      for (let k = 0; k + 1 < crossings.length; k += 2) {
-        const colOf = (e: number) => (e - into.e0) / into.res - 0.5
-        const col0 = Math.max(0, Math.ceil(colOf(crossings[k]!)))
-        const col1 = Math.min(into.w - 1, Math.floor(colOf(crossings[k + 1]!)))
-        for (let col = col0; col <= col1; col++) {
-          const at = row * into.w + col
-          const cur = into.data[at]!
-          if (Number.isNaN(cur) || z > cur) {
-            if (Number.isNaN(cur)) cells++
-            into.data[at] = z
-          }
-        }
-      }
-    }
+    fillPolygon(ring, into, (at) => {
+      const cur = into.data[at]!
+      if (!Number.isNaN(cur) && z <= cur) return
+      if (Number.isNaN(cur)) cells++
+      into.data[at] = z
+    })
   }
   return cells
 }
+

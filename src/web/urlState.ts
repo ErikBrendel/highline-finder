@@ -27,6 +27,12 @@ import type { CustomPoints, LatLon } from './planPoints.js'
 export interface Filters {
   minScore: number
   minLength: number
+  /**
+   * Top of the length band. Infinity is "not filtering", which is what keeps it out of a link until
+   * the thumb is actually moved -- the slider's own maximum comes from the data and would otherwise
+   * be written into every URL as if the sharer had chosen it.
+   */
+  maxLength: number
   minExposure: number
   maxCanopy: number
   maxOffLevel: number
@@ -35,6 +41,7 @@ export interface Filters {
 export const FILTER_DEFAULTS: Filters = {
   minScore: 0,
   minLength: 0,
+  maxLength: Infinity,
   minExposure: 0,
   maxCanopy: 100,
   maxOffLevel: 100,
@@ -44,6 +51,7 @@ export const FILTER_DEFAULTS: Filters = {
 const FILTER_PARAMS: Record<keyof Filters, string> = {
   minScore: 'score',
   minLength: 'len',
+  maxLength: 'maxlen',
   minExposure: 'air',
   maxCanopy: 'canopy',
   maxOffLevel: 'level',

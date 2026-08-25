@@ -57,6 +57,12 @@ import { buildProfile, packProfile } from '../shared/profile.js'
  * affordable -- the overwhelming majority of pairs die at the midspan check, before any profile is
  * built. The authoritative metrics are recomputed afterwards from the emitted profile, so this only
  * has to be a filter, not a measurement.
+ *
+ * It holds the line to the *loosest* clearance any sample could earn, not the ordinary one. A
+ * prefilter is only allowed to reject what the real test would also reject, and the real test asks
+ * less over open water -- so gating at the ground figure here would quietly delete every line over
+ * a lake before the water layer was ever consulted. The band goes the other way and needs no such
+ * care: it only ever finds more obstruction than the centreline, so the thin walk stays a superset.
  */
 function clearsTerrain(
   a: Pos,
@@ -73,13 +79,11 @@ function clearsTerrain(
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
   if (inner1 <= inner0) return false
+  const loosest = Math.min(p.minClearance, p.waterClearance)
 
   // The deepest sag sits at midspan, so that is where a line most often meets the ground.
   const mid = length / 2
-  if (
-    lineHeightAt(hA, hB, sag, 0.5) - ground.sample(a.e + de * mid, a.n + dn * mid) <
-    p.minClearance
-  ) {
+  if (lineHeightAt(hA, hB, sag, 0.5) - ground.sample(a.e + de * mid, a.n + dn * mid) < loosest) {
     return false
   }
 
@@ -89,7 +93,7 @@ function clearsTerrain(
     if (Number.isNaN(g)) return false
     const clear = lineHeightAt(hA, hB, sag, d / length) - g
     if (clear > exposure) exposure = clear
-    if (d >= inner0 && d <= inner1 && clear < p.minClearance) return false
+    if (d >= inner0 && d <= inner1 && clear < loosest) return false
   }
   return exposure >= p.minExposure
 }
@@ -223,7 +227,7 @@ export function evaluateLine(
     scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
     maxSagRatio: 0,
     crossings,
-    profile: packProfile(buildProfile(a, b, hA, hB, roundedLength, ground, surface, p)),
+    profile: packProfile(buildProfile(a, b, hA, hB, roundedLength, ground, surface, p, scene), p),
   }
   /**
    * Measured once and gated before anything expensive, which is both the cheaper order and the one

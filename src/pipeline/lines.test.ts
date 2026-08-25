@@ -4,7 +4,7 @@ import { chooseHeights } from '../shared/scoring.js'
 import { gridFrom } from './testing.js'
 import { DEFAULT_PARAMS } from './params.js'
 import type { Anchor } from './openness.js'
-import type { Grid } from '../shared/grid.js'
+import type { Grid, Pos } from '../shared/grid.js'
 import type { Candidate, Params } from '../shared/types.js'
 import { unpackProfile } from '../shared/profile.js'
 
@@ -248,6 +248,50 @@ describe('band clearance', () => {
     }).line!
     expect(forced.exposure).toBeCloseTo(thin.exposure, 1)
     expect(forced.clearanceMin).toBeLessThan(0)
+  })
+})
+
+describe('water clearance', () => {
+  /**
+   * A canyon the line clears by 1.5 m at midspan: too close over ground, ample over water.
+   *
+   * The rims sit at 50 m and the line leaves them 1.5 m up, so a 220 m span sags 11 m to 40.5 m in
+   * the middle -- which is the number the floor is placed against.
+   */
+  const shallow = gridFrom(400, 400, (e) => (e <= 45 || e >= 255 ? 50 : 39))
+  const ends: [Pos, Pos] = [{ e: 40, n: 200 }, { e: 260, n: 200 }]
+  const lake = (covers: (e: number, n: number) => boolean) => ({ water: { covers } })
+
+  it('rejects over ground and accepts the same line over water', () => {
+    const p2 = { ...p, minExposure: 0 }
+    expect(evaluateLine(...ends, shallow, shallow, p2).reject).toBe('clearance')
+    expect(evaluateLine(...ends, shallow, shallow, p2, lake(() => true)).line).not.toBeNull()
+  })
+
+  it('holds the line to the ground figure over an island in that water', () => {
+    // Water everywhere except a 40 m island across the middle of the span, which is where the line
+    // is lowest. One dry sample is enough, and should be.
+    const p2 = { ...p, minExposure: 0 }
+    const withIsland = lake((e: number) => e < 130 || e > 170)
+    expect(evaluateLine(...ends, shallow, shallow, p2, withIsland).reject).toBe('clearance')
+  })
+
+  it('holds the line to the ground figure where the band reaches a bank', () => {
+    // The centreline is over water for the whole span; the band is not. A walker swinging sideways
+    // lands on the bank, so the bank is what the clearance is owed to.
+    const p2 = { ...p, minExposure: 0 }
+    const narrowChannel = lake((_e: number, n: number) => Math.abs(n - 200) < 2)
+    expect(evaluateLine(...ends, shallow, shallow, p2, narrowChannel).reject).toBe('clearance')
+    // Widen the channel past the band and the same line is fine again.
+    const wideChannel = lake((_e: number, n: number) => Math.abs(n - 200) < 12)
+    expect(evaluateLine(...ends, shallow, shallow, p2, wideChannel).line).not.toBeNull()
+  })
+
+  it('reports the real gap, not one adjusted for what it is over', () => {
+    const p2 = { ...p, minExposure: 0 }
+    const c = evaluateLine(...ends, shallow, shallow, p2, lake(() => true)).line!
+    // 1.5 m of air is what there is, and what the panel has to say, even though it passes.
+    expect(c.clearanceMin).toBeCloseTo(1.5, 1)
   })
 })
 

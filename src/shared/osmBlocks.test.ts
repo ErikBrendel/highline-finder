@@ -86,9 +86,21 @@ describe('encode and decode', () => {
     const seen = new Set<number>()
     const first = splitFeatures([shared, lake], seen)
     expect(first.roads).toHaveLength(1)
-    expect(first.water).toHaveLength(1)
+    expect(first.water.rings).toHaveLength(1)
     // The same block again, as the neighbouring block would deliver it.
-    expect(splitFeatures([shared, lake], seen)).toEqual({ roads: [], water: [] })
+    expect(splitFeatures([shared, lake], seen)).toEqual({
+      roads: [],
+      water: { rings: [], islands: [] },
+    })
+  })
+
+  it('keeps an island apart from the lake it stands in', () => {
+    const lake: OsmFeature = { id: 8, kind: 'water', name: 'water', half: 0, bridge: false, pts: [e0, n0, e0 + 40, n0, e0 + 40, n0 + 40, e0, n0 + 40, e0, n0] }
+    const island: OsmFeature = { id: 9, kind: 'island', name: 'island', half: 0, bridge: false, pts: [e0 + 10, n0 + 10, e0 + 20, n0 + 10, e0 + 20, n0 + 20, e0 + 10, n0 + 20, e0 + 10, n0 + 10] }
+    const back = decodeBlock(key, encodeBlock(key, [lake, island]))
+    const split = splitFeatures(back, new Set())
+    expect(split.water.rings).toHaveLength(1)
+    expect(split.water.islands).toHaveLength(1)
   })
 
   it('separates the road tiers from the water kinds', () => {

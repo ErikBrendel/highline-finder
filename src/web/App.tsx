@@ -19,10 +19,10 @@ import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, onBuilding, roofs, surfaceSampler } from './terrain.js'
-import { coverAlong, coverFailed, ensureCover, roadsFor } from './landcover.js'
+import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
 
 import { Details } from './Details.js'
-import { Slider } from './Slider.js'
+import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
 import { optimizeFrame, startingSpacing } from './optimize.js'
@@ -216,6 +216,7 @@ export function App() {
     initial.filters[field] ?? FILTER_DEFAULTS[field]
   const [minScore, setMinScore] = useState(filter('minScore'))
   const [minLength, setMinLength] = useState(filter('minLength'))
+  const [maxLength, setMaxLength] = useState(filter('maxLength'))
   const [minExposure, setMinExposure] = useState(filter('minExposure'))
   const [maxCanopy, setMaxCanopy] = useState(filter('maxCanopy'))
   const [maxOffLevel, setMaxOffLevel] = useState(filter('maxOffLevel'))
@@ -433,7 +434,7 @@ export function App() {
    */
   const scene = useMemo(() => {
     void coverVersion
-    return { roofs, roads: customUtm ? roadsFor(customUtm.a, customUtm.b) : null }
+    return { roofs, roads: customUtm ? roadsFor(customUtm.a, customUtm.b) : null, water }
   }, [customUtm, coverVersion])
 
   const roadState: 'ok' | 'loading' | 'failed' =
@@ -545,12 +546,13 @@ export function App() {
           kinds.has(c.kind) &&
           c.score >= minScore &&
           c.length >= minLength &&
+          c.length <= maxLength &&
           c.exposure >= minExposure &&
           c.canopyBlockedFraction * 100 <= maxCanopy &&
           c.offLevelRatio * 100 <= maxOffLevel,
       )
       .sort((a, b) => b.score - a.score)
-  }, [data, rescored, kinds, minScore, minLength, minExposure, maxCanopy, maxOffLevel])
+  }, [data, rescored, kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
@@ -647,15 +649,15 @@ export function App() {
     const a = { e: selected.a.e, n: selected.a.n }
     const b = { e: selected.b.e, n: selected.b.n }
     let stale = false
-    ensureTerrain(a, b)
+    Promise.all([ensureTerrain(a, b), ensureCover(a, b)])
       .then(() => {
         if (stale) return
         const built = buildProfile(
           a, b, selected.a.anchor, selected.b.anchor, selected.length,
-          groundSampler, surfaceSampler, data.meta.params,
+          groundSampler, surfaceSampler, data.meta.params, { water },
         )
         if (built.some((s) => Number.isNaN(s.ground))) return
-        setFetchedProfile({ id: selected.id, profile: packProfile(built) })
+        setFetchedProfile({ id: selected.id, profile: packProfile(built, data.meta.params) })
       })
       .catch(() => undefined)
     return () => {
@@ -764,12 +766,14 @@ export function App() {
       showHotspots: changed(showHotspots, true),
       // All three on is the default, so only a narrowed selection is worth a parameter.
       kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
-      filters: movedFilters({ minScore, minLength, minExposure, maxCanopy, maxOffLevel }),
+      filters: movedFilters({
+        minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
+      }),
     })
   }, [
     bbox, selectedId, selected, custom, rig, sagPct, basemapMix, data,
     showLines, showHotspots, kinds,
-    minScore, minLength, minExposure, maxCanopy, maxOffLevel,
+    minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
   ])
 
   useEffect(() => {
@@ -926,7 +930,21 @@ export function App() {
 
               <h2 style={{ marginTop: 14 }}>Filters</h2>
               <Slider label="Min score" value={Math.min(minScore, maxScore)} min={0} max={maxScore} step={1} unit="" onChange={setMinScore} />
-              <Slider label="Min length" value={minLength} min={0} max={maxLen} step={10} unit=" m" onChange={setMinLength} />
+              <RangeSlider
+                label="Length"
+                from={minLength}
+                to={Math.min(maxLength, maxLen)}
+                min={0}
+                max={maxLen}
+                step={10}
+                unit=" m"
+                onChange={(from, to) => {
+                  setMinLength(from)
+                  // At the top of the track the ceiling stops filtering rather than pinning itself
+                  // to a number that came from whichever dataset happened to be loaded.
+                  setMaxLength(to >= maxLen ? Infinity : to)
+                }}
+              />
               <Slider label="Min exposure (air below)" value={minExposure} min={0} max={maxExp} step={1} unit=" m" onChange={setMinExposure} />
               <Slider label="Max canopy blocked" value={maxCanopy} min={0} max={100} step={1} unit=" %" onChange={setMaxCanopy} />
               <Slider

@@ -58,7 +58,8 @@ describe('url state', () => {
       kinds: null,
       filters: {},
     })
-    for (const absent of ['lines', 'spots', 'kinds', 'score', 'len', 'air', 'canopy', 'level']) {
+    const params = ['lines', 'spots', 'kinds', 'score', 'len', 'maxlen', 'air', 'canopy', 'level']
+    for (const absent of params) {
       expect(search).not.toContain(`${absent}=`)
     }
   })
@@ -67,6 +68,7 @@ describe('url state', () => {
     for (const [field, value] of [
       ['minScore', 40],
       ['minLength', 120],
+      ['maxLength', 380],
       ['minExposure', 25],
       ['maxCanopy', 30],
       ['maxOffLevel', 1.5],

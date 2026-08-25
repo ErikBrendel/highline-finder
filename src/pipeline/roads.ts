@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { RoadIndex } from '../shared/roads.js'
-import { blockKeysFor, decodeBlock, splitFeatures } from '../shared/osmBlocks.js'
+import { blockKeysFor, decodeBlock, splitFeatures, type Water } from '../shared/osmBlocks.js'
 
 /**
  * Loads the roads and railways a region's lines might pass over.
@@ -21,8 +21,8 @@ const DIR = new URL('../web/public/osm/', import.meta.url).pathname
 export interface RoadsLoaded {
   index: RoadIndex
   ways: number
-  /** Water outlines in the same blocks, as flat `[e, n, ...]` rings. */
-  water: number[][]
+  /** Water outlines in the same blocks, with the islands standing in them. */
+  water: Water
   /** Blocks that held something, against the number looked for. */
   blocks: number
   wanted: number
@@ -38,7 +38,7 @@ export async function loadRoads(bbox: {
   const keys = blockKeysFor(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
   const index = new RoadIndex()
   const seen = new Set<number>()
-  const water: number[][] = []
+  const water: Water = { rings: [], islands: [] }
   const byTier: Record<string, number> = {}
   let ways = 0
   let blocks = 0
@@ -57,7 +57,8 @@ export async function loadRoads(bbox: {
       ways++
       byTier[road.tier] = (byTier[road.tier] ?? 0) + 1
     }
-    water.push(...split.water)
+    water.rings.push(...split.water.rings)
+    water.islands.push(...split.water.islands)
   }
 
   if (!blocks) {

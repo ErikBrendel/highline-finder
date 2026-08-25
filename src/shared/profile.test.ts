@@ -69,8 +69,8 @@ describe('buildProfile band', () => {
 
 describe('packProfile', () => {
   it('stores the band only where it says something the centreline does not', () => {
-    expect(packProfile(span(withWall(206, 60))).groundMax).toBeDefined()
-    const flat = packProfile(span(gridFrom(400, 400, () => 20)))
+    expect(packProfile(span(withWall(206, 60)), p).groundMax).toBeDefined()
+    const flat = packProfile(span(gridFrom(400, 400, () => 20)), p)
     expect(flat.groundMax).toBeUndefined()
     expect(flat.surfaceMax).toBeUndefined()
   })

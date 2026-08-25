@@ -60,8 +60,20 @@ export interface Metrics {
    *
    * The band, not the centreline: a line does not stay on its own axis, and a measurement that
    * assumed it did happily threaded corridors between buildings. See shared/profile.ts.
+   *
+   * A true gap in metres, and on its own it no longer says whether the line qualifies -- what a
+   * sample is held to varies, less over water and more over a road. `clearanceMargin` is the figure
+   * that answers that; this one is what a person reads.
    */
   clearanceMin: number
+  /**
+   * Smallest amount by which any sample beats what it is held to. Negative means the line fails.
+   *
+   * Separate from `clearanceMin` because the requirement is no longer one number: three metres over
+   * a field, one over open water. Reporting only the gap would say a line one metre over a lake
+   * clears less than one three metres over a hedge, when the first is fine and the second is not.
+   */
+  clearanceMargin: number
   /**
    * Deepest air gap anywhere. Measured on the *centreline*, unlike the clearance: this answers how
    * high the line is, and what a walker is over is what is directly beneath them.
@@ -154,7 +166,9 @@ export function rawMetricsAt(
   // Absent means the band said nothing the centreline did not, which is the whole of a run at
   // sideClearanceRatio 0 and most samples of a line over open ground.
   const band = sp.groundMax ?? sp.ground
+  const needs = sp.needed
   let clearanceMin = Infinity
+  let clearanceMargin = Infinity
   let exposure = -Infinity
   let canopyClearanceMin = Infinity
   let blocked = 0
@@ -172,13 +186,15 @@ export function rawMetricsAt(
 
     const clear = line - band[i]!
     if (clear < clearanceMin) clearanceMin = clear
+    const need = needs?.[i] ?? p.minClearance
+    if (clear - need < clearanceMargin) clearanceMargin = clear - need
     const canopyClear = line - (sp.surface[i] ?? ground)
     if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
     if (canopyClear < 0) blocked++
     // Fraction of the way from the nearer anchor to midspan: 0 at the ends, 1 in the middle.
     const central = Math.min(d, length - d) / (length / 2)
     weight += central
-    if (clear < p.minClearance) deficit += central * (p.minClearance - clear)
+    if (clear < need) deficit += central * (need - clear)
     samples++
   }
 
@@ -237,6 +253,7 @@ export function rawMetricsAt(
 
   return {
     clearanceMin,
+    clearanceMargin,
     exposure,
     canopyClearanceMin,
     canopyBlockedFraction: blocked / samples,
@@ -259,7 +276,7 @@ export function rawMetricsAt(
 export type Reject = 'clearance' | 'exposure' | 'crossing' | 'canopy'
 
 export function rejectionOf(m: Metrics, p: Params): Reject | null {
-  if (m.clearanceMin < p.minClearance) return 'clearance'
+  if (m.clearanceMargin < 0) return 'clearance'
   if (m.exposure < p.minExposure) return 'exposure'
   // A hard constraint, like terrain and unlike canopy: a line six metres over a Bundesstraße is not
   // something anyone rigs, and reporting it with a low score would be reporting it as a candidate.
@@ -298,14 +315,17 @@ export function violationsOf(
   const out: string[] = []
   if (length < p.minLength) out.push(`${length.toFixed(0)} m is under the ${p.minLength} m minimum`)
   if (length > p.maxLength) out.push(`${length.toFixed(0)} m is over the ${p.maxLength} m maximum`)
-  if (m.clearanceMin < p.minClearance) {
+  if (m.clearanceMargin < 0) {
     // A negative clearance is not a small one. "Clears the ground by only -2.6 m" is arithmetic
     // rather than a description: the line is inside the hill, and saying so is the whole answer.
+    // The figure it is short of is quoted rather than assumed, since over water it is not the same
+    // number the rest of the span is held to.
+    const needed = m.clearanceMin - m.clearanceMargin
     out.push(
       m.clearanceMin < 0
         ? 'intersects the ground'
         : `clears the ground by only ${m.clearanceMin.toFixed(1)} m, under the ` +
-          `${p.minClearance} m minimum`,
+          `${needed} m minimum`,
     )
   }
   if (m.exposure < p.minExposure) {
@@ -430,7 +450,7 @@ export function scoreOf(
     exposure: clamp01(Math.log10(Math.max(m.exposure, 1) / 5) / Math.log10(200 / 5)),
     length: clamp01(length / p.maxLength),
     canopy: 1 - m.canopyBlockedFraction,
-    margin: clamp01((m.clearanceMin - p.minClearance) / 10),
+    margin: clamp01(m.clearanceMargin / 10),
     level: budget > 0 ? clamp01(1 - offLevel / budget) : 1,
   }
   const score =

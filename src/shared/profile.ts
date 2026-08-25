@@ -1,5 +1,7 @@
 import type { Pos, Sampler } from './grid.js'
 import { lineHeightAt } from './scoring.js'
+import type { Scene } from './scene.js'
+import { clearanceNeeded } from './water.js'
 import type { Params, ProfileSample, StoredProfile } from './types.js'
 
 /**
@@ -58,18 +60,27 @@ function worstAcross(
   pn: number,
   half: number,
   p: Params,
+  /** Called at every point sampled, centreline included, for whoever else is asking about them. */
+  visit?: (e: number, n: number) => void,
 ): number {
   const centre = s.sample(e, n)
+  visit?.(e, n)
   if (!(half > 0)) return centre
   const count = Math.min(p.sideSamplesPerSide, Math.max(1, Math.ceil(half)))
   const step = half / count
   let worst = centre
   for (let j = 1; j <= count; j++) {
     const off = j * step
-    const left = s.nearest(e - pe * off, n - pn * off)
+    const le = e - pe * off
+    const ln = n - pn * off
+    const left = s.nearest(le, ln)
     if (left > worst) worst = left
-    const right = s.nearest(e + pe * off, n + pn * off)
+    visit?.(le, ln)
+    const re = e + pe * off
+    const rn = n + pn * off
+    const right = s.nearest(re, rn)
     if (right > worst) worst = right
+    visit?.(re, rn)
   }
   return worst
 }
@@ -83,6 +94,8 @@ export function buildProfile(
   ground: Sampler,
   surface: Sampler,
   p: Params,
+  /** For the water layer, which decides how much air each sample is held to. */
+  scene: Scene = {},
 ): ProfileSample[] {
   const sag = p.sagRatio * length
   const de = (b.e - a.e) / length
@@ -91,6 +104,7 @@ export function buildProfile(
   const pe = -dn
   const pn = de
   const steps = Math.min(p.profilePoints, Math.max(8, Math.round(length / p.profileStep)))
+  const water = scene.water
   const out: ProfileSample[] = []
   const r2 = (v: number) => Math.round(v * 100) / 100
   for (let i = 0; i <= steps; i++) {
@@ -100,7 +114,16 @@ export function buildProfile(
     const n = a.n + dn * d
     const half = sideHalfWidthAt(t, length, p)
     const g = ground.sample(e, n)
-    const gMax = worstAcross(ground, e, n, pe, pn, half, p)
+    /**
+     * Water only buys the lower requirement where the *whole* band is over it. If the walker can
+     * swing onto a bank, they need what a bank demands -- and since the clearance is measured to
+     * the worst obstruction anywhere across the band, the requirement has to be the worst one too
+     * or the two halves of the test would be talking about different places.
+     */
+    let allWater = !!water
+    const gMax = worstAcross(ground, e, n, pe, pn, half, p, (pe2, pn2) => {
+      if (allWater && !water!.covers(pe2, pn2)) allWater = false
+    })
     const s = Math.max(g, surface.sample(e, n) || g)
     const sMax = Math.max(gMax, worstAcross(surface, e, n, pe, pn, half, p) || gMax)
     out.push({
@@ -111,6 +134,7 @@ export function buildProfile(
       surfaceMax: r2(Math.max(s, sMax)),
       line: r2(lineHeightAt(hA, hB, sag, t)),
       halfWidth: r2(half),
+      needed: clearanceNeeded(allWater, p),
     })
   }
   return out
@@ -124,13 +148,22 @@ export function buildProfile(
  * bytes of the largest field in the dataset. Parallel arrays rather than an array of objects for
  * the same reason: two key names per line instead of two per sample.
  *
- * The two band series are omitted when they say nothing the centreline does not, which is every
- * sample of every line when `sideClearanceRatio` is 0 and most samples of a line over open ground.
+ * The band series are omitted when they say nothing the centreline does not, and the per-sample
+ * requirement when it is the ordinary one everywhere -- which is every sample of every line away
+ * from water, and every line at all when `sideClearanceRatio` is 0.
  */
-export function packProfile(p: ProfileSample[]): StoredProfile {
-  const stored: StoredProfile = { ground: p.map((s) => s.ground), surface: p.map((s) => s.surface) }
-  if (p.some((s) => s.groundMax > s.ground)) stored.groundMax = p.map((s) => s.groundMax)
-  if (p.some((s) => s.surfaceMax > s.surface)) stored.surfaceMax = p.map((s) => s.surfaceMax)
+export function packProfile(samples: ProfileSample[], p: Params): StoredProfile {
+  const stored: StoredProfile = {
+    ground: samples.map((s) => s.ground),
+    surface: samples.map((s) => s.surface),
+  }
+  if (samples.some((s) => s.groundMax > s.ground)) {
+    stored.groundMax = samples.map((s) => s.groundMax)
+  }
+  if (samples.some((s) => s.surfaceMax > s.surface)) {
+    stored.surfaceMax = samples.map((s) => s.surfaceMax)
+  }
+  if (samples.some((s) => s.needed !== p.minClearance)) stored.needed = samples.map((s) => s.needed)
   return stored
 }
 
@@ -157,6 +190,7 @@ export function unpackProfile(
       surfaceMax: sp.surfaceMax?.[i] ?? surface,
       line: r2(lineHeightAt(hA, hB, sag, t)),
       halfWidth: r2(sideHalfWidthAt(t, length, p)),
+      needed: sp.needed?.[i] ?? p.minClearance,
     }
   })
 }

@@ -21,6 +21,11 @@ export const DEFAULT_PARAMS: Params = {
   // Enough that a walker plus sag does not scrape. Applies only outside anchorZone.
   minClearance: 3.0,
 
+  // What a line owes water instead. Falling in a lake is how a session ends; falling on ground is
+  // how one ends badly, so the figure over water is about not dragging rather than about safety.
+  // Islands inside lakes are ground and get the full 3 m -- see shared/water.ts.
+  waterClearance: 1.0,
+
   // Extra metres demanded where the line passes over traffic, on top of minClearance.
   //
   // For scale: German law wants 4.50 m over a road -- the 4.00 m a lorry may legally be, plus half
@@ -163,4 +168,8 @@ export const DEFAULT_AOIS: Aoi[] = [
   { south: 52.390088, west: 13.601721, north: 52.428357, east: 13.677498 },
   // Vehlen: 10.6 km2, further west again.
   { south: 52.422160, west: 12.297235, north: 52.444399, east: 12.360257 },
+  // Sperenberg: 1.9 km2 south of Berlin, around the old gypsum quarry.
+  { south: 52.134358, west: 13.367475, north: 52.141191, east: 13.392128 },
+  // Otto Lilienthal: 3.4 km2 west of Berlin, around the Gollenberg he flew from.
+  { south: 52.403294, west: 12.814322, north: 52.415410, east: 12.851882 },
 ]

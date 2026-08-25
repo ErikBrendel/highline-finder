@@ -23,6 +23,7 @@ function flatSpan(anchor = 50, floor = 20, length = 200, step = 5): ProfileSampl
     const ground = d === 0 || d === length ? anchor : floor
     out.push({
       d, ground, surface: ground, groundMax: ground, surfaceMax: ground, line: 0, halfWidth: 0,
+      needed: p.minClearance,
     })
   }
   return out
@@ -41,7 +42,7 @@ describe('lineHeightAt', () => {
 })
 
 describe('metricsAt', () => {
-  const profile = packProfile(flatSpan())
+  const profile = packProfile(flatSpan(), p)
 
   it('reports the deepest air gap as exposure and the tightest as clearance', () => {
     const m = metricsAt(profile, 200, 52, 52, 0.05, p)!
@@ -53,7 +54,7 @@ describe('metricsAt', () => {
 
   it('rejects the line once sag brings it into the ground', () => {
     // A floor 4 m below the anchors cannot take a 200 m span at any sag in range.
-    const shallow = packProfile(flatSpan(50, 46))
+    const shallow = packProfile(flatSpan(50, 46), p)
     expect(metricsAt(shallow, 200, 52, 52, 0.05, p)).toBeNull()
   })
 
@@ -67,6 +68,7 @@ describe('metricsAt', () => {
   it('counts canopy the line passes through without rejecting it', () => {
     const treed = packProfile(
       flatSpan().map((s) => ({ ...s, surface: s.d === 0 || s.d === 200 ? s.ground : 45 })),
+      p,
     )
     const m = metricsAt(treed, 200, 52, 52, 0.05, p)!
     expect(m.canopyBlockedFraction).toBeGreaterThan(0)
@@ -76,8 +78,9 @@ describe('metricsAt', () => {
 
 describe('scoreOf', () => {
   const base: Metrics = {
-    clearanceMin: 5, exposure: 20, canopyClearanceMin: 2, canopyBlockedFraction: 0,
-    clearanceDeficit: 0, crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
+    clearanceMin: 5, clearanceMargin: 2, exposure: 20, canopyClearanceMin: 2,
+    canopyBlockedFraction: 0, clearanceDeficit: 0, crossingDeficit: 0, worstCrossing: -1,
+    worstClearance: Infinity,
   }
 
   it('scales exposure logarithmically so big lines stay distinguishable', () => {
@@ -100,12 +103,13 @@ describe('penaltyOf', () => {
   const withBump = (from: number, to: number, top: number) =>
     packProfile(
       flatSpan().map((sm) => (sm.d >= from && sm.d <= to ? { ...sm, ground: top } : sm)),
+      p,
     )
   const measure = (sp: ReturnType<typeof withBump>) =>
     rawMetricsAt(sp, 200, 50, 50, 0.05, p)!
 
   it('costs a line that qualifies nothing at all', () => {
-    const m = metricsAt(packProfile(flatSpan()), 200, 50, 50, 0.05, p)!
+    const m = metricsAt(packProfile(flatSpan(), p), 200, 50, 50, 0.05, p)!
     expect(violationsOf(m, 200, 0, p)).toEqual([])
     expect(penaltyOf(m, 200, 0, p)).toBe(0)
   })
@@ -125,7 +129,7 @@ describe('penaltyOf', () => {
   })
 
   it('charges for every failure the planner lists, and for nothing it does not', () => {
-    const clean = metricsAt(packProfile(flatSpan()), 200, 50, 50, 0.05, p)!
+    const clean = metricsAt(packProfile(flatSpan(), p), 200, 50, 50, 0.05, p)!
     const cases: [Metrics, number, number][] = [
       [clean, 200, 0],
       [clean, 200, p.maxOffLevelRatio * 200 + 2],
@@ -144,8 +148,9 @@ describe('penaltyOf', () => {
 
 describe('violationsOf', () => {
   const at = (clearanceMin: number): Metrics => ({
-    clearanceMin, exposure: 40, canopyClearanceMin: 5, canopyBlockedFraction: 0,
-    clearanceDeficit: 0, crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
+    clearanceMin, clearanceMargin: clearanceMin - p.minClearance, exposure: 40,
+    canopyClearanceMin: 5, canopyBlockedFraction: 0, clearanceDeficit: 0, crossingDeficit: 0,
+    worstCrossing: -1, worstClearance: Infinity,
   })
 
   it('quotes the shortfall when the line is merely too low', () => {
@@ -167,7 +172,7 @@ describe('road crossings', () => {
    * The flat span, with the line 20 m over the floor at midspan once the sag is applied. Anything
    * demanding more than that is a crossing the line cannot make.
    */
-  const packed = packProfile(flatSpan())
+  const packed = packProfile(flatSpan(), p)
   const cross = (tier: 'path' | 'street' | 'highway', extra: Partial<Crossing> = {}): Crossing => ({
     d: 100, from: 96, to: 104, offset: 0, kind: 'test', tier, onBridge: false, ...extra,
   })
@@ -205,6 +210,7 @@ describe('road crossings', () => {
     // A deck 15 m over the floor leaves only 5 m of air, where the ground would have said 20.
     const decked = packProfile(
       flatSpan().map((sm) => (sm.d >= 90 && sm.d <= 110 ? { ...sm, surface: 35 } : sm)),
+      p,
     )
     const onGround = rawMetricsAt(decked, 200, 50, 50, 0.05, p, [cross('street')])!
     const onDeck = rawMetricsAt(decked, 200, 50, 50, 0.05, p, [cross('street', { onBridge: true })])!
@@ -218,6 +224,7 @@ describe('road crossings', () => {
     // it.
     const humped = packProfile(
       flatSpan().map((sm) => (sm.d === 105 ? { ...sm, ground: 38 } : sm)),
+      p,
     )
     const m = rawMetricsAt(humped, 200, 50, 50, 0.05, p, [
       cross('street', { d: 101, from: 97, to: 105 }),
@@ -255,7 +262,7 @@ describe('road crossings', () => {
 
 describe('rescoreAtSag', () => {
   const profile = flatSpan()
-  const packed = packProfile(profile)
+  const packed = packProfile(profile, p)
   const m = metricsAt(packed, 200, 52, 52, 0.05, p)!
   const candidate: Candidate = {
     id: 'x',
@@ -334,6 +341,7 @@ describe('rawMetricsAt', () => {
     const inner0 = p.anchorZone
     const inner1 = length - p.anchorZone
     let clearanceMin = Infinity
+    let clearanceMargin = Infinity
     let exposure = -Infinity
     let canopyClearanceMin = Infinity
     let blocked = 0
@@ -345,6 +353,7 @@ describe('rawMetricsAt', () => {
       if (clear > exposure) exposure = clear
       if (s.d < inner0 || s.d > inner1) continue
       if (clear < clearanceMin) clearanceMin = clear
+      if (clear - s.needed < clearanceMargin) clearanceMargin = clear - s.needed
       const canopy = s.line - s.surface
       if (canopy < canopyClearanceMin) canopyClearanceMin = canopy
       if (canopy < 0) blocked++
@@ -355,6 +364,7 @@ describe('rawMetricsAt', () => {
     }
     return {
       clearanceMin,
+      clearanceMargin,
       exposure,
       canopyClearanceMin,
       canopyBlockedFraction: blocked / n,

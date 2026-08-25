@@ -1,8 +1,9 @@
 import type { Pos } from '../shared/grid.js'
 import { RoadIndex } from '../shared/roads.js'
-import { blockKeysFor, decodeBlock, splitFeatures } from '../shared/osmBlocks.js'
+import { blockKeysFor, decodeBlock, splitFeatures, type Water } from '../shared/osmBlocks.js'
 import type { Roads } from '../shared/scene.js'
-import { bareGround, onBuilding } from './terrain.js'
+import { WaterMask, type WaterCover } from '../shared/water.js'
+import { WINDOW, bareGround, onBuilding } from './terrain.js'
 import { fetchCached } from './tileCache.js'
 
 /**
@@ -34,8 +35,8 @@ export const COVER_WATER = 2
 
 interface Block {
   roads: RoadIndex
-  /** Water outlines, as flat `[e, n, ...]` rings in EPSG:25833. */
-  water: number[][]
+  /** Water outlines and the islands standing in them. */
+  water: Water
 }
 
 /** Decoded blocks, and the ones still arriving. A block is fetched once per session. */
@@ -89,7 +90,7 @@ const keysFor = (a: Pos, b: Pos, margin = 500) =>
     Math.max(a.n, b.n) + margin,
   )
 
-const EMPTY: Block = { roads: new RoadIndex(), water: [] }
+const EMPTY: Block = { roads: new RoadIndex(), water: { rings: [], islands: [] } }
 
 /**
  * One block, or an empty one where the build produced none.
@@ -150,6 +151,50 @@ export function roadsFor(a: Pos, b: Pos): Roads | null {
 }
 
 /**
+ * Water as a bit per cell, one window at a time.
+ *
+ * The same shape as the elevation windows next door, and for the same reason: a line is measured
+ * across a band at a hundred and twenty stations, which is thousands of "is this water" questions
+ * per drag frame, and a point-in-polygon test against every lake outline in an 8 km block is not
+ * something to do thousands of times a second. Rasterised once per 256 m window and then read with
+ * a shift.
+ *
+ * A window whose block has not arrived reports no water, which is the strict reading: without the
+ * layer every sample is held to the full ground clearance.
+ */
+const waterWindows = new Map<string, WaterMask>()
+
+function waterAt(tx: number, ty: number): WaterMask {
+  const key = `${tx}_${ty}`
+  let mask = waterWindows.get(key)
+  if (mask) return mask
+  const e0 = tx * WINDOW
+  const n0 = ty * WINDOW
+  mask = new WaterMask({ w: WINDOW, h: WINDOW, e0, n1: n0 + WINDOW, res: 1 })
+  for (const k of blockKeysFor(e0, n0, e0 + WINDOW, n0 + WINDOW)) {
+    const block = held.get(k)
+    // Not loaded yet: leave the window unbuilt so it is rasterised again once the block arrives.
+    if (!block) return mask
+    mask.add(block.water)
+  }
+  waterWindows.set(key, mask)
+  return mask
+}
+
+/**
+ * The water layer, in the form the clearance rule takes.
+ *
+ * Module-level and always available, unlike `roadsFor`, because absence is already the answer it
+ * gives: no block, no water, full ground clearance. There is no reading of it that could pass a
+ * line the strict rule would reject.
+ */
+export const water: WaterCover = {
+  covers(e: number, n: number): boolean {
+    return waterAt(Math.floor(e / WINDOW), Math.floor(n / WINDOW)).covers(e, n)
+  },
+}
+
+/**
  * Standard ray cast over a flat `[e, n, ...]` ring, in projected metres.
  *
  * Projected rather than in latitude and longitude, which is what this used to take: the samples are
@@ -191,7 +236,9 @@ export interface Cover {
 export function coverAlong(a: Pos, b: Pos, count: number): Cover {
   const kind = new Uint8Array(count)
   const bare = new Float32Array(count)
-  const rings = keysFor(a, b).flatMap((k) => held.get(k)?.water ?? [])
+  const rings = keysFor(a, b).flatMap((k) => held.get(k)?.water.rings ?? [])
+  // An island is not a lake to draw a section through, so a sample standing on one is bare ground.
+  const islands = keysFor(a, b).flatMap((k) => held.get(k)?.water.islands ?? [])
   const last = count - 1
   for (let i = 0; i < count; i++) {
     const t = last > 0 ? i / last : 0
@@ -202,7 +249,9 @@ export function coverAlong(a: Pos, b: Pos, count: number): Cover {
       kind[i] = COVER_BUILDING
       continue
     }
-    if (rings.some((r) => inRing(r, e, n))) kind[i] = COVER_WATER
+    if (rings.some((r) => inRing(r, e, n)) && !islands.some((r) => inRing(r, e, n))) {
+      kind[i] = COVER_WATER
+    }
   }
   return { kind, bare }
 }

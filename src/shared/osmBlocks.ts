@@ -39,7 +39,7 @@ const UNITS_PER_M = 10
  * Water is here rather than in a file of its own because it comes from the same extract in the same
  * pass, and a line that crosses a lake usually crosses the road beside it too -- one fetch, not two.
  */
-export const OSM_KINDS = [...ROAD_TIERS, 'water', 'waterway'] as const
+export const OSM_KINDS = [...ROAD_TIERS, 'water', 'waterway', 'island'] as const
 
 export type OsmKind = (typeof OSM_KINDS)[number]
 
@@ -74,17 +74,31 @@ export interface OsmFeature {
 export function splitFeatures(
   features: OsmFeature[],
   seen: Set<number>,
-): { roads: RoadWay[]; water: number[][] } {
+): { roads: RoadWay[]; water: Water } {
   const roads: RoadWay[] = []
-  const water: number[][] = []
+  const water: Water = { rings: [], islands: [] }
   for (const f of features) {
     if (seen.has(f.id)) continue
     seen.add(f.id)
     if (isRoadKind(f.kind)) {
       roads.push({ tier: f.kind, kind: f.name, half: f.half, bridge: f.bridge, pts: f.pts })
-    } else if (f.kind === 'water') water.push(f.pts)
+    } else if (f.kind === 'water') water.rings.push(f.pts)
+    else if (f.kind === 'island') water.islands.push(f.pts)
   }
   return { roads, water }
+}
+
+/**
+ * Water outlines and the islands standing in them, as flat `[e, n, ...]` rings in EPSG:25833.
+ *
+ * Two lists rather than a winding rule, because they arrive as two lists: OSM multipolygons name
+ * their inner rings, so nothing has to be inferred from ring orientation -- which is a good thing,
+ * since orientation in OSM is not reliably maintained. A point is water when it is inside a ring
+ * and inside no island.
+ */
+export interface Water {
+  rings: number[][]
+  islands: number[][]
 }
 
 export const blockKey = (e: number, n: number) =>
