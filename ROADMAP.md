@@ -49,6 +49,10 @@ anchors only, one AOI, static viewer.
   flat square with a tower on it is skipped before the city model is consulted. The value of the
   suite is that it would say which.
 
+  Vehlen is the second entry and a different kind of evidence: highlines have been rigged there in
+  reality, and the search returns four candidates from 127,000 pairs in range. Somewhere between
+  those two numbers is a filter that is too strict, and a suite is what would name it.
+
 ## Physics
 
 - **Coupling the band to the sag control.** The band's half-width is `sideClearanceRatio` of the
