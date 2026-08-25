@@ -4,7 +4,11 @@ import { gridFrom } from '../pipeline/testing.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 import type { Params } from './types.js'
 
-const p = DEFAULT_PARAMS
+/**
+ * A fixed band width, not the shipped default: these test the mechanism, and pinning the number
+ * keeps them from turning red the next time the default is tuned.
+ */
+const p: Params = { ...DEFAULT_PARAMS, sideClearanceRatio: 0.04 }
 
 /** Flat ground at 20 m, with a wall of `height` running along `n = at` for `e` in [from, to]. */
 const withWall = (at: number, height: number, from = 0, to = 400) =>

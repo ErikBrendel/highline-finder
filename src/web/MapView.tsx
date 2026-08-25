@@ -348,7 +348,7 @@ function bandFeature(a: LatLon, b: LatLon, p: Params): GeoJSON.FeatureCollection
   const [ae, an] = toUtm33(a.lat, a.lon)
   const [be, bn] = toUtm33(b.lat, b.lon)
   const length = Math.hypot(be - ae, bn - an)
-  if (!(length > 0) || p.sideClearanceRatio <= 0) return emptyCollection
+  if (!(length > 0) || !(sideHalfWidthAt(0.5, length, p) > 0)) return emptyCollection
 
   const pe = -(bn - an) / length
   const pn = (be - ae) / length

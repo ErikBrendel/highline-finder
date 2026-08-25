@@ -204,6 +204,9 @@ describe('roof anchors', () => {
 })
 
 describe('band clearance', () => {
+  // Pinned rather than taken from the default, so tuning the width does not turn these red.
+  const p: Params = { ...DEFAULT_PARAMS, sideClearanceRatio: 0.04 }
+
   /**
    * The case the band exists for: two blocks with a corridor between them, and a line threaded
    * straight down it. On the centreline there is nothing but floor; three metres either side there

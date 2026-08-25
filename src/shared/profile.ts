@@ -21,9 +21,16 @@ import type { Params, ProfileSample, StoredProfile } from './types.js'
  * `4t(1-t)` peaks at 1 in the middle and vanishes at both ends, so the parameter reads directly as
  * the midspan half-width. Same shape as the sag curve because both are pinned at the same two
  * points -- and, as it happens, the same physics with the load turned sideways.
+ *
+ * A missing ratio means no band, which is exactly what a dataset generated before this existed was
+ * measured with. Worth guarding rather than trusting: the browser reads its parameters out of
+ * whichever `candidates.json` it was served, and NaN spreads silently here -- it would have drawn a
+ * band at undefined coordinates and, worse, made every `NaN > 0` road test fall through to "inside
+ * the band", quietly inventing crossings under planned lines.
  */
 export function sideHalfWidthAt(t: number, length: number, p: Params): number {
-  return 4 * t * (1 - t) * p.sideClearanceRatio * length
+  const ratio = p.sideClearanceRatio
+  return Number.isFinite(ratio) ? 4 * t * (1 - t) * ratio * length : 0
 }
 
 /**
