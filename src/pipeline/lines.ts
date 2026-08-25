@@ -3,7 +3,15 @@ import { bearingOf, oppositeBearing, sectorOf, toWgs84 } from '../shared/geo.js'
 import type { Anchor } from './openness.js'
 import type { Endpoint } from './hotspots.js'
 import type { AnchorOut, Candidate, Params } from '../shared/types.js'
-import { chooseHeights, lineHeightAt, maxFeasibleSag, rescoreAtSag } from '../shared/scoring.js'
+import {
+  chooseHeights,
+  lineHeightAt,
+  maxFeasibleSag,
+  rawMetricsAt,
+  rejectionOf,
+  rescoreAtSag,
+  type Reject,
+} from '../shared/scoring.js'
 import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
 import { buildProfile, packProfile } from '../shared/profile.js'
@@ -86,6 +94,26 @@ function clearsTerrain(
   return exposure >= p.minExposure
 }
 
+/**
+ * What a pair of positions turned out to be: a candidate, or the reason it was not one.
+ *
+ * The reason is reported rather than discarded because the pipeline draws where lines are dying and
+ * to what. A filter whose cost is invisible is a filter nobody can tune, and the clearance ladder
+ * over traffic is a stack of judgement calls waiting for that evidence.
+ */
+export interface Evaluated {
+  line: Candidate | null
+  reject: Reject | 'geometry' | 'length' | 'offlevel' | 'terrain' | null
+  /** Where the failure is, when it has a place: the crossing, for a line that passes too low. */
+  at: Pos | null
+}
+
+const failed = (reject: Evaluated['reject'], at: Pos | null = null): Evaluated => ({
+  line: null,
+  reject,
+  at,
+})
+
 export interface FindResult {
   /** Deduplicated but not capped; run.ts refines and caps. */
   candidates: Candidate[]
@@ -100,6 +128,10 @@ export interface FindResult {
   pairsLevelEnough: number
   pairsFeasible: number
   candidatesAfterDedup: number
+  /** How many pairs each hard constraint rejected, and where the road ones were. */
+  rejects: Record<string, number>
+  /** Positions of lines killed by a road crossing, so the map can show which roads are doing it. */
+  roadKills: Pos[]
 }
 
 /**
@@ -132,15 +164,15 @@ export function evaluateLine(
    * has: repeating it costs a full raster walk per surviving line and cannot change the answer.
    */
   terrainAlreadyChecked = false,
-): Candidate | null {
+): Evaluated {
   const gA = ground.nearest(a.e, a.n)
   const gB = ground.nearest(b.e, b.n)
-  if (Number.isNaN(gA) || Number.isNaN(gB)) return null
+  if (Number.isNaN(gA) || Number.isNaN(gB)) return failed('geometry')
 
   const dE = b.e - a.e
   const dN = b.n - a.n
   const length = Math.hypot(dE, dN)
-  if (length < p.minLength || length > p.maxLength) return null
+  if (length < p.minLength || length > p.maxLength) return failed('length')
 
   const onRoofA = scene.roofs?.covers(a.e, a.n) ?? false
   const onRoofB = scene.roofs?.covers(b.e, b.n) ?? false
@@ -153,14 +185,17 @@ export function evaluateLine(
     gB + rangeB.max,
     p.maxOffLevelRatio * length,
   )
-  if (!h) return null
+  if (!h) return failed('offlevel')
 
-  if (!terrainAlreadyChecked && !clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) return null
+  if (!terrainAlreadyChecked && !clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) {
+    return failed('terrain')
+  }
 
   // Round the scalars before anything is measured from them. The web app re-derives every
   // clearance from these serialised values, so measuring from the full-precision ones would let
   // the dataset contain candidates the UI immediately rejects -- a line whose clearance is exactly
   // at minClearance flips either side of the boundary on the last decimal.
+  const crossings = scene.roads?.crossings(a, b)
   const r2 = (v: number) => Math.round(v * 100) / 100
   const roundedLength = Math.round(length * 10) / 10
   const hA = r2(h.hA)
@@ -187,16 +222,30 @@ export function evaluateLine(
     score: 0,
     scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
     maxSagRatio: 0,
-    crossings: scene.roads?.crossings(a, b),
+    crossings,
     profile: packProfile(buildProfile(a, b, hA, hB, roundedLength, ground, surface, p)),
   }
+  /**
+   * Measured once and gated before anything expensive, which is both the cheaper order and the one
+   * that can say why. The loosest feasible sag costs a dozen more passes over the profile and is
+   * only wanted for a line that is going to be kept -- and better than nineteen in twenty are not.
+   */
+  const m = rawMetricsAt(provisional.profile!, roundedLength, hA, hB, p.sagRatio, p, crossings)
+  if (!m) return failed('geometry')
+  const reject = rejectionOf(m, p)
+  if (reject) {
+    const worst = reject === 'crossing' ? crossings?.[m.worstCrossing] : undefined
+    const t = worst ? worst.d / roundedLength : 0
+    return failed(reject, worst ? { e: a.e + dE * t, n: a.n + dN * t } : null)
+  }
+
   provisional.maxSagRatio = maxFeasibleSag(
     provisional.profile!, roundedLength, hA, hB, p, provisional.crossings,
   )
 
   // Every measured field is filled in by the same function the web app uses, so the two cannot
-  // disagree. Returns null if the line fails a hard constraint at the generation sag.
-  return rescoreAtSag(provisional, p.sagRatio, p)
+  // disagree. It re-measures, which is one pass over the profile for a line already known to keep.
+  return { line: rescoreAtSag(provisional, p.sagRatio, p), reject: null, at: null }
 }
 
 export interface TerrainPairs {
@@ -302,9 +351,15 @@ export function evaluatePairs(
 ): FindResult {
   const feasible: Candidate[] = []
   const endpoints: Endpoint[] = []
+  const rejects: Record<string, number> = {}
+  const roadKills: Pos[] = []
   for (const [a, b] of found.pairs) {
-    const c = evaluateLine(a, b, ground, surface, p, scene, true)
-    if (!c) continue
+    const { line: c, reject, at } = evaluateLine(a, b, ground, surface, p, scene, true)
+    if (!c) {
+      if (reject) rejects[reject] = (rejects[reject] ?? 0) + 1
+      if (at) roadKills.push(at)
+      continue
+    }
     feasible.push(c)
     // Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
     // rigged from here", and for a mixed line that is a mixed line at either end of it.
@@ -323,6 +378,8 @@ export function evaluatePairs(
     pairsLevelEnough: found.pairsLevelEnough,
     pairsFeasible: feasible.length,
     candidatesAfterDedup: candidates.length,
+    rejects,
+    roadKills,
   }
 }
 
@@ -405,7 +462,7 @@ export function refine(
         const fixed = end === 0 ? { e: best.b.e, n: best.b.n } : { e: best.a.e, n: best.a.n }
         for (const off of offsets) {
           const moved = { e: origin[end].e + off.e, n: origin[end].n + off.n }
-          const c = end === 0
+          const { line: c } = end === 0
             ? evaluateLine(moved, fixed, ground, surface, p, scene)
             : evaluateLine(fixed, moved, ground, surface, p, scene)
           evaluations++

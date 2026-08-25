@@ -195,7 +195,7 @@ describe('roof anchors', () => {
   })
 
   it('keeps the classification when refinement moves an anchor', () => {
-    const start = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, p, westRoof)!
+    const start = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, p, westRoof).line!
     expect(start.kind).toBe('mixed')
     const moved = refine([start], g, g, p, westRoof).candidates[0]!
     expect(moved.kind).toBe('mixed')
@@ -209,7 +209,7 @@ describe('refine', () => {
   const ridge = gridFrom(400, 400, (e, n) =>
     e <= 45 ? (n >= 198.5 ? 54 : 50) : e >= 255 ? 54 : 20,
   )
-  const start = evaluateLine({ e: 40, n: 197.5 }, { e: 260, n: 197.5 }, ridge, ridge, p)!
+  const start = evaluateLine({ e: 40, n: 197.5 }, { e: 260, n: 197.5 }, ridge, ridge, p).line!
 
   it('moves an anchor onto a nearby higher rim to level the line out', () => {
     expect(start.offLevel).toBeCloseTo(4 - p.aFrameMax, 1)

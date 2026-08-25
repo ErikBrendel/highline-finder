@@ -70,6 +70,15 @@ export interface BuildingsApplied {
   /** Tiles that carry at least one building. */
   tiles: string[]
   /**
+   * Roof cells found per tile, including tiles whose terrain was never loaded.
+   *
+   * Those are the interesting ones. The coarse pre-pass judges a tile on bare terrain, so a flat
+   * square with a thirty-metre building on it is skipped before the city model is ever consulted --
+   * and until this was counted there was no way to see how much that costs. Probing a skipped tile
+   * is 5-50 KB and answers it exactly.
+   */
+  cellsPerTile: Map<string, number>
+  /**
    * Which cells the ground was raised at, so later stages can still tell a roof from a hill once
    * the two have been merged into one grid. Anchoring depends on the difference -- see rigRange.
    */
@@ -88,7 +97,11 @@ export interface BuildingsApplied {
  */
 export async function raiseOntoBuildings(
   ground: Grid,
+  /** Every tile of the region. All are probed, so a skipped one still reports its buildings. */
   tiles: string[],
+  /** The subset whose terrain was loaded. Only these are raised: a roof over unloaded terrain
+   * would be a building standing on nothing. */
+  raiseOn: Set<string>,
 ): Promise<BuildingsApplied> {
   // Eight at a time: these are small requests against one server, and a region can be hundreds of
   // tiles, so serial would spend minutes on the first run doing nothing but waiting.
@@ -107,9 +120,14 @@ export async function raiseOntoBuildings(
   )
 
   const mask = RoofMask.forGrid(ground)
-  for (const { grid } of roofs) {
+  const cellsPerTile = new Map<string, number>()
+  for (const { tile, grid } of roofs) {
+    let cells = 0
+    for (const v of grid.data) if (!Number.isNaN(v)) cells++
+    cellsPerTile.set(tile, cells)
+    if (!raiseOn.has(tile)) continue
     mask.add(grid)
     blitGrid(grid, ground)
   }
-  return { tiles: roofs.map((r) => r.tile).sort(), mask }
+  return { tiles: roofs.map((r) => r.tile).sort(), mask, cellsPerTile }
 }

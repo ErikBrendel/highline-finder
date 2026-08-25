@@ -92,6 +92,12 @@ export const DEBUG_COLORS = {
   productive: '#22c55e',
   maskBelow: '#0b1220',
   maskAbove: '#38bdf8',
+  /** Roofs on ground the search looked at, and roofs on ground it never loaded. */
+  roofs: '#9aa4b8',
+  roofsMissed: '#f43f5e',
+  /** Lines killed by a road crossing, palest where one died and hottest where hundreds did. */
+  killsFew: '#3f2d1a',
+  killsMany: '#f97316',
 } as const
 
 const SCORE_COLOR: maplibregl.ExpressionSpecification = [
@@ -274,7 +280,10 @@ function maskGeoJson(m: MaskCells | null): GeoJSON.FeatureCollection {
  * The honest counterpart to the coarse mask: the mask shows what the pre-pass concluded at 16 m,
  * this shows what could actually be acted on, since the data arrives in 1 km tiles.
  */
-function tilesGeoJson(t: TileUsage | null, layer: 'terrain' | 'surface'): GeoJSON.FeatureCollection {
+/** Which per-tile question the squares are answering. */
+export type TileLayer = 'terrain' | 'surface' | 'buildings' | 'roads'
+
+function tilesGeoJson(t: TileUsage | null, layer: TileLayer): GeoJSON.FeatureCollection {
   if (!t) return { type: 'FeatureCollection', features: [] }
   return {
     type: 'FeatureCollection',
@@ -285,8 +294,11 @@ function tilesGeoJson(t: TileUsage | null, layer: 'terrain' | 'surface'): GeoJSO
       return {
         type: 'Feature',
         properties: {
-          fetched: (layer === 'terrain' ? t.terrain[i] : t.surface[i]) ? 1 : 0,
+          fetched: (layer === 'surface' ? t.surface[i] : t.terrain[i]) ? 1 : 0,
           anchors: t.anchors[i]!,
+          roofCells: t.roofCells?.[i] ?? 0,
+          roadKills: t.roadKills?.[i] ?? 0,
+          layer,
         },
         geometry: {
           type: 'Polygon',
@@ -342,7 +354,7 @@ interface Props {
   hotspots: HotspotArrays | null
   mask: MaskCells | null
   tiles: TileUsage | null
-  tileLayer: 'terrain' | 'surface'
+  tileLayer: TileLayer
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
   custom: CustomPoints
@@ -453,16 +465,43 @@ export function MapView({
         type: 'fill',
         source: 'tiles',
         paint: {
-          // Fetched and productive is green; fetched for nothing is amber, which is the filter
-          // being too loose; skipped is dark, and a dark tile beside a busy one is it being too
-          // tight.
+          /**
+           * One expression for all four views, because the squares and their geometry are the same
+           * question asked four ways and a second source would only drift from the first.
+           *
+           *   terrain / surface -- green where the fetch paid off, amber where it bought nothing
+           *     (the filter too loose), dark where it was skipped (dark beside green: too tight)
+           *   buildings -- grey where roofs stand on ground the search loaded, red where they
+           *     stand on ground it never looked at, which is the pre-pass judging on bare earth
+           *   roads -- heat by how many lines died to a crossing here
+           */
           'fill-color': [
             'case',
+            ['==', ['get', 'layer'], 'buildings'], [
+              'case',
+              ['==', ['get', 'roofCells'], 0], DEBUG_COLORS.skipped,
+              ['==', ['get', 'fetched'], 0], DEBUG_COLORS.roofsMissed,
+              DEBUG_COLORS.roofs,
+            ],
+            ['==', ['get', 'layer'], 'roads'], [
+              'case',
+              ['==', ['get', 'roadKills'], 0], DEBUG_COLORS.skipped,
+              ['interpolate', ['linear'], ['get', 'roadKills'],
+                1, DEBUG_COLORS.killsFew,
+                500, DEBUG_COLORS.killsMany,
+              ],
+            ],
             ['==', ['get', 'fetched'], 0], DEBUG_COLORS.skipped,
             ['==', ['get', 'anchors'], 0], DEBUG_COLORS.barren,
             DEBUG_COLORS.productive,
           ],
-          'fill-opacity': ['case', ['==', ['get', 'fetched'], 0], 0.55, 0.22],
+          'fill-opacity': [
+            'case',
+            ['==', ['get', 'layer'], 'buildings'], ['case', ['==', ['get', 'roofCells'], 0], 0.35, 0.5],
+            ['==', ['get', 'layer'], 'roads'], ['case', ['==', ['get', 'roadKills'], 0], 0.35, 0.65],
+            ['==', ['get', 'fetched'], 0], 0.55,
+            0.22,
+          ],
         },
       })
       m.addLayer({

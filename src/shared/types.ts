@@ -403,6 +403,20 @@ export interface TileUsage {
   surface: boolean[]
   /** Anchors the exact 1 m scan found in it. Zero means the terrain fetch bought nothing. */
   anchors: number[]
+  /**
+   * Roof cells the city model found here, whether or not the terrain was loaded.
+   *
+   * A tile with roofs and no terrain is the coarse pre-pass's blind spot made visible: it judges a
+   * tile on bare earth, so a flat square with a tall building on it is skipped before the city
+   * model is consulted. Probing skipped tiles costs 5-50 KB each and turns that from a suspicion
+   * into a number.
+   */
+  roofCells: number[]
+  /**
+   * Lines rejected for passing too low over traffic, counted at the crossing rather than at an
+   * anchor -- the point of the layer is to show which roads are killing lines.
+   */
+  roadKills: number[]
 }
 
 export interface Dataset {

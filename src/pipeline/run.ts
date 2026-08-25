@@ -158,7 +158,10 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
    */
   const built = await stage(`[2/6] terrain and buildings (${label})`, async () => {
     const ground = await loadProduct('dgm', bbox, 1, wantedTiles ?? undefined)
-    return { ground, buildings: await raiseOntoBuildings(ground, groundTiles) }
+    // Every tile is probed for buildings, not just the ones the pre-pass kept: what a skipped tile
+    // holds is the only way to see what judging tiles on bare earth costs. Only the kept ones are
+    // raised.
+    return { ground, buildings: await raiseOntoBuildings(ground, allTiles, new Set(groundTiles)) }
   })
   const ground = built.ground
   const roofs = built.buildings.mask
@@ -167,10 +170,20 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
       `${ext.min.toFixed(2)}..${ext.max.toFixed(2)} m (relief ${(ext.max - ext.min).toFixed(1)} m)`,
   )
+  const skippedWithRoofs = [...built.buildings.cellsPerTile]
+    .filter(([tile, cells]) => cells > 0 && !groundTiles.includes(tile))
   console.log(
-    `  ${built.buildings.tiles.length} of ${groundTiles.length} tiles carry a building, ` +
+    `  ${built.buildings.tiles.length} of ${allTiles.length} tiles carry a building, ` +
       `ground raised at ${roofs.count()} cells`,
   )
+  if (skippedWithRoofs.length) {
+    // The coarse pre-pass judges a tile on bare earth, so this is what that costs: ground the
+    // search never looked at, that has something standing on it worth anchoring to. See ROADMAP.
+    const cells = skippedWithRoofs.reduce((s, [, c]) => s + c, 0)
+    console.log(
+      `  ${skippedWithRoofs.length} tiles the pre-pass skipped carry ${cells} roof cells anyway`,
+    )
+  }
 
   const scan = await stage('[3/6] openness scan', () => scanAnchors(ground, p, roofs))
   // Ground merged in between two AOIs is read for profiles but never searched.
@@ -244,6 +257,10 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       `(${pct2(r.pairsFeasible, r.pairsLevelEnough)} of those tested)`,
   )
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
+  const rejected = Object.entries(r.rejects).sort((x, y) => y[1] - x[1])
+  if (rejected.length) {
+    console.log(`  rejected by  ${rejected.map(([why, n]) => `${n} ${why}`).join(', ')}`)
+  }
 
   const ref = await stage('[6/6] local refinement', () =>
     refine(r.candidates, ground, surface, p, scene),
@@ -259,7 +276,14 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
     anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
   }
-  const tiles: TileUsage = { size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [] }
+  const killsPerTile = new Map<string, number>()
+  for (const at of r.roadKills) {
+    const key = `${Math.floor(at.e / 1000)}_${Math.floor(at.n / 1000)}`
+    killsPerTile.set(key, (killsPerTile.get(key) ?? 0) + 1)
+  }
+  const tiles: TileUsage = {
+    size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [], roofCells: [], roadKills: [],
+  }
   for (const id of allTiles) {
     const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
     const { lat, lon } = toWgs84(e * 1000 + 500, n * 1000 + 500)
@@ -268,6 +292,8 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
     tiles.surface.push(wanted.has(id))
     tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
+    tiles.roofCells.push(built.buildings.cellsPerTile.get(id) ?? 0)
+    tiles.roadKills.push(killsPerTile.get(`${e}_${n}`) ?? 0)
   }
 
   const r6 = (v: number) => Math.round(v * 1e6) / 1e6
@@ -518,6 +544,8 @@ async function main() {
     terrain: tileUse.flatMap((t) => t.terrain),
     surface: tileUse.flatMap((t) => t.surface),
     anchors: tileUse.flatMap((t) => t.anchors),
+    roofCells: tileUse.flatMap((t) => t.roofCells),
+    roadKills: tileUse.flatMap((t) => t.roadKills),
   }
   await writeFile(TILES_OUT, JSON.stringify(tiles))
   const barren = tiles.terrain.filter((t, i) => t && tiles.anchors[i] === 0).length

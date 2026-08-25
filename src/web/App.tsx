@@ -31,7 +31,7 @@ import { emitProbes } from './probeOverlay.js'
 const OFFER_MS = 2000
 import { toWgs84 } from '../shared/geo.js'
 
-type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface'
+type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roads'
 
 /** What each anchor class actually means for the trip, which the word alone does not say. */
 const KIND_HELP: Record<LineKind, string> = {
@@ -76,15 +76,63 @@ function DebugLegend({
           {mask.sourceRes} m grid that costs almost nothing to fetch, and drawn here in{' '}
           {mask.res} m squares that each take the steepest reading inside them. Source data arrives
           in 1 km tiles, so this verdict is acted on a tile at a time: compare it with the terrain
-          view, whose squares are eight times wider, to see that gap.
+          view, whose squares are eight times wider, to see that gap. It measures bare earth, which
+          is its other blind spot &mdash; the buildings view counts what that skips.
         </div>
       </div>
     )
   }
 
   if (!tiles) return null
-  const fetched = (layer === 'terrain' ? tiles.terrain : tiles.surface).filter(Boolean).length
+  const fetched = (layer === 'surface' ? tiles.surface : tiles.terrain).filter(Boolean).length
   const barren = tiles.terrain.filter((t, i) => t && tiles.anchors[i] === 0).length
+
+  if (layer === 'buildings') {
+    const withRoofs = tiles.roofCells.filter((c) => c > 0).length
+    const missed = tiles.roofCells.filter((c, i) => c > 0 && !tiles.terrain[i])
+    const missedCells = missed.reduce((s, c) => s + c, 0)
+    return (
+      <div className="legendbox">
+        <h3>Buildings</h3>
+        {key(DEBUG_COLORS.roofs, 0.5, 'roofs on ground the search loaded — anchors and obstacles')}
+        {key(DEBUG_COLORS.roofsMissed, 0.5, 'roofs the search never saw — the pre-pass skipped this tile')}
+        {key(DEBUG_COLORS.skipped, 0.35, 'no buildings')}
+        <div className="stat">
+          {withRoofs} of {tiles.lat.length} tiles carry a building;{' '}
+          {missed.length} of those were skipped ({missedCells.toLocaleString()} roof cells unseen)
+        </div>
+        <div className="about">
+          The city model is asked about every tile, including the ones the coarse pass rejected, at
+          5&ndash;50 KB each. Red is what that pass costs: it judges a tile on bare earth, so a flat
+          square with a thirty-metre building on it is skipped before any roof is known about. A red
+          tile is ground with something worth anchoring to that the search never looked at.
+        </div>
+      </div>
+    )
+  }
+
+  if (layer === 'roads') {
+    const killed = tiles.roadKills.reduce((s, n) => s + n, 0)
+    const worst = Math.max(0, ...tiles.roadKills)
+    return (
+      <div className="legendbox">
+        <h3>Lines killed by a road</h3>
+        {key(DEBUG_COLORS.killsMany, 0.65, 'many died here')}
+        {key(DEBUG_COLORS.killsFew, 0.65, 'a few died here')}
+        {key(DEBUG_COLORS.skipped, 0.35, 'none')}
+        <div className="stat">
+          {killed.toLocaleString()} lines rejected for passing too low over traffic, worst tile{' '}
+          {worst.toLocaleString()}
+        </div>
+        <div className="about">
+          Counted at the crossing rather than at an anchor, so a bright square is a road doing the
+          killing rather than a place lines start from. This is the only filter whose numbers are
+          pure judgement &mdash; a footpath asks for nothing extra and a railway for twenty metres
+          &mdash; so it is the one worth looking at before changing them.
+        </div>
+      </div>
+    )
+  }
 
   if (layer === 'terrain') {
     return (
@@ -283,7 +331,7 @@ export function App() {
    * Cycles the debug views: the coarse pre-pass, then what was actually fetched per source tile for
    * terrain and for surface. Off by default -- these are views of the pipeline, not of the terrain.
    */
-  const DEBUG_ORDER = ['none', 'coarse', 'terrain', 'surface'] as const
+  const DEBUG_ORDER = ['none', 'coarse', 'terrain', 'surface', 'buildings', 'roads'] as const
   const cycleDebug = () => {
     const next = DEBUG_ORDER[(DEBUG_ORDER.indexOf(debugLayer) + 1) % DEBUG_ORDER.length]!
     setDebugLayer(next)
@@ -302,6 +350,8 @@ export function App() {
     coarse: 'coarse pre-pass',
     terrain: 'terrain tiles',
     surface: 'surface tiles',
+    buildings: 'buildings',
+    roads: 'road kills',
   }
 
   useEffect(() => {
@@ -891,8 +941,8 @@ export function App() {
             anchorDump={anchorDump}
             hotspots={showHotspots ? shownHotspots : null}
             mask={debugLayer === 'coarse' ? mask : null}
-            tiles={debugLayer === 'terrain' || debugLayer === 'surface' ? tiles : null}
-            tileLayer={debugLayer === 'surface' ? 'surface' : 'terrain'}
+            tiles={debugLayer === 'none' || debugLayer === 'coarse' ? null : tiles}
+            tileLayer={debugLayer === 'coarse' || debugLayer === 'none' ? 'terrain' : debugLayer}
             initialBbox={initial.bbox}
             custom={custom}
             showLines={showLines}

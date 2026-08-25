@@ -213,6 +213,26 @@ export function rawMetricsAt(
   }
 }
 
+/**
+ * Which hard constraint rejects a measured line, or null if none does.
+ *
+ * The single list of gates, so the search, the validity check and the diagnostics cannot drift
+ * apart about what disqualifies a line. Named rather than boolean because the pipeline reports
+ * where lines are dying and to what -- a filter you cannot see the cost of is a filter you cannot
+ * tune, and the clearance ladder over traffic is a pile of judgement calls waiting for exactly that
+ * evidence.
+ */
+export type Reject = 'clearance' | 'exposure' | 'crossing' | 'canopy'
+
+export function rejectionOf(m: Metrics, p: Params): Reject | null {
+  if (m.clearanceMin < p.minClearance) return 'clearance'
+  if (m.exposure < p.minExposure) return 'exposure'
+  // A hard constraint, like terrain and unlike canopy: a line six metres over a Bundesstraße is not
+  // something anyone rigs, and reporting it with a low score would be reporting it as a candidate.
+  if (m.crossingDeficit > 0) return 'crossing'
+  return m.canopyBlockedFraction > p.maxCanopyBlocked ? 'canopy' : null
+}
+
 /** The same, plus the validity gate. Null when the line is not a candidate. */
 export function metricsAt(
   sp: StoredProfile,
@@ -224,12 +244,7 @@ export function metricsAt(
   crossings: Crossing[] = [],
 ): Metrics | null {
   const m = rawMetricsAt(sp, length, hA, hB, sagRatio, p, crossings)
-  if (!m) return null
-  if (m.clearanceMin < p.minClearance || m.exposure < p.minExposure) return null
-  // A hard constraint, like terrain and unlike canopy: a line six metres over a Bundesstraße is not
-  // something anyone rigs, and reporting it with a low score would be reporting it as a candidate.
-  if (m.crossingDeficit > 0) return null
-  return m.canopyBlockedFraction > p.maxCanopyBlocked ? null : m
+  return m && !rejectionOf(m, p) ? m : null
 }
 
 /**
