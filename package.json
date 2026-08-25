@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "downsample": "tsx src/pipeline/downsample.ts"
+    "downsample": "tsx src/pipeline/downsample.ts",
+    "osm": "tsx src/tools/osmRefresh.ts"
   },
   "dependencies": {
     "fflate": "^0.8.2",
@@ -30,6 +31,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "pbf": "^5.1.2",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",

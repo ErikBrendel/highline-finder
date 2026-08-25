@@ -215,15 +215,15 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
   /**
-   * The road network, for the same corridors and for the same reason: only ground a line actually
-   * crosses can put traffic under it. Fetched here rather than with the terrain because the
-   * corridor set is not known until the pair search has run.
+   * The road network. Read from the committed blocks rather than fetched, so this costs a few
+   * hundred milliseconds and nothing at all from any third party -- see src/pipeline/roads.ts.
+   * Loaded for the whole region rather than per corridor, since it is cheap enough not to bother.
    */
-  const roads = await stage('[5/6] roads under those corridors', () => loadRoads(used))
+  const roads = await stage('[5/6] roads and railways', () => loadRoads(bbox))
   console.log(
-    `  ${roads.ways} ways in ${roads.index.segments} segments  ` +
-      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})` +
-      (roads.fetched ? `, ${roads.fetched} block(s) fetched` : ', all cached'),
+    `  ${roads.ways.toLocaleString()} ways in ${roads.index.segments.toLocaleString()} segments ` +
+      `from ${roads.blocks}/${roads.wanted} blocks  ` +
+      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})`,
   )
   const scene = { roofs, roads: roads.index }
 

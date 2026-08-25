@@ -121,9 +121,39 @@ draws. Tunnels are ignored — a road in a tunnel is under the ground the line i
 against — and a bridge is measured against its deck, which the terrain model has no idea exists but
 the photogrammetric surface model does.
 
-A failed road fetch is fatal to a pipeline run and stated loudly in the browser. Every other layer
-can fail soft; this one cannot, because "no roads here" and "roads not checked" produce the same
-silence and only one of them means the line is safe to believe.
+### The OSM data ships with the app
+
+Roads and water used to be fetched from the public Overpass API at run time, by the pipeline and the
+browser separately. That was wrong twice over. It is a shared community service, and asking it for a
+state's road network got this project's machine refused outright — 112 one-square-kilometre queries
+was enough. And the two halves asked it independently, so they could disagree about what a line
+passes over, which is the exact thing the project refuses to allow for terrain and roofs.
+
+So `npm run osm` extracts it once from a Geofabrik dump and commits the result:
+
+```
+brandenburg-latest.osm.pbf   285 MB   downloaded once, cached, gitignored
+  ↓  1.1 M roads, 36 k railways, 29 k water outlines
+src/web/public/osm/*.bin      32 MB   702 blocks of 8 km, committed via Git LFS
+```
+
+Coordinates are decimetres of EPSG:25833, delta-encoded along each way, gzipped — about four bytes
+per point. A tenth of a metre is finer than anything else here measures (the rasters are 1 m), and
+it is what keeps a crossing's position along a span exact enough to draw.
+
+The pipeline reads the blocks its region touches; the browser fetches the one to four a line needs
+and keeps them in the same IndexedDB store as the elevation windows. **Neither asks anything of a
+third party at run time**, and both read the identical bytes, so a planned line and a found one
+cannot disagree. A block that is not in `index.json` means there is genuinely nothing in that
+square; a block that *is* listed and will not load is a broken deployment, and says so.
+
+The script is deliberately separate from the search pipeline: that one is about one area of interest
+and re-runs whenever a parameter changes, this one is about the whole state and changes only when
+OpenStreetMap does.
+
+**Working on this repo needs `git lfs install` first**, and the Pages workflow checks out with
+`lfs: true`. Without either, the blocks arrive as 130-byte pointer files and every one of them reads
+as empty.
 
 ### Natural, mixed and urban
 
@@ -198,7 +228,7 @@ tile — so growing an area of interest still only fetches what it added.
 | Ground | `dgm` — LiDAR terrain model | 1 m grid | **Hard constraint.** The line must clear it. |
 | Vegetation + structures | `bdom` — photogrammetric surface model | 0.2 m grid | **Scored, not enforced.** How much canopy the line runs through. |
 | Buildings | `3d_gebaeude` — LoD1 CityGML | per building | **Hard constraint, and an anchor.** Merged into the ground layer, so a line must clear a roof and may also be rigged off one. |
-| Roads and rail | OpenStreetMap via Overpass | vector centrelines | **Hard constraint.** Raises the clearance the line owes wherever it passes over traffic. |
+| Roads and rail | OpenStreetMap, shipped with the app | vector centrelines | **Hard constraint.** Raises the clearance the line owes wherever it passes over traffic. |
 
 Heights are metres above sea level in DHHN2016. Measured agreement between the two models on
 open ground is ±0.2 m, which is the practical accuracy ceiling of the whole project.

@@ -20,6 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The OpenStreetMap blocks under src/web/public/osm/ are LFS objects. Without this the
+          # checkout leaves 130-byte pointer files in their place, the build happily copies those
+          # into dist/, and the deployed planner reads every block as empty -- so it would stop
+          # asking for height over roads with no error anywhere.
+          lfs: true
 
       - uses: actions/setup-node@v7
         with:

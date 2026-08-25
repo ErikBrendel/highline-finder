@@ -18,7 +18,7 @@ import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, onBuilding, roofs, surfaceSampler } from './terrain.js'
-import { coverAlong, ensureCover, roadsFailed, roadsFor } from './landcover.js'
+import { coverAlong, coverFailed, ensureCover, roadsFor } from './landcover.js'
 
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
@@ -359,22 +359,18 @@ export function App() {
   /**
    * The layers a planned line is measured against, beyond the two elevation rasters.
    *
-   * Roads are null until the corridor's Overpass request lands, and null is not "no roads" -- it is
-   * "not yet known". So `roadState` below reports which of the two it is, and the panel says so
-   * rather than presenting an unchecked line as a valid one.
+   * Roads are null until the corridor's blocks have been read, and null is not "no roads" -- it is
+   * "not yet known". `roadState` reports which of the three it is, so the panel never presents an
+   * unchecked line as a valid one. Failure now means only one thing: the blocks ship with the app,
+   * so a block the index lists and the server will not serve is a broken deployment.
    */
   const scene = useMemo(() => {
     void coverVersion
     return { roofs, roads: customUtm ? roadsFor(customUtm.a, customUtm.b) : null }
   }, [customUtm, coverVersion])
 
-  const roadState: 'ok' | 'loading' | 'failed' = !customUtm
-    ? 'ok'
-    : scene.roads
-      ? 'ok'
-      : roadsFailed(customUtm.a, customUtm.b)
-        ? 'failed'
-        : 'loading'
+  const roadState: 'ok' | 'loading' | 'failed' =
+    !customUtm || scene.roads ? 'ok' : coverFailed(customUtm.a, customUtm.b) ? 'failed' : 'loading'
 
   /**
    * The planned line, measured by the same code the search uses.

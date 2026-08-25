@@ -344,8 +344,9 @@ export function Details({
           <div>
             {roadState === 'loading'
               ? 'Clearance over roads and railways is not in the figures below yet.'
-              : 'OpenStreetMap could not be reached, so nothing below accounts for roads or ' +
-                'railways under this line. Move an anchor to retry.'}
+              : 'The road data that ships with this app did not load, so nothing below accounts ' +
+                'for roads or railways under this line. This is a broken deployment rather than ' +
+                'something you did.'}
           </div>
         </div>
       )}

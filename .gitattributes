@@ -1,0 +1,8 @@
+# The OpenStreetMap blocks are generated binary, ~32 MB in total and rewritten wholesale by
+# `npm run osm`. In plain git every regeneration would add another 32 MB to the history for ever;
+# in LFS the history holds pointers and only the current objects are fetched.
+#
+# Two things have to be true for the deployed site to work: `git lfs install` on any machine that
+# commits them, and `lfs: true` on the checkout step in .github/workflows/pages.yml. Without the
+# second, the build publishes 130-byte pointer files and every block silently reads as empty.
+src/web/public/osm/*.bin filter=lfs diff=lfs merge=lfs -text

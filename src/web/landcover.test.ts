@@ -18,23 +18,22 @@ describe('coverRuns', () => {
 })
 
 describe('inRing', () => {
-  // An L, so a point inside the bounding box but outside the polygon is distinguishable.
-  const l = [
-    { lat: 0, lon: 0 },
-    { lat: 0, lon: 4 },
-    { lat: 1, lon: 4 },
-    { lat: 1, lon: 1 },
-    { lat: 4, lon: 1 },
-    { lat: 4, lon: 0 },
-    { lat: 0, lon: 0 },
-  ]
+  // An L in projected metres, so a point inside the bounding box but outside the polygon is
+  // distinguishable. Flat [e, n, ...], which is how the shipped blocks store outlines.
+  const l = [0, 0, 4, 0, 4, 1, 1, 1, 1, 4, 0, 4, 0, 0]
 
   it('accepts a point in the polygon and rejects one merely in its bounding box', () => {
-    expect(inRing(l, 0.5, 2)).toBe(true)
+    expect(inRing(l, 2, 0.5)).toBe(true)
     expect(inRing(l, 3, 3)).toBe(false)
   })
 
   it('rejects a point outside altogether', () => {
     expect(inRing(l, 5, 5)).toBe(false)
+  })
+
+  it('holds along the whole of the long arms, not just near the corner', () => {
+    expect(inRing(l, 3.9, 0.5)).toBe(true)
+    expect(inRing(l, 0.5, 3.9)).toBe(true)
+    expect(inRing(l, 4.1, 0.5)).toBe(false)
   })
 })
