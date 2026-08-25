@@ -89,5 +89,20 @@ export function workAreas(aois: Aoi[], reach: number): WorkArea[] {
       }
     }
   }
-  return areas
+
+  /**
+   * Smallest first, so a run that is going to go wrong goes wrong early.
+   *
+   * Regions are independent, so the order is free -- and the order that costs nothing is the one
+   * where a crash, a bad number or a performance regression shows up in the first thirty seconds
+   * rather than after half an hour of the largest area. Region 2 alone is most of a run here; a
+   * mistake that surfaces only there is a mistake found expensively.
+   *
+   * Ties break on the bounding box's south-west corner, so the order is stable across runs and two
+   * areas of identical size cannot swap places between them.
+   */
+  return areas.sort((a, b) => {
+    const size = (w: WorkArea) => (w.bbox.maxE - w.bbox.minE) * (w.bbox.maxN - w.bbox.minN)
+    return size(a) - size(b) || a.bbox.minE - b.bbox.minE || a.bbox.minN - b.bbox.minN
+  })
 }

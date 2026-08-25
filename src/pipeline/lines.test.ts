@@ -271,36 +271,44 @@ describe('water clearance', () => {
   const ends: [Pos, Pos] = [{ e: 40, n: 200 }, { e: 260, n: 200 }]
   const lake = (covers: (e: number, n: number) => boolean) => ({ water: { covers } })
 
+  /**
+   * Rejection is asserted on the verdict rather than on which gate reached it.
+   *
+   * The cheap terrain gate reads the water layer too, so for a line over dry ground it now catches
+   * the failure before the profile gate does and reports 'terrain' rather than 'clearance'. Both
+   * are the same answer, and pinning the test to one of them would be testing the funnel's shape.
+   */
+  const accepts = (scene: object) => evaluateLine(...ends, shallow, shallow, loose, scene).line
+
+  const loose = { ...p, minExposure: 0 }
+
   it('rejects over ground and accepts the same line over water', () => {
-    const p2 = { ...p, minExposure: 0 }
-    expect(evaluateLine(...ends, shallow, shallow, p2).reject).toBe('clearance')
-    expect(evaluateLine(...ends, shallow, shallow, p2, lake(() => true)).line).not.toBeNull()
+    expect(accepts({})).toBeNull()
+    expect(accepts(lake(() => true))).not.toBeNull()
   })
 
   it('holds the line to the ground figure over an island in that water', () => {
     // Water everywhere except a 40 m island across the middle of the span, which is where the line
-    // is lowest. One dry sample is enough, and should be.
-    const p2 = { ...p, minExposure: 0 }
-    const withIsland = lake((e: number) => e < 130 || e > 170)
-    expect(evaluateLine(...ends, shallow, shallow, p2, withIsland).reject).toBe('clearance')
+    // is lowest. One dry sample is enough, and should be -- the contrast with the all-water case
+    // above is what pins the island as the cause rather than anything else about the fixture.
+    expect(accepts(lake((e: number) => e < 130 || e > 170))).toBeNull()
   })
 
   it('holds the line to the ground figure where the band reaches a bank', () => {
     // The centreline is over water for the whole span; the band is not. A walker swinging sideways
-    // lands on the bank, so the bank is what the clearance is owed to.
-    const p2 = { ...p, minExposure: 0 }
-    const narrowChannel = lake((_e: number, n: number) => Math.abs(n - 200) < 2)
-    expect(evaluateLine(...ends, shallow, shallow, p2, narrowChannel).reject).toBe('clearance')
+    // lands on the bank, so the bank is what the clearance is owed to -- and the cheap gate, which
+    // only reads the centreline, lets this through for the band to catch.
+    const narrow = evaluateLine(...ends, shallow, shallow, loose, {
+      water: { covers: (_e: number, n: number) => Math.abs(n - 200) < 2 },
+    })
+    expect(narrow.reject).toBe('clearance')
     // Widen the channel past the band and the same line is fine again.
-    const wideChannel = lake((_e: number, n: number) => Math.abs(n - 200) < 12)
-    expect(evaluateLine(...ends, shallow, shallow, p2, wideChannel).line).not.toBeNull()
+    expect(accepts(lake((_e: number, n: number) => Math.abs(n - 200) < 12))).not.toBeNull()
   })
 
   it('reports the real gap, not one adjusted for what it is over', () => {
-    const p2 = { ...p, minExposure: 0 }
-    const c = evaluateLine(...ends, shallow, shallow, p2, lake(() => true)).line!
     // 1.5 m of air is what there is, and what the panel has to say, even though it passes.
-    expect(c.clearanceMin).toBeCloseTo(1.5, 1)
+    expect(accepts(lake(() => true))!.clearanceMin).toBeCloseTo(1.5, 1)
   })
 })
 

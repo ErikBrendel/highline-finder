@@ -206,8 +206,33 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     console.log(`  inside an AOI             ${anchors.length}`)
   }
 
+  /**
+   * The road network. Read from the committed blocks rather than fetched, so this costs a few
+   * hundred milliseconds and nothing at all from any third party -- see src/pipeline/roads.ts.
+   * Loaded for the whole region rather than per corridor, since it is cheap enough not to bother.
+   */
+  const roads = await stage('[4/6] roads and water', () => loadRoads(bbox))
+  console.log(
+    `  ${roads.ways.toLocaleString()} ways in ${roads.index.segments.toLocaleString()} segments ` +
+      `from ${roads.blocks}/${roads.wanted} blocks  ` +
+      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})`,
+  )
+  /**
+   * Water, rasterised onto the terrain grid so a sample can ask about it as cheaply as it asks the
+   * elevation. Islands are punched back out -- a wooded island in a lake is ground with trees on
+   * it, and offering a line one metre of clearance over it would be exactly backwards.
+   */
+  const water = new WaterMask(ground)
+  water.add(roads.water)
+  console.log(
+    `  ${roads.water.rings.length.toLocaleString()} water outlines with ` +
+      `${roads.water.islands.length.toLocaleString()} islands, ` +
+      `${(water.cells / 1e6).toFixed(1)}M cells of the grid under water`,
+  )
+  const scene = { roofs, roads: roads.index, water }
+
   const found = await stage('[4/6] pairing and terrain test', () =>
-    terrainPairs(anchors, ground, p),
+    terrainPairs(anchors, ground, p, scene),
   )
 
   /**
@@ -228,30 +253,6 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-  /**
-   * The road network. Read from the committed blocks rather than fetched, so this costs a few
-   * hundred milliseconds and nothing at all from any third party -- see src/pipeline/roads.ts.
-   * Loaded for the whole region rather than per corridor, since it is cheap enough not to bother.
-   */
-  const roads = await stage('[5/6] roads and railways', () => loadRoads(bbox))
-  console.log(
-    `  ${roads.ways.toLocaleString()} ways in ${roads.index.segments.toLocaleString()} segments ` +
-      `from ${roads.blocks}/${roads.wanted} blocks  ` +
-      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})`,
-  )
-  /**
-   * Water, rasterised onto the terrain grid so a sample can ask about it as cheaply as it asks the
-   * elevation. Islands are punched back out -- a wooded island in a lake is ground with trees on
-   * it, and offering a line one metre of clearance over it would be exactly backwards.
-   */
-  const water = new WaterMask(ground)
-  water.add(roads.water)
-  console.log(
-    `  ${roads.water.rings.length.toLocaleString()} water outlines with ` +
-      `${roads.water.islands.length.toLocaleString()} islands, ` +
-      `${(water.cells / 1e6).toFixed(1)}M cells of the grid under water`,
-  )
-  const scene = { roofs, roads: roads.index, water }
 
   const r = await stage('[6/6] profiles and score', () =>
     evaluatePairs(found, ground, surface, p, scene),

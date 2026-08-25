@@ -14,6 +14,7 @@ import {
 } from '../shared/scoring.js'
 import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
+import { clearanceNeeded, type WaterCover } from '../shared/water.js'
 import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
 
 /**
@@ -58,11 +59,17 @@ import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
  * built. The authoritative metrics are recomputed afterwards from the emitted profile, so this only
  * has to be a filter, not a measurement.
  *
- * It holds the line to the *loosest* clearance any sample could earn, not the ordinary one. A
- * prefilter is only allowed to reject what the real test would also reject, and the real test asks
- * less over open water -- so gating at the ground figure here would quietly delete every line over
- * a lake before the water layer was ever consulted. The band goes the other way and needs no such
- * care: it only ever finds more obstruction than the centreline, so the thin walk stays a superset.
+ * The clearance it demands is read per sample from the water layer, not fixed. A prefilter may only
+ * reject what the real test would also reject, and the real test asks less over open water -- so a
+ * flat ground figure here would delete every line over a lake before the water layer was consulted.
+ * Assuming the loosest figure everywhere instead is safe but ruinous: it waves through every line
+ * with one to three metres of air over dry Brandenburg, and measured on region 2 that put nine and
+ * a half times as many pairs into the banded profile stage and tripled the run.
+ *
+ * Reading water on the centreline is deliberately more permissive than the real rule, which wants
+ * the whole band over water before it discounts anything. More permissive is the safe direction for
+ * a prefilter, and it costs one bitmask lookup per step. The band itself needs no such care: it
+ * only ever finds more obstruction than the centreline, so the thin walk stays a superset.
  */
 function clearsTerrain(
   a: Pos,
@@ -72,6 +79,7 @@ function clearsTerrain(
   length: number,
   ground: Grid,
   p: Params,
+  water?: WaterCover | null,
 ): boolean {
   const sag = p.sagRatio * length
   const de = (b.e - a.e) / length
@@ -79,21 +87,23 @@ function clearsTerrain(
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
   if (inner1 <= inner0) return false
-  const loosest = Math.min(p.minClearance, p.waterClearance)
+  const needAt = (e: number, n: number) => clearanceNeeded(water?.covers(e, n) ?? false, p)
 
   // The deepest sag sits at midspan, so that is where a line most often meets the ground.
   const mid = length / 2
-  if (lineHeightAt(hA, hB, sag, 0.5) - ground.sample(a.e + de * mid, a.n + dn * mid) < loosest) {
-    return false
-  }
+  const me = a.e + de * mid
+  const mn = a.n + dn * mid
+  if (lineHeightAt(hA, hB, sag, 0.5) - ground.sample(me, mn) < needAt(me, mn)) return false
 
   let exposure = -Infinity
   for (let d = 0; d <= length; d += p.profileStep) {
-    const g = ground.sample(a.e + de * d, a.n + dn * d)
+    const e = a.e + de * d
+    const n = a.n + dn * d
+    const g = ground.sample(e, n)
     if (Number.isNaN(g)) return false
     const clear = lineHeightAt(hA, hB, sag, d / length) - g
     if (clear > exposure) exposure = clear
-    if (d >= inner0 && d <= inner1 && clear < loosest) return false
+    if (d >= inner0 && d <= inner1 && clear < needAt(e, n)) return false
   }
   return exposure >= p.minExposure
 }
@@ -191,7 +201,7 @@ export function evaluateLine(
   )
   if (!h) return failed('offlevel')
 
-  if (!terrainAlreadyChecked && !clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) {
+  if (!terrainAlreadyChecked && !clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)) {
     return failed('terrain')
   }
 
@@ -302,7 +312,13 @@ export interface TerrainPairs {
  * the ones a line already crosses, and those cannot be known until this pass has run. Everything
  * here reads `ground` alone.
  */
-export function terrainPairs(anchors: Anchor[], ground: Grid, p: Params): TerrainPairs {
+export function terrainPairs(
+  anchors: Anchor[],
+  ground: Grid,
+  p: Params,
+  /** For the water layer, which decides how much air each sample of the gate is held to. */
+  scene: Scene = {},
+): TerrainPairs {
   let pairsInRange = 0
   let pairsSectorPassed = 0
   let pairsLevelEnough = 0
@@ -362,7 +378,7 @@ export function terrainPairs(anchors: Anchor[], ground: Grid, p: Params): Terrai
           if (!h) continue
           pairsLevelEnough++
 
-          if (clearsTerrain(a, b, h.hA, h.hB, length, ground, p)) pairs.push([a, b])
+          if (clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)) pairs.push([a, b])
         }
       }
     }
@@ -429,7 +445,7 @@ export function findLines(
   p: Params,
   scene: Scene = {},
 ): FindResult {
-  return evaluatePairs(terrainPairs(anchors, ground, p), ground, surface, p, scene)
+  return evaluatePairs(terrainPairs(anchors, ground, p, scene), ground, surface, p, scene)
 }
 
 /** Offsets within `radius`, on a `step` lattice, ordered outward. Excludes the origin. */

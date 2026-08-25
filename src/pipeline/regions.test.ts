@@ -43,4 +43,15 @@ describe('workAreas', () => {
     expect(contains(bbox, e, midN)).toBe(true)
     expect(boxes.some((b) => contains(b, e, midN))).toBe(false)
   })
+
+  it('orders regions smallest first, so a bad run fails early and cheaply', () => {
+    // Deliberately given largest first, to show the order is chosen rather than inherited.
+    const big: Aoi = { south: 52.0, west: 13.0, north: 52.5, east: 13.5 }
+    const middling: Aoi = { south: 51.0, west: 12.0, north: 51.1, east: 12.1 }
+    const small: Aoi = { south: 50.0, west: 11.0, north: 50.01, east: 11.01 }
+    const sizes = workAreas([big, middling, small], 500).map(
+      (w) => (w.bbox.maxE - w.bbox.minE) * (w.bbox.maxN - w.bbox.minN),
+    )
+    expect(sizes).toEqual([...sizes].sort((a, b) => a - b))
+  })
 })
