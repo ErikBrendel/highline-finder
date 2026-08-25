@@ -4,7 +4,7 @@ import { corridorTiles, loadProduct } from './raster.js'
 import { raiseOntoBuildings } from './buildings.js'
 import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
-import { readRegion, regionKey, writeRegion } from './regionCache.js'
+import { readRegion, regionId, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
 import { dedupe, evaluatePairs, locate, refine, terrainPairs } from './lines.js'
@@ -339,6 +339,10 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       groundMax: Math.round(ext.max * 100) / 100,
       anchorsScanned: scan.scanned,
       anchorsKept: anchors.length,
+      // Overwritten by the caller, which is the only place that knows whether this came from a
+      // cache and when that cache was written.
+      generatedAt: '',
+      current: true,
     },
     mask: exportMask(drop, p),
     tiles,
@@ -357,6 +361,14 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   }
 }
 
+/**
+ * Rectangles named on the command line, which *select* what to recompute rather than replacing the
+ * list of areas.
+ *
+ * It used to replace it, which made the obvious move -- "just rebuild Sperenberg" -- quietly
+ * destructive: the run wrote a dataset containing Sperenberg and nothing else. Every area is always
+ * searched or served from cache; naming one only says which are worth the compute.
+ */
 function aoisFromArgv(argv: number[]): Aoi[] | null {
   if (!argv.length || argv.length % 4 !== 0 || !argv.every((v) => Number.isFinite(v))) return null
   const out: Aoi[] = []
@@ -366,11 +378,26 @@ function aoisFromArgv(argv: number[]): Aoi[] | null {
   return out
 }
 
+/** Whether two rectangles touch at all, which is how a named rectangle picks the areas it means. */
+const overlaps = (a: Aoi, b: Aoi) =>
+  a.west <= b.east && b.west <= a.east && a.south <= b.north && b.south <= a.north
+
 async function main() {
   const started = Date.now()
   const p = DEFAULT_PARAMS
-  const aois = aoisFromArgv(process.argv.slice(2).map(Number)) ?? DEFAULT_AOIS
+  const aois = DEFAULT_AOIS
   const areas = workAreas(aois, p.maxLength)
+  /**
+   * Which areas are worth recomputing. Null means the usual thing: recompute whatever is stale.
+   *
+   * With rectangles on the command line, only the areas they touch are recomputed and every other
+   * is served from its cache even when the code has moved on since. That is deliberately a
+   * different promise from the usual one, so the run says which areas it served stale and the
+   * dataset records it per region.
+   */
+  const selection = aoisFromArgv(process.argv.slice(2).map(Number))
+  const wantsFresh = (area: WorkArea) =>
+    !selection || area.aois.some((a) => selection.some((s) => overlaps(a, s)))
 
   console.log(`${aois.length} AOI(s) in ${areas.length} region(s):`)
   for (const area of areas) {
@@ -403,25 +430,36 @@ async function main() {
   }
 
   let reused = 0
+  const stale: string[] = []
   for (const [index, area] of areas.entries()) {
     const label = `region ${index + 1}/${areas.length}`
-    const key = await regionKey(area.aois, p)
-    const cached = await readRegion<AreaResult>(key)
+    const where = area.aois.map((a) => `${a.south},${a.west}`).join(' + ')
+    const hit = await readRegion<AreaResult>(area.aois, p)
+    // A cache is served when it is current, and also when it is not but this area was not selected
+    // for recompute -- keeping what we have beats emitting a dataset with a hole in it.
+    const serve = hit && (hit.current || !wantsFresh(area))
     let found: AreaResult
-    if (cached) {
+    let vintage = new Date().toISOString()
+    let current = true
+    if (serve) {
       reused++
+      current = hit.current
+      vintage = hit.generatedAt
+      if (!hit.current) stale.push(`${where} (${hit.generatedAt.slice(0, 10)})`)
       console.log(
-        `\n=== ${label} (unchanged, reused) ===\n` +
-          `  ${cached.region.anchorsKept} anchors, ${cached.find.pairsFeasible} feasible, ` +
-          `${cached.candidates.length} distinct`,
+        `\n=== ${label} (${hit.current ? 'unchanged, reused' : 'STALE, kept on purpose'}) ===\n` +
+          `  ${hit.value.region.anchorsKept} anchors, ${hit.value.find.pairsFeasible} feasible, ` +
+          `${hit.value.candidates.length} distinct`,
       )
-      found = cached
+      found = hit.value
     } else {
       console.log(`\n=== ${label} ===`)
       found = await searchArea(area, p, label)
-      const bytes = await writeRegion(key, found)
-      console.log(`  cached as region_${key}.json (${(bytes / 1e6).toFixed(1)} MB)`)
+      const bytes = await writeRegion(area.aois, p, found)
+      console.log(`  cached as region_${regionId(area.aois)}.json (${(bytes / 1e6).toFixed(1)} MB)`)
     }
+    found.region.generatedAt = vintage
+    found.region.current = current
 
     const { region } = found
     regions.push(region)
@@ -456,7 +494,16 @@ async function main() {
     totals.refinedCount += found.improved
     totals.refineGain += found.totalGain
   }
-  if (reused) console.log(`\n${reused} of ${areas.length} region(s) reused unchanged`)
+  if (reused) console.log(`\n${reused} of ${areas.length} region(s) served from cache`)
+  if (stale.length) {
+    // Loud, because it is the one thing about this dataset a reader cannot see in it: the lines
+    // from these regions were scored under rules the rest of the file no longer follows.
+    console.log(
+      `\n!! ${stale.length} region(s) served STALE on purpose, not rebuilt with this code:\n` +
+        stale.map((where) => `     ${where}`).join('\n') +
+        `\n   Re-run without arguments to bring them up to date.`,
+    )
+  }
 
   // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
   // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct

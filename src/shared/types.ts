@@ -387,6 +387,17 @@ export interface Candidate {
  */
 export interface Region {
   aois: Aoi[]
+  /**
+   * When this region's results were computed, and whether that was with the current code and
+   * parameters.
+   *
+   * A run can be told to recompute one area and keep the rest, which means a dataset's regions are
+   * not necessarily of one vintage. Recording it per region is what stops that being silent: a line
+   * from a region marked `current: false` was scored under rules that have since moved on, and is
+   * not strictly comparable with one beside it.
+   */
+  generatedAt: string
+  current: boolean
   /** EPSG:25833 bounds actually rasterised. */
   bbox25833: { minE: number; minN: number; maxE: number; maxN: number }
   width: number
