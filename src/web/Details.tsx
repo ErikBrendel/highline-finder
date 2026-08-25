@@ -47,9 +47,16 @@ function optimizeHelp(offer: number | null): string {
       'top.',
     '',
     `The lattice starts at ${spacing.toFixed(1)} m and halves whenever the scan stalls, down to ` +
-      `${PLANNED_REFINE_FINEST} m, so a run arrives quickly and then settles at full resolution ` +
-      'however coarsely it started. It stops when even the finest patch makes things worse, or ' +
-      `when both anchors are ${PLANNED_REFINE_RADIUS * reach} m from where you put them.`,
+      `${PLANNED_REFINE_FINEST * 100} cm — so a run arrives quickly and then settles at full ` +
+      'resolution however coarsely it started. Each spacing runs until it has nothing left to ' +
+      'find, however long that takes, and never goes back up.',
+    '',
+    `A centimetre because the elevation is a 1 m grid read by interpolation: everywhere except a ` +
+      'cell’s centre, the height under the line is a guess between four measurements. This lattice ' +
+      'is fine enough to stand on the measurements.',
+    '',
+    'It stops when even the finest patch makes things worse, or when both anchors are ' +
+      `${PLANNED_REFINE_RADIUS * reach} m from where you put them.`,
     '',
     'Score here counts hard-constraint failures too, so a line running through terrain or a ' +
       'building is walked out of it before anything gets polished.',

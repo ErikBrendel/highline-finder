@@ -39,12 +39,15 @@ export const PLANNED_REFINE_START = 1
 /**
  * Spacing the lattice winds down to, in metres. Every run ends at this resolution, at any reach.
  *
- * A tenth of a metre, not a metre: the samplers are bilinear, so sub-metre moves do change what the
- * line measures, and the things worth resolving at that scale are real. A roof edge is a one-metre
- * ramp in the composite ground, and a metre-grid search either stands on the roof or beside it with
- * nothing in between.
+ * A centimetre. The samplers are bilinear over a 1 m raster, so almost everywhere the surface is a
+ * smooth interpolation between four measurements -- but the cell centres are the places where the
+ * value is the measurement rather than a guess about it, and a lattice this fine can land within
+ * half a centimetre of one. A coarser finish leaves the anchor on the slope between them.
+ *
+ * The cost of a fine finish is the number of halvings it takes to get there, which is why the
+ * spacing is carried between frames rather than re-derived: see optimizeFrame.
  */
-export const PLANNED_REFINE_FINEST = 0.1
+export const PLANNED_REFINE_FINEST = 0.01
 
 /** Rings of the hex neighbourhood scanned around an anchor. 3 gives 36 candidate positions. */
 export const PLANNED_REFINE_RINGS = 3
@@ -59,8 +62,8 @@ export const PLANNED_REFINE_RINGS = 3
  * near the top without waiting for the halving to notice. And scanning three rings deep can cross a
  * bad band one spacing wide, where a single-ring scan is walled in by neighbours that are all worse
  * than where it stands even though the ground just past them is better. That second one does
- * nothing at the finest spacing -- a tenth of a metre on a bilinear 1 m raster has no such
- * structure to cross -- and everything during a wide run's coarse phase, where a spacing is metres.
+ * nothing at the finest spacing -- a centimetre on a bilinear 1 m raster has no such structure to
+ * cross -- and everything during a wide run's coarse phase, where a spacing is metres.
  *
  * Hex rather than square because every point of a triangular lattice is the same distance from all
  * six of its neighbours, so the patch has no diagonal that is secretly 41 % further than the rest.
@@ -191,27 +194,44 @@ export function optimizeStep(current: Plan, o: Options, spacing: number): Plan |
   return moved ? out : null
 }
 
+/** Where a walk has got to: the line, and the lattice the next step will use. */
+export interface Advance {
+  plan: Plan
+  spacing: number
+}
+
+/** The lattice a run begins on. Only this scales with reach; the finest never does. */
+export const startingSpacing = (reach: number) => PLANNED_REFINE_START * reach
+
 /**
- * One animation frame's worth of descent, coarse to fine.
+ * One animation frame's worth of descent.
  *
- * Each frame restarts at the reach's starting spacing and halves it whenever the scan stalls, down to
- * `PLANNED_REFINE_FINEST`. Restarting coarse every frame rather than ratcheting down is
- * deliberate: having moved at a fine spacing, the coarse patch is often worth another look, and
- * finding out costs one stalled scan. Null means even the finest patch cannot improve the line,
- * which is the only thing that stops a run.
+ * The spacing is carried in and out rather than restarted each frame, and that is the difference
+ * between a walk that converges and one that spends its whole budget getting back to where it was.
+ * The ladder from a metre down to a centimetre is seven halvings; re-walking it every frame costs
+ * seven stalled scans -- about five hundred line measurements -- before the first useful step, and
+ * a frame only affords eight steps in total.
+ *
+ * So a level now runs until it is exhausted, however many frames that takes, and the walk contracts
+ * one level when it stalls and never goes back up. What that gives up is the chance that a move
+ * made at a fine spacing reopens a coarse direction; what it buys is that every step in a frame is
+ * a step, which at a centimetre finish is the only way the fine levels ever converge.
+ *
+ * Null means even the finest patch cannot improve the line, which is the only thing that stops a
+ * run.
  */
-export function optimizeFrame(current: Plan, o: Options): Plan | null {
+export function optimizeFrame(current: Plan, o: Options, spacing: number): Advance | null {
   const budget = PLANNED_REFINE_PACE * o.reach
-  let out: Plan | null = null
   let cur = current
-  let spacing = PLANNED_REFINE_START * o.reach
+  let at = spacing
   let travelled = 0
+  let moved = false
 
   for (let i = 0; i < MAX_STEPS_PER_FRAME && travelled < budget; i++) {
-    let next = optimizeStep(cur, o, spacing)
-    while (!next && spacing > PLANNED_REFINE_FINEST) {
-      spacing = Math.max(PLANNED_REFINE_FINEST, spacing / 2)
-      next = optimizeStep(cur, o, spacing)
+    let next = optimizeStep(cur, o, at)
+    while (!next && at > PLANNED_REFINE_FINEST) {
+      at = Math.max(PLANNED_REFINE_FINEST, at / 2)
+      next = optimizeStep(cur, o, at)
     }
     if (!next) break
     travelled += Math.max(
@@ -219,7 +239,7 @@ export function optimizeFrame(current: Plan, o: Options): Plan | null {
       Math.hypot(next.b.e - cur.b.e, next.b.n - cur.b.n),
     )
     cur = next
-    out = cur
+    moved = true
   }
-  return out
+  return moved ? { plan: cur, spacing: at } : null
 }

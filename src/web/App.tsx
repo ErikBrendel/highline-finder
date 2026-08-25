@@ -24,7 +24,7 @@ import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
-import { optimizeFrame } from './optimize.js'
+import { optimizeFrame, startingSpacing } from './optimize.js'
 import { emitProbes } from './probeOverlay.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
@@ -524,6 +524,9 @@ export function App() {
     const origin = customUtm
     let timer: ReturnType<typeof setTimeout>
     let stopped = false
+    // Carried across ticks. Restarting it each frame would spend the frame re-walking the halving
+    // ladder from a metre back down to a centimetre instead of moving the line -- see optimizeFrame.
+    let spacing = startingSpacing(reach)
 
     const tick = () => {
       if (stopped) return
@@ -534,7 +537,7 @@ export function App() {
       // Collected for the frame and handed over in one go, so the overlay rewrites its source once
       // per frame rather than once per measurement.
       const probes: number[] = []
-      const next = optimizeFrame(
+      const advance = optimizeFrame(
         { a: { e: ae, n: an }, b: { e: be, n: bn } },
         {
           origin,
@@ -547,10 +550,13 @@ export function App() {
           reach,
           onProbe: (e, n) => probes.push(e, n),
         },
+        spacing,
       )
       emitProbes(probes)
-      if (!next) return endRun()
-      setCustom({ a: toWgs84(next.a.e, next.a.n), b: toWgs84(next.b.e, next.b.n) })
+      if (!advance) return endRun()
+      spacing = advance.spacing
+      const { plan } = advance
+      setCustom({ a: toWgs84(plan.a.e, plan.a.n), b: toWgs84(plan.b.e, plan.b.n) })
       timer = setTimeout(tick, 100)
     }
 

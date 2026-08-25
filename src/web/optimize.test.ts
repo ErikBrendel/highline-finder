@@ -3,6 +3,7 @@ import {
   NEIGHBOURHOOD,
   optimizeFrame,
   optimizeStep,
+  startingSpacing,
   PLANNED_REFINE_RADIUS,
   PLANNED_REFINE_RINGS,
   PLANNED_REFINE_FINEST,
@@ -106,18 +107,37 @@ describe('optimizeStep', () => {
 })
 
 describe('optimizeFrame', () => {
+  it('reports the spacing it reached, so the next frame carries on rather than starting over', () => {
+    const g = terrain(1 / 2)
+    const at = { a: { e: 408085, n: 5784100 }, b: { e: 408315, n: 5784100 } }
+    const o = { origin: at, ground: g, surface: g, sagRatio: 0.05, params: p, rig: null, reach: 1 }
+    const first = optimizeFrame(at, o, startingSpacing(1))!
+    expect(first.spacing).toBeLessThanOrEqual(startingSpacing(1))
+    expect(first.spacing).toBeGreaterThanOrEqual(PLANNED_REFINE_FINEST)
+    // Handed its own spacing back, it picks up from there rather than re-walking the ladder.
+    const second = optimizeFrame(first.plan, o, first.spacing)
+    if (second) expect(second.spacing).toBeLessThanOrEqual(first.spacing)
+  })
+
   // Steep enough that the walk keeps improving until the radius stops it, which is the point.
   const g = terrain(1 / 2)
   const start = { a: at(85, 100), b: at(315, 100) }
   const opts = (reach: number) => ({
     origin: start, ground: g, surface: g, sagRatio: 0.05, params: p, rig: null, reach,
   })
+  /**
+   * Runs to convergence, carrying the spacing between frames exactly as the app does. Restarting it
+   * each frame is what the walk stopped doing, and a test that restarted it would be measuring
+   * something the app no longer runs.
+   */
   const settle = (reach: number) => {
     let cur = start
-    for (let i = 0; i < 400; i++) {
-      const next = optimizeFrame(cur, opts(reach))
-      if (!next) break
-      cur = next
+    let spacing = startingSpacing(reach)
+    for (let i = 0; i < 4000; i++) {
+      const advance = optimizeFrame(cur, opts(reach), spacing)
+      if (!advance) break
+      cur = advance.plan
+      spacing = advance.spacing
     }
     return cur
   }
@@ -135,7 +155,7 @@ describe('optimizeFrame', () => {
 
   it('finishes at the finest step however coarsely it travelled', () => {
     // The point of halving: a reach-8 run covers eight times the ground but does not leave the
-    // anchors on an eight-times-coarser lattice. Nothing is left for a tenth-metre step to find.
+    // anchors on an eight-times-coarser lattice. Nothing is left for a centimetre step to find.
     for (const reach of [1, 8]) {
       const settled = settle(reach)
       expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_FINEST)).toBeNull()
@@ -178,10 +198,12 @@ describe('walking out of an obstruction', () => {
     expect(before.candidate.score).toBeLessThan(0)
 
     let cur = start
-    for (let i = 0; i < 400; i++) {
-      const next = optimizeFrame(cur, o)
-      if (!next) break
-      cur = next
+    let spacing = startingSpacing(o.reach)
+    for (let i = 0; i < 4000; i++) {
+      const advance = optimizeFrame(cur, o, spacing)
+      if (!advance) break
+      cur = advance.plan
+      spacing = advance.spacing
     }
 
     const after = measure(cur)

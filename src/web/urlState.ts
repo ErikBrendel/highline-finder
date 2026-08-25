@@ -80,8 +80,15 @@ const EMPTY: UrlState = {
   filters: {},
 }
 
-/** 6 decimals of a degree is ~11 cm, past any accuracy this data has. */
-const coord = (v: number) => v.toFixed(6).replace(/\.?0+$/, '')
+/**
+ * 7 decimals of a degree is ~1.1 cm, which is what the anchor optimiser settles to.
+ *
+ * It used to be 6, on the reasoning that 11 cm is past any accuracy this data has. True of the
+ * elevation, and no longer true of the position: the walk finishes on a centimetre lattice so it
+ * can land on a raster cell's centre rather than on the interpolation between four of them, and
+ * rounding the link to 11 cm would move it back off.
+ */
+const coord = (v: number) => v.toFixed(7).replace(/\.?0+$/, '')
 
 function numbers(raw: string | null, count: number): number[] | null {
   if (!raw) return null
