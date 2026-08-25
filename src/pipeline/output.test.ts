@@ -4,6 +4,7 @@ import { toUtm33 } from '../shared/geo.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { unpackProfile } from '../shared/profile.js'
 import { boxOf, contains } from './regions.js'
+import { LINE_KINDS } from '../shared/types.js'
 import type { Dataset } from '../shared/types.js'
 
 /**
@@ -15,28 +16,40 @@ import type { Dataset } from '../shared/types.js'
  * data, only that each works alone.
  */
 const PATH = new URL('../web/public/candidates.json', import.meta.url).pathname
-const present = existsSync(PATH)
+// A file from a pipeline older than the three-list split reads as absent rather than as a failure,
+// the same way a missing one does: this suite asserts on the current schema, not on whether the
+// checkout happens to hold output from before it.
+const loaded: Dataset | null = existsSync(PATH) ? JSON.parse(readFileSync(PATH, 'utf8')) : null
+const present = !!loaded?.lines?.natural
+
+/**
+ * Derived up here, not inside the describe: vitest still runs a skipped suite's body to collect its
+ * tests, so anything that touches the file has to be safe when there is no file to touch.
+ */
+const data: Dataset = loaded ?? ({ meta: { regions: [] }, lines: {} } as unknown as Dataset)
+const { params, regions } = data.meta
+/**
+ * An AOI is given in latitude and longitude but searched as its UTM bounding box, which is a
+ * slightly larger, skewed quadrilateral -- so an anchor near a corner can sit outside the
+ * lat/lon rectangle and still be inside the area the search was asked to cover. The boxes are
+ * what the pipeline actually confines anchors to, so they are what this checks.
+ */
+const boxes = regions.flatMap((r) => r.aois.map(boxOf))
+const inSomeAoi = (e: number, n: number) => boxes.some((b) => contains(b, e, n))
+// The file stores three lists; every rule below holds of a line whichever one it came out of.
+const candidates = present
+  ? LINE_KINDS.flatMap((kind) => data.lines[kind].map((c) => ({ ...c, kind })))
+  : []
 
 describe.skipIf(!present)('generated candidates.json', () => {
-  const data: Dataset = JSON.parse(readFileSync(PATH, 'utf8'))
-  const { params, regions } = data.meta
-  /**
-   * An AOI is given in latitude and longitude but searched as its UTM bounding box, which is a
-   * slightly larger, skewed quadrilateral -- so an anchor near a corner can sit outside the
-   * lat/lon rectangle and still be inside the area the search was asked to cover. The boxes are
-   * what the pipeline actually confines anchors to, so they are what this checks.
-   */
-  const boxes = regions.flatMap((r) => r.aois.map(boxOf))
-  const inSomeAoi = (e: number, n: number) => boxes.some((b) => contains(b, e, n))
-
   it('produced candidates, over ground with real relief', () => {
-    expect(data.candidates.length).toBeGreaterThan(0)
+    expect(candidates.length).toBeGreaterThan(0)
     expect(regions.length).toBeGreaterThan(0)
     for (const r of regions) expect(r.groundMax - r.groundMin).toBeGreaterThan(10)
   })
 
   it('respects every hard filter it claims to enforce', () => {
-    for (const c of data.candidates) {
+    for (const c of candidates) {
       expect(c.length).toBeGreaterThanOrEqual(params.minLength)
       expect(c.length).toBeLessThanOrEqual(params.maxLength)
       expect(c.clearanceMin).toBeGreaterThanOrEqual(params.minClearance)
@@ -48,7 +61,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
   })
 
   it('keeps anchor coordinates consistent between WGS84 and UTM, and inside an AOI', () => {
-    for (const c of data.candidates.slice(0, 40)) {
+    for (const c of candidates.slice(0, 40)) {
       for (const a of [c.a, c.b]) {
         expect(a.aFrame).toBeGreaterThanOrEqual(params.aFrameMin - 1e-9)
         expect(a.aFrame).toBeLessThanOrEqual(params.aFrameMax + 1e-9)
@@ -61,7 +74,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
   })
 
   it('reports a length that matches the anchor separation', () => {
-    for (const c of data.candidates.slice(0, 40)) {
+    for (const c of candidates.slice(0, 40)) {
       expect(Math.hypot(c.b.e - c.a.e, c.b.n - c.a.n)).toBeCloseTo(c.length, 0)
     }
   })
@@ -69,7 +82,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
   it.skipIf(!params.storeProfiles)(
     'has profiles that start at A, end at B, and never dip below the terrain',
     () => {
-      for (const c of data.candidates.slice(0, 40)) {
+      for (const c of candidates.slice(0, 40)) {
         const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, params.sagRatio)
         const first = samples[0]!
         const last = samples[samples.length - 1]!
@@ -86,7 +99,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
     // The web app re-derives every clearance from the serialised profile. If the pipeline measured
     // from full-precision values while the app measures from rounded ones, candidates on a
     // constraint boundary vanish the moment the page loads.
-    for (const c of data.candidates) {
+    for (const c of candidates) {
       const same = rescoreAtSag(c, params.sagRatio, params)
       expect(same, `candidate ${c.id} rejected at its own sag`).not.toBeNull()
       expect(same!.score).toBe(c.score)
@@ -96,7 +109,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
   })
 
   it('reports a max feasible sag consistent with its own validity', () => {
-    for (const c of data.candidates) {
+    for (const c of candidates) {
       expect(c.maxSagRatio).toBeGreaterThanOrEqual(params.sagRatio)
       // Just past that sag the line no longer clears, which is what the sag filter relies on.
       if (c.profile) expect(rescoreAtSag(c, c.maxSagRatio + 0.005, params)).toBeNull()
@@ -105,13 +118,39 @@ describe.skipIf(!present)('generated candidates.json', () => {
 
   it('only loses candidates as sag increases', () => {
     const alive = (pct: number) =>
-      data.candidates.filter((c) => rescoreAtSag(c, pct, params) !== null).length
-    expect(alive(params.sagRatio)).toBe(data.candidates.length)
+      candidates.filter((c) => rescoreAtSag(c, pct, params) !== null).length
+    expect(alive(params.sagRatio)).toBe(candidates.length)
     expect(alive(params.sagRatio * 1.4)).toBeLessThanOrEqual(alive(params.sagRatio))
   })
 
-  it('is sorted by score', () => {
-    const scores = data.candidates.map((c) => c.score)
-    expect(scores).toEqual([...scores].sort((a, b) => b - a))
+  it('is sorted by score within each list', () => {
+    for (const kind of LINE_KINDS) {
+      const scores = data.lines[kind].map((c) => c.score)
+      expect(scores).toEqual([...scores].sort((a, b) => b - a))
+    }
+  })
+
+  it('stores the kind as the list a line is in, and nowhere else', () => {
+    const ids = new Set(candidates.map((c) => c.id))
+    expect(ids.size).toBe(candidates.length)
+    for (const kind of LINE_KINDS) {
+      for (const c of data.lines[kind]) expect(c).not.toHaveProperty('kind')
+    }
+  })
+
+  it('gives a roof anchor no A-frame', () => {
+    // Not exactly zero: `aFrame` is the difference of an already-rounded attachment height and an
+    // unrounded ground height, so a genuine zero can land a centimetre either side of it.
+    const flat = (v: number) => expect(Math.abs(v)).toBeLessThanOrEqual(0.01)
+    // Only urban and mixed lines can have a roof end, so this is also a check that the split is
+    // real: if everything were filed as natural the assertions below would be vacuous.
+    expect(data.lines.urban.length + data.lines.mixed.length).toBeGreaterThan(0)
+    for (const c of data.lines.urban) {
+      flat(c.a.aFrame)
+      flat(c.b.aFrame)
+    }
+    for (const c of data.lines.mixed) {
+      flat(Math.min(Math.abs(c.a.aFrame), Math.abs(c.b.aFrame)))
+    }
   })
 })

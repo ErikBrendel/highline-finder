@@ -9,11 +9,14 @@ import { dedupe, evaluatePairs, locate, refine, terrainPairs } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
+import { LINE_KINDS } from '../shared/types.js'
 import type {
   Aoi,
   AnchorDump,
+  ByKind,
   Candidate,
   Dataset,
+  HotspotArrays,
   Hotspots,
   MaskCells,
   Params,
@@ -59,8 +62,11 @@ interface AreaResult {
   tiles: TileUsage
   /** Anchors inside the AOIs, already in the shape the debug dump wants. */
   anchors: { lat: number[]; lon: number[]; ground: number[]; drop: number[]; open: string[] }
-  /** Anchors of every feasible line, for the hotspot layer. */
-  endpoints: { e: number[]; n: number[]; score: number[]; blocked: number[] }
+  /**
+   * Anchors of every feasible line, for the hotspot layer. `kind` is an index into LINE_KINDS
+   * rather than the word: there are millions of these, and the word is most of the record.
+   */
+  endpoints: { e: number[]; n: number[]; kind: number[]; score: number[]; blocked: number[] }
   candidates: Candidate[]
   improved: number
   totalGain: number
@@ -72,6 +78,13 @@ interface AreaResult {
     candidatesAfterDedup: number
   }
 }
+
+/** One entry per kind, built fresh so the three never share an array. */
+function byKind<T>(make: () => T): ByKind<T> {
+  return Object.fromEntries(LINE_KINDS.map((k) => [k, make()])) as ByKind<T>
+}
+
+const emptyHotspots = (): HotspotArrays => ({ lat: [], lon: [], count: [], score: [] })
 
 function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCells {
   const cells = aggregateDrops(drop, p.maskExportRes)
@@ -147,6 +160,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     return { ground, buildings: await raiseOntoBuildings(ground, groundTiles) }
   })
   const ground = built.ground
+  const roofs = built.buildings.mask
   const ext = ground.extent()
   console.log(
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
@@ -154,10 +168,10 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(
     `  ${built.buildings.tiles.length} of ${groundTiles.length} tiles carry a building, ` +
-      `ground raised at ${built.buildings.cells} cells`,
+      `ground raised at ${roofs.count()} cells`,
   )
 
-  const scan = await stage('[3/6] openness scan', () => scanAnchors(ground, p))
+  const scan = await stage('[3/6] openness scan', () => scanAnchors(ground, p, roofs))
   // Ground merged in between two AOIs is read for profiles but never searched.
   const anchors = scan.anchors.filter((a) => boxes.some((b) => contains(b, a.e, a.n)))
   const meanOpen = anchors.length
@@ -199,7 +213,9 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-  const r = await stage('[6/6] profiles and score', () => evaluatePairs(found, ground, surface, p))
+  const r = await stage('[6/6] profiles and score', () =>
+    evaluatePairs(found, ground, surface, p, roofs),
+  )
   console.log(`  pairs in length range      ${r.pairsInRange}`)
   console.log(
     `  survived sector test       ${r.pairsSectorPassed}  ` +
@@ -215,7 +231,9 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
 
-  const ref = await stage('[6/6] local refinement', () => refine(r.candidates, ground, surface, p))
+  const ref = await stage('[6/6] local refinement', () =>
+    refine(r.candidates, ground, surface, p, roofs),
+  )
   const gain = ref.improved ? ref.totalGain / ref.improved : 0
   console.log(
     `  ${ref.improved}/${r.candidates.length} improved from ${ref.evaluations} evaluations, ` +
@@ -248,10 +266,11 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     dump.drop.push(Math.round(a.dropDepth * 10) / 10)
     dump.open.push(packSectors(a.open))
   }
-  const packed = { e: [], n: [], score: [], blocked: [] } as AreaResult['endpoints']
+  const packed = { e: [], n: [], kind: [], score: [], blocked: [] } as AreaResult['endpoints']
   for (const e of r.endpoints) {
     packed.e.push(e.e)
     packed.n.push(e.n)
+    packed.kind.push(LINE_KINDS.indexOf(e.kind))
     packed.score.push(e.score)
     packed.blocked.push(e.blocked)
   }
@@ -365,6 +384,7 @@ async function main() {
       endpoints.push({
         e: found.endpoints.e[i]!,
         n: found.endpoints.n[i]!,
+        kind: LINE_KINDS[found.endpoints.kind[i]!]!,
         score: found.endpoints.score[i]!,
         blocked: found.endpoints.blocked[i]!,
       })
@@ -396,6 +416,14 @@ async function main() {
     `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +
       `${finalCandidates.length} distinct` +
       (p.storeProfiles ? ' (with profiles)' : ' (profiles fetched on demand)'),
+  )
+
+  // Split rather than labelled: the list a line is in is its kind, so the word does not have to be
+  // repeated on every line. `kind` is dropped here for the same reason and put back on load.
+  const lines = byKind<Candidate[]>(() => [])
+  for (const { kind, ...rest } of finalCandidates) lines[kind].push(rest as Candidate)
+  console.log(
+    `  ${LINE_KINDS.map((k) => `${lines[k].length} ${k}`).join(', ')}`,
   )
 
   const dataset: Dataset = {
@@ -430,7 +458,7 @@ async function main() {
         runtimeMs: Date.now() - started,
       },
     },
-    candidates: finalCandidates,
+    lines,
   }
 
   await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
@@ -480,30 +508,35 @@ async function main() {
       `(${(JSON.stringify(mask).length / 1024).toFixed(0)} KB)`,
   )
 
-  // Clustered across all regions at once, so a spot straddling two of them is one spot.
+  /**
+   * Clustered across all regions at once, so a spot straddling two of them is one spot -- but once
+   * per kind, so the layer splits the same way the lines do.
+   *
+   * Three independent clusterings rather than one tagged set, because a place where both a natural
+   * and an urban line work really is two answers: a spot only appears in a layer if that kind of
+   * line can actually be rigged there, which is what makes switching the filter mean something.
+   */
   const walkable = endpoints.filter(isWalkable)
-  const spots = await stage('hotspot clustering', () => clusterEndpoints(walkable, HOTSPOT_RADIUS))
-  spots.sort((a, b) => b.count - a.count)
-  const hotspots: Hotspots = {
-    radius: HOTSPOT_RADIUS,
-    lat: [],
-    lon: [],
-    count: [],
-    score: [],
-  }
-  for (const s of spots) {
-    const { lat, lon } = toWgs84(s.e, s.n)
-    hotspots.lat.push(r6(lat))
-    hotspots.lon.push(r6(lon))
-    hotspots.count.push(s.count)
-    hotspots.score.push(Math.round(s.score * 10) / 10)
-  }
+  const hotspots: Hotspots = { radius: HOTSPOT_RADIUS, ...byKind<HotspotArrays>(emptyHotspots) }
+  const spotCounts = await stage('hotspot clustering', () =>
+    LINE_KINDS.map((kind) => {
+      const spots = clusterEndpoints(walkable.filter((e) => e.kind === kind), HOTSPOT_RADIUS)
+      spots.sort((a, b) => b.count - a.count)
+      for (const s of spots) {
+        const { lat, lon } = toWgs84(s.e, s.n)
+        hotspots[kind].lat.push(r6(lat))
+        hotspots[kind].lon.push(r6(lon))
+        hotspots[kind].count.push(s.count)
+        hotspots[kind].score.push(Math.round(s.score * 10) / 10)
+      }
+      return `${spots.length} ${kind}`
+    }),
+  )
   await writeFile(HOTSPOTS_OUT, JSON.stringify(hotspots))
   const hotKb = (JSON.stringify(hotspots).length / 1024).toFixed(0)
   console.log(
     `hotspots: ${endpoints.length} feasible endpoints, ${walkable.length} clear of canopy ` +
-      `-> ${spots.length} spots @${HOTSPOT_RADIUS}m (${hotKb} KB), ` +
-      `busiest ${spots[0]?.count ?? 0} endpoints`,
+      `-> ${spotCounts.join(', ')} spots @${HOTSPOT_RADIUS}m (${hotKb} KB)`,
   )
   const anchorKb = (JSON.stringify(dump).length / 1024).toFixed(0)
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
@@ -525,13 +558,13 @@ async function main() {
 
   if (finalCandidates.length) {
     console.log('\ntop 10:')
-    console.log('  score  len    exposure  clear  offlevel  canopyMin  blocked')
+    console.log('  score  len    exposure  clear  offlevel  canopyMin  blocked  kind')
     for (const c of finalCandidates.slice(0, 10)) {
       console.log(
         `  ${c.score.toFixed(1).padStart(5)}  ${c.length.toFixed(0).padStart(4)}m  ` +
           `${c.exposure.toFixed(1).padStart(7)}m  ${c.clearanceMin.toFixed(1).padStart(5)}m  ` +
           `${c.offLevel.toFixed(1).padStart(7)}m  ${c.canopyClearanceMin.toFixed(1).padStart(8)}m  ` +
-          `${(c.canopyBlockedFraction * 100).toFixed(0).padStart(6)}%`,
+          `${(c.canopyBlockedFraction * 100).toFixed(0).padStart(6)}%  ${c.kind}`,
       )
     }
   }

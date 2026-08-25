@@ -4,7 +4,7 @@ import type {
   AnchorDump,
   Candidate,
   Dataset,
-  Hotspots,
+  HotspotArrays,
   MaskCells,
   TileUsage,
 } from '../shared/types.js'
@@ -212,7 +212,7 @@ function sectorWedges(
  * as noise. Weighted by how many feasible line endpoints collapsed into each spot, so a place with
  * four hundred workable spans burns brighter than one with a single line.
  */
-function hotspotsGeoJson(h: Hotspots | null): GeoJSON.FeatureCollection {
+function hotspotsGeoJson(h: HotspotArrays | null): GeoJSON.FeatureCollection {
   if (!h) return { type: 'FeatureCollection', features: [] }
   return {
     type: 'FeatureCollection',
@@ -327,7 +327,7 @@ interface Props {
   selected: Candidate | null
   basemapMix: number
   anchorDump: AnchorDump | null
-  hotspots: Hotspots | null
+  hotspots: HotspotArrays | null
   mask: MaskCells | null
   tiles: TileUsage | null
   tileLayer: 'terrain' | 'surface'

@@ -50,8 +50,8 @@ npm run build         # static bundle in dist/, deployable as-is
 ### Where the elevation profiles live
 
 `storeProfiles` in [`params.ts`](src/pipeline/params.ts) decides whether each line ships with its
-own elevation profile. Off (the default), `candidates.json` holds 7,058 lines in 4.4 MB (1.0 MB
-gzipped); on, the same lines would be about 40 MB, because profiles were 89 % of the file. The browser rebuilds the
+own elevation profile. Off (the default), `candidates.json` holds 17,848 lines in 11 MB; on, the
+same lines would be roughly 100 MB, because profiles were 89 % of the file. The browser rebuilds the
 profile for whichever line you open, from the same elevation service and the same code the planner
 uses, so the chart and the exact metrics are unchanged — they just arrive a moment later, and one
 `maxSagRatio` per line keeps the sag control filtering the whole dataset exactly either way.
@@ -94,6 +94,26 @@ parameters can move an anchor and orphan an id. That is why a shared candidate c
 too: if the id no longer resolves, the same line is rebuilt and measured live as a planned line, so
 the link goes stale rather than broken.
 
+### Natural, mixed and urban
+
+Every line is filed by what its two ends stand on — both on the ground is **natural**, both on roofs
+is **urban**, one of each is **mixed** — and the three are stored as three lists in
+`candidates.json` rather than one list with a label on each line. The hotspot layer is clustered
+three times over and split the same way. Three toggles in the filter panel switch them.
+
+The classification is about the *anchors*, not the surroundings. A ground-to-ground line threading
+between two houses is still natural, because what makes an urban line urban is having to get onto a
+building and be allowed to rig off it: a different approach, a different permission and different
+gear from walking into a forest. Classifying by what happens to be nearby would put those two in the
+same bucket.
+
+It matters more than it sounds. Extending the search over Eberswalde made roof-to-roof lines the
+majority of the dataset — 9,424 urban against 6,593 natural and 1,831 mixed — which drowned the
+forest lines the tool was built to find. But the same buildings are where the clean lines are: of
+5,573 lines with no canopy blockage at all, 5,147 are urban, because a roof is the one place in
+Brandenburg with nothing growing above it. So the answer is a filter rather than a rule against
+them.
+
 ### Reading it at scale
 
 The `hotspots` layer, on by default, draws a red heatmap of every place where a line worth a trip
@@ -122,7 +142,7 @@ never deployed — it is diagnostics for the scan, not a feature.
 |---|---|---|---|
 | Ground | `dgm` — LiDAR terrain model | 1 m grid | **Hard constraint.** The line must clear it. |
 | Vegetation + structures | `bdom` — photogrammetric surface model | 0.2 m grid | **Scored, not enforced.** How much canopy the line runs through. |
-| Buildings | `3d_gebaeude` — LoD1/LoD2 CityGML | per building | Not used yet, see ROADMAP. |
+| Buildings | `3d_gebaeude` — LoD1 CityGML | per building | **Hard constraint, and an anchor.** Merged into the ground layer, so a line must clear a roof and may also be rigged off one. |
 
 Heights are metres above sea level in DHHN2016. Measured agreement between the two models on
 open ground is ±0.2 m, which is the practical accuracy ceiling of the whole project.
@@ -150,9 +170,11 @@ open ground is ±0.2 m, which is the practical accuracy ceiling of the whole pro
    anchor can hold a partner in range, which makes the enumeration output-sensitive rather than
    quadratic. Surviving pairs must also be open *towards each other*: two array lookups per pair,
    no raster access.
-5. **Heights and offlevel** — each anchor has a *range* of usable attachment heights (ground level
-   at a clean edge, up to a 2 m A-frame), so the search picks the pair of heights that is as level
-   as possible and then as high as possible. Height difference is hard-capped at 3 % of span — 1.5 m
+5. **Heights and offlevel** — a ground anchor has a *range* of usable attachment heights (ground
+   level at a clean edge, up to a 1.5 m A-frame), so the search picks the pair of heights that is as
+   level as possible and then as high as possible. A roof anchor has no range at all: the line goes
+   on the parapet or the structure, both of which sit at roof level, so it attaches exactly where
+   the roof is and the pair has to be level enough on its own. Height difference is hard-capped at 3 % of span — 1.5 m
    over 50 m, 15 m over 500 m. This is what stops the finder proposing badly tilted lines.
 6. **Profile** — sample the span, apply parabolic sag, measure clearance to terrain and to canopy.
 7. **Score and dedup** — filter, rank, then collapse near-duplicates: two lines are the same when

@@ -146,6 +146,7 @@ describe('rescoreAtSag', () => {
   const m = metricsAt(packed, 200, 52, 52, 0.05, p)!
   const candidate: Candidate = {
     id: 'x',
+    kind: 'natural',
     a: { lat: 0, lon: 0, e: 0, n: 0, ground: 50, anchor: 52, aFrame: 1.5 },
     b: { lat: 0, lon: 0, e: 200, n: 0, ground: 50, anchor: 52, aFrame: 1.5 },
     length: 200,

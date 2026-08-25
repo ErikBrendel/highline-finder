@@ -40,6 +40,12 @@ const canyon = (floor: number) =>
 
 const rimsOf = (g: Grid) => [anchor(40, 200, g), anchor(260, 200, g)]
 
+/**
+ * A city model covering the west rim only. Anchors carry their own attachment range, so the west
+ * anchor is built roof-flat too -- that is what the openness scan does with the same mask.
+ */
+const westRoof = { covers: (e: number) => e < 150 }
+
 /** Midspan sag the pipeline will apply to a span of this length. */
 const sagOf = (length: number) => p.sagRatio * length
 
@@ -171,6 +177,29 @@ describe('offlevel constraint', () => {
       expect(c.offLevelRatio).toBeLessThanOrEqual(p.maxOffLevelRatio + 1e-9)
       expect(c.offLevel).toBeCloseTo(Math.abs(c.a.anchor - c.b.anchor), 2)
     }
+  })
+})
+
+describe('roof anchors', () => {
+  const g = canyon(20)
+
+  it('classifies by both ends and rigs a roof flat, all the way through findLines', () => {
+    const [west, east] = rimsOf(g)
+    const roofed = { ...west!, anchorMin: west!.ground, anchorMax: west!.ground }
+    const c = findLines([roofed, east!], g, g, p, westRoof).candidates[0]!
+    expect(c.kind).toBe('mixed')
+    expect(c.a.aFrame).toBe(0)
+    // The east rim is open ground and the two rims are level, so it takes the height it likes.
+    expect(c.b.aFrame).toBe(0)
+    expect(findLines(rimsOf(g), g, g, p).candidates[0]!.kind).toBe('natural')
+  })
+
+  it('keeps the classification when refinement moves an anchor', () => {
+    const start = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, p, westRoof)!
+    expect(start.kind).toBe('mixed')
+    const moved = refine([start], g, g, p, westRoof).candidates[0]!
+    expect(moved.kind).toBe('mixed')
+    expect(moved.a.aFrame).toBe(0)
   })
 })
 
@@ -325,6 +354,7 @@ describe('dedupe indexing', () => {
       const bn = an + Math.round(rnd() * 60)
       cs.push({
         id: `c${i}`,
+        kind: 'natural',
         a: { lat: 0, lon: 0, e: ae, n: an, ground: 0, anchor: 0, aFrame: 0 },
         b: { lat: 0, lon: 0, e: be, n: bn, ground: 0, anchor: 0, aFrame: 0 },
         length: 0, bearing: 0, sag: 0, offLevel: 0, offLevelRatio: 0,

@@ -141,6 +141,20 @@ export interface Params {
   profilePoints: number
 }
 
+/**
+ * What a line's two anchors stand on, which is the axis results are split along.
+ *
+ * Serialisation order as well as the type: an endpoint carries its kind as an index into this,
+ * where a string per endpoint would cost more than the endpoint does. See shared/anchoring.ts for
+ * why the classification is about the anchors and not about the surroundings.
+ */
+export const LINE_KINDS = ['natural', 'mixed', 'urban'] as const
+
+export type LineKind = (typeof LINE_KINDS)[number]
+
+/** One value per kind, which is how both the line list and the hotspot layer are stored. */
+export type ByKind<T> = Record<LineKind, T>
+
 export interface AnchorOut {
   lat: number
   lon: number
@@ -187,6 +201,14 @@ export interface ScoreParts {
 
 export interface Candidate {
   id: string
+  /**
+   * Which of the three anchor classes this line is.
+   *
+   * Not serialised: `Dataset.lines` holds three lists and the list a line is in says which, so
+   * writing it per line would repeat the same word twenty-five thousand times. The web app puts it
+   * back on load, so everything downstream of either side sees one shape.
+   */
+  kind: LineKind
   a: AnchorOut
   b: AnchorOut
   /** Horizontal span. */
@@ -291,13 +313,16 @@ export interface AnchorDump {
  * candidate list: `count` is how many line endpoints collapsed into the spot, which is the whole
  * signal -- one workable line and four hundred look identical on a map of candidates.
  */
-export interface Hotspots {
-  /** Clustering radius in metres. */
-  radius: number
+export interface HotspotArrays {
   lat: number[]
   lon: number[]
   count: number[]
   score: number[]
+}
+
+export interface Hotspots extends ByKind<HotspotArrays> {
+  /** Clustering radius in metres. */
+  radius: number
 }
 
 /**
@@ -339,5 +364,12 @@ export interface TileUsage {
 
 export interface Dataset {
   meta: DatasetMeta
-  candidates: Candidate[]
+  /**
+   * Every distinct line, in three lists rather than one with a label on each entry.
+   *
+   * The split is the storage form of the filter: asking for natural lines only is the common case
+   * and it is 26 % of the data, so the shape that makes that cheap to load is the shape it is
+   * stored in. Each entry's own `kind` field is omitted because the list already says it.
+   */
+  lines: ByKind<Candidate[]>
 }

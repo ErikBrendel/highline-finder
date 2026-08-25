@@ -1,4 +1,4 @@
-import type { Candidate, ProfileSample } from '../shared/types.js'
+import type { Candidate, LineKind, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import type { Cover } from './landcover.js'
 import { ProfileChart } from './ProfileChart.js'
@@ -97,6 +97,13 @@ interface Props {
   onClose: () => void
 }
 
+/** The anchor class in terms of the two ends, rather than the one word the filter uses. */
+const KIND_TEXT: Record<LineKind, string> = {
+  natural: 'ground to ground',
+  mixed: 'roof to ground',
+  urban: 'roof to roof',
+}
+
 export function Details({
   c, profile, cover, onRoof, planned, at, failed, optimizing, offer, onOptimize, rig, onRig, onClose,
 }: Props) {
@@ -125,6 +132,8 @@ export function Details({
       label: 'Offlevel',
       value: stat((c) => `${c.offLevel.toFixed(1)} m · ${(c.offLevelRatio * 100).toFixed(1)} %`),
     },
+    // Named here as well as shown per end below, because it is what the anchor filter splits on.
+    { label: 'Anchors', value: stat((c) => KIND_TEXT[c.kind]) },
     {
       // A roof counts as ground, so this figure is the roof where an end stands on a building.
       label: 'Ground A / B',

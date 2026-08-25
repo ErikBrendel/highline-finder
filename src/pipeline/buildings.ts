@@ -2,6 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { unzipSync } from 'fflate'
 import { blitGrid, type Grid } from '../shared/grid.js'
+import { RoofMask } from '../shared/anchoring.js'
 import { levelFaces, rasteriseFaces } from '../shared/lod1.js'
 import { gridForTile } from './downsample.js'
 
@@ -68,8 +69,11 @@ async function tileGml(tile: string): Promise<string> {
 export interface BuildingsApplied {
   /** Tiles that carry at least one building. */
   tiles: string[]
-  /** Cells the ground was raised at. */
-  cells: number
+  /**
+   * Which cells the ground was raised at, so later stages can still tell a roof from a hill once
+   * the two have been merged into one grid. Anchoring depends on the difference -- see rigRange.
+   */
+  mask: RoofMask
 }
 
 /**
@@ -102,10 +106,10 @@ export async function raiseOntoBuildings(
     }),
   )
 
-  let cells = 0
+  const mask = RoofMask.forGrid(ground)
   for (const { grid } of roofs) {
-    for (const v of grid.data) if (!Number.isNaN(v)) cells++
+    mask.add(grid)
     blitGrid(grid, ground)
   }
-  return { tiles: roofs.map((r) => r.tile).sort(), cells }
+  return { tiles: roofs.map((r) => r.tile).sort(), mask }
 }

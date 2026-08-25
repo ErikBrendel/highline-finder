@@ -4,6 +4,7 @@ import type { Anchor } from './openness.js'
 import type { Endpoint } from './hotspots.js'
 import type { AnchorOut, Candidate, Params } from '../shared/types.js'
 import { chooseHeights, lineHeightAt, maxFeasibleSag, rescoreAtSag } from '../shared/scoring.js'
+import { lineKind, rigRange, type Roofs } from '../shared/anchoring.js'
 import { buildProfile, packProfile } from '../shared/profile.js'
 
 /**
@@ -120,6 +121,11 @@ export function evaluateLine(
   surface: Grid,
   p: Params,
   /**
+   * Which points stand on a building, which decides both how the line may attach and what kind of
+   * line it is. Null means no city model, so everything is open ground.
+   */
+  roofs: Roofs | null = null,
+  /**
    * Set when the caller has already run the terrain gate on this exact pair, which the pair search
    * has: repeating it costs a full raster walk per surviving line and cannot change the answer.
    */
@@ -134,11 +140,15 @@ export function evaluateLine(
   const length = Math.hypot(dE, dN)
   if (length < p.minLength || length > p.maxLength) return null
 
+  const onRoofA = roofs?.covers(a.e, a.n) ?? false
+  const onRoofB = roofs?.covers(b.e, b.n) ?? false
+  const rangeA = rigRange(onRoofA, p)
+  const rangeB = rigRange(onRoofB, p)
   const h = chooseHeights(
-    gA + p.aFrameMin,
-    gA + p.aFrameMax,
-    gB + p.aFrameMin,
-    gB + p.aFrameMax,
+    gA + rangeA.min,
+    gA + rangeA.max,
+    gB + rangeB.min,
+    gB + rangeB.max,
     p.maxOffLevelRatio * length,
   )
   if (!h) return null
@@ -160,6 +170,7 @@ export function evaluateLine(
   // twenty seconds spent on coordinates that dedup is about to discard.
   const provisional: Candidate = {
     id: `${a.e.toFixed(1)}_${a.n.toFixed(1)}__${b.e.toFixed(1)}_${b.n.toFixed(1)}`,
+    kind: lineKind(onRoofA, onRoofB),
     a: { lat: NaN, lon: NaN, e: a.e, n: a.n, ground: r2(gA), anchor: hA, aFrame: r2(hA - gA) },
     b: { lat: NaN, lon: NaN, e: b.e, n: b.n, ground: r2(gB), anchor: hB, aFrame: r2(hB - gB) },
     length: roundedLength,
@@ -282,16 +293,19 @@ export function evaluatePairs(
   ground: Grid,
   surface: Grid,
   p: Params,
+  roofs: Roofs | null = null,
 ): FindResult {
   const feasible: Candidate[] = []
   const endpoints: Endpoint[] = []
   for (const [a, b] of found.pairs) {
-    const c = evaluateLine(a, b, ground, surface, p, true)
+    const c = evaluateLine(a, b, ground, surface, p, roofs, true)
     if (!c) continue
     feasible.push(c)
+    // Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
+    // rigged from here", and for a mixed line that is a mixed line at either end of it.
     endpoints.push(
-      { e: c.a.e, n: c.a.n, score: c.score, blocked: c.canopyBlockedFraction },
-      { e: c.b.e, n: c.b.n, score: c.score, blocked: c.canopyBlockedFraction },
+      { e: c.a.e, n: c.a.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
+      { e: c.b.e, n: c.b.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
     )
   }
 
@@ -313,8 +327,9 @@ export function findLines(
   ground: Grid,
   surface: Grid,
   p: Params,
+  roofs: Roofs | null = null,
 ): FindResult {
-  return evaluatePairs(terrainPairs(anchors, ground, p), ground, surface, p)
+  return evaluatePairs(terrainPairs(anchors, ground, p), ground, surface, p, roofs)
 }
 
 /** Offsets within `radius`, on a `step` lattice, ordered outward. Excludes the origin. */
@@ -361,6 +376,7 @@ export function refine(
   ground: Grid,
   surface: Grid,
   p: Params,
+  roofs: Roofs | null = null,
 ): RefineResult {
   if (p.refineRadius <= 0) {
     return { candidates, improved: 0, totalGain: 0, evaluations: 0 }
@@ -385,8 +401,8 @@ export function refine(
         for (const off of offsets) {
           const moved = { e: origin[end].e + off.e, n: origin[end].n + off.n }
           const c = end === 0
-            ? evaluateLine(moved, fixed, ground, surface, p)
-            : evaluateLine(fixed, moved, ground, surface, p)
+            ? evaluateLine(moved, fixed, ground, surface, p, roofs)
+            : evaluateLine(fixed, moved, ground, surface, p, roofs)
           evaluations++
           if (c && c.score > best.score) best = c
         }

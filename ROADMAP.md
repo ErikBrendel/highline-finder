@@ -16,19 +16,20 @@ anchors only, one AOI, static viewer.
   bulk of the span. Model as a tolerance window of `max(5 m, 2 % of length)` at each end, inside
   which canopy is ignored, and enforce canopy clearance as a hard constraint outside it. This is
   what turns the canopy column from a score into a real filter.
-- **Buildings in the coarse pre-pass.** The search now stands on roofs — ALKIS footprints
-  rasterised per 1 km tile, see `src/pipeline/buildings.ts` — but the pre-pass that decides which
-  tiles are worth loading at all still measures bare terrain. A flat tile with a thirty-metre
-  building on it has thirty metres of usable relief and gets skipped anyway. Fixing it means either
-  loading terrain for every tile with a footprint regardless of relief, which in a city is every
-  tile, or folding building height into the coarse drop field — which needs a coarse building
-  height, and ALKIS footprints have no height. `3d_gebaeude` LoD1 does.
+- **Buildings in the coarse pre-pass.** The search now stands on roofs — LoD1 CityGML rasterised
+  per 1 km tile, see `src/pipeline/buildings.ts` — but the pre-pass that decides which tiles are
+  worth loading at all still measures bare terrain. A flat tile with a thirty-metre building on it
+  has thirty metres of usable relief and gets skipped anyway. Fixing it means either loading terrain
+  for every tile with a building regardless of relief, which in a town is every tile, or folding
+  roof height into the coarse drop field. LoD1 already carries the height, and it is cheap enough to
+  fetch before the decision rather than after it, so this is a wiring job rather than a data one.
 - **Anchoring to the side of a building, not just the top.** A parapet, a balcony, a beam through a
   window: in practice urban lines are rigged off the structure, not off the roof surface, and the
   usable attachment point is often several metres below the roof and horizontally outside the
-  footprint. The footprint mask cannot express that — it is 2D. `3d_gebaeude` LoD2 CityGML carries
-  per-building wall and roof geometry with eave and ridge heights, which is what a real façade
-  anchor model would need, and is also the point of extending properly to Berlin.
+  footprint. A roof height cannot express that — the model is an extruded footprint with one height.
+  `3d_gebaeude` LoD2 CityGML carries per-building wall and roof geometry with eave and ridge
+  heights, which is what a real façade anchor model would need, and is also the point of extending
+  properly to Berlin.
 - **Anchor quality.** Rock vs. sand vs. loose spoil changes whether a ground anchor is riggable at
   all. Partly derivable from `alkis` land cover and geological maps.
 - **Terrain-dependent attachment range.** Every ground anchor currently gets the same 0–2 m range.
@@ -38,6 +39,18 @@ anchors only, one AOI, static viewer.
   computed during the openness scan and then thrown away.
 
 ## Physics
+
+- **A band, not a ray.** Clearance is measured along a single line sampled every 2 m, which can
+  thread between two pines 3 m apart and report clear air. The line a walker occupies is wider than
+  that: leash and swing put them off the centreline, most at midspan and not at all at the anchors.
+  So the measurement should be a lens — zero half-width at each anchor, widest in the middle —
+  taking the worst obstruction across it. Note the shape it shares with the sag curve is a
+  coincidence of both being pinned at the anchors; the width is its own parameter, not a multiple of
+  `sagRatio`. Cheap in the right place: a band always contains its centreline, so widening can only
+  remove candidates, which makes the existing thin-line test a valid prefilter — 1.35 million lines
+  reach the profile stage against 40 million tested, so the band would run on 3 % of the work. It is
+  also the same mechanism as the no-fall-zone allowance above, since a width tapering to zero at the
+  anchors *is* the tolerance window.
 
 - **Real sag.** Replace the flat fraction-of-span constant with a catenary under tension,
   parameterised by webbing, pretension and walker mass, and evaluate the worst load case rather

@@ -1,4 +1,5 @@
 import { Grid, minFilter } from '../shared/grid.js'
+import { rigRange, type Roofs } from '../shared/anchoring.js'
 import type { Params } from '../shared/types.js'
 
 /**
@@ -53,7 +54,7 @@ export interface Anchor {
   e: number
   n: number
   ground: number
-  /** Lowest and highest the line may attach, `ground + aFrameMin` .. `ground + aFrameMax`. */
+  /** Lowest and highest the line may attach. See rigRange: a roof anchor has no range at all. */
   anchorMin: number
   anchorMax: number
   /** One byte per sector, 1 = open. Indexed by sectorOf(bearing). */
@@ -85,7 +86,13 @@ function lowestInDisc(ground: Grid, e: number, n: number, radius: number): numbe
   return lo
 }
 
-export function scanAnchors(ground: Grid, p: Params): ScanResult {
+/**
+ * `ground` is terrain with roofs merged in, so `roofs` is what tells the two apart -- and the
+ * difference is not cosmetic here: a roof anchor gets no A-frame, which lowers its attachment point
+ * and therefore tightens both the drop test and the fall-away envelope below. Null means no city
+ * model, so everything counts as open ground.
+ */
+export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null): ScanResult {
   const anchors: Anchor[] = []
   const { sectorCount } = p
   const sin = new Float64Array(sectorCount)
@@ -114,7 +121,8 @@ export function scanAnchors(ground: Grid, p: Params): ScanResult {
 
       // Test A, measured from the highest attachment because that is the most permissive case.
       // The square window first, then the disc it is only an approximation of.
-      const anchorH = g + p.aFrameMax
+      const range = rigRange(roofs?.covers(e, n) ?? false, p)
+      const anchorH = g + range.max
       const deepEnough = anchorH - p.minDropDepth
       if (!(lowestNearby.nearest(e, n) <= deepEnough)) continue
       const lowest = lowestInDisc(ground, e, n, p.dropSearchRadius)
@@ -144,7 +152,7 @@ export function scanAnchors(ground: Grid, p: Params): ScanResult {
           e,
           n,
           ground: g,
-          anchorMin: g + p.aFrameMin,
+          anchorMin: g + range.min,
           anchorMax: anchorH,
           open,
           openCount,

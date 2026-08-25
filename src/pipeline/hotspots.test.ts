@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 
-const at = (e: number, n: number, score = 50, blocked = 0): Endpoint => ({ e, n, score, blocked })
+// Kind plays no part in clustering -- run.ts partitions on it before calling in -- so one is enough.
+const at = (e: number, n: number, score = 50, blocked = 0): Endpoint =>
+  ({ e, n, kind: 'natural', score, blocked })
 
 describe('isWalkable', () => {
   it('takes a good line that clips some canopy', () => {

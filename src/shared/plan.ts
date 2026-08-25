@@ -8,7 +8,9 @@ import {
   rigPenalty,
   scoreOf,
   violationsOf,
+  type RigEnd,
 } from './scoring.js'
+import { lineKind, rigRange, type Roofs } from './anchoring.js'
 import type { Candidate, Params } from './types.js'
 import { toWgs84 } from './geo.js'
 
@@ -63,6 +65,8 @@ export function planLine(
   sagRatio: number,
   p: Params,
   rig: RigHeights | null = null,
+  /** Null means no city model, so every anchor is treated as standing on open ground. */
+  roofs: Roofs | null = null,
 ): PlannedLine | null {
   const gA = ground.sample(a.e, a.n)
   const gB = ground.sample(b.e, b.n)
@@ -71,13 +75,17 @@ export function planLine(
   const length = Math.hypot(b.e - a.e, b.n - a.n)
   if (length < 1) return null
 
+  const onRoofA = roofs?.covers(a.e, a.n) ?? false
+  const onRoofB = roofs?.covers(b.e, b.n) ?? false
+  const rangeA = rigRange(onRoofA, p)
+  const rangeB = rigRange(onRoofB, p)
   const h = rig
     ? { hA: gA + rig.a, hB: gB + rig.b, offLevel: Math.abs(gA + rig.a - (gB + rig.b)) }
     : chooseHeights(
-        gA + p.aFrameMin,
-        gA + p.aFrameMax,
-        gB + p.aFrameMin,
-        gB + p.aFrameMax,
+        gA + rangeA.min,
+        gA + rangeA.max,
+        gB + rangeB.min,
+        gB + rangeB.max,
         Infinity,
       )
   if (!h) return null
@@ -93,12 +101,17 @@ export function planLine(
   const { score, parts } = scoreOf(length, h.offLevel, m, p)
   // The one failure no anchor move can undo, so it is charged here rather than inside scoreOf: it
   // is a property of the rig setting, not of the terrain the search is walking over.
-  const rigCharge = rigPenalty(h.hA - gA, h.hB - gB, p)
+  const ends: [RigEnd, RigEnd] = [
+    { aFrame: h.hA - gA, max: rangeA.max },
+    { aFrame: h.hB - gB, max: rangeB.max },
+  ]
+  const rigCharge = rigPenalty(ends[0], ends[1])
   const wa = toWgs84(a.e, a.n)
   const wb = toWgs84(b.e, b.n)
   return {
     candidate: {
       id: PLANNED_ID,
+      kind: lineKind(onRoofA, onRoofB),
       a: { ...wa, e: a.e, n: a.n, ground: r2(gA), anchor: r2(h.hA), aFrame: r2(h.hA - gA) },
       b: { ...wb, e: b.e, n: b.n, ground: r2(gB), anchor: r2(h.hB), aFrame: r2(h.hB - gB) },
       length: Math.round(length * 10) / 10,
@@ -117,21 +130,26 @@ export function planLine(
       maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p),
       profile: stored,
     },
-    violations: [...violationsOf(m, length, h.offLevel, p), ...rigViolations(h, gA, gB, p)],
+    violations: [...violationsOf(m, length, h.offLevel, p), ...rigViolations(ends)],
     penalty: penaltyOf(m, length, h.offLevel, p) + rigCharge,
   }
 }
 
-function rigViolations(
-  h: { hA: number; hB: number },
-  gA: number,
-  gB: number,
-  p: Params,
-): string[] {
-  return ([['A', h.hA - gA], ['B', h.hB - gB]] as const)
-    .filter(([, aFrame]) => aFrame > p.aFrameMax + 1e-9)
-    .map(
-      ([label, aFrame]) =>
-        `rigged ${aFrame.toFixed(1)} m up at ${label}, over the ${p.aFrameMax} m an A-frame reaches`,
+/**
+ * A rig height the anchor cannot supply, in words.
+ *
+ * Two different sentences because they are two different problems. On the ground the limit is how
+ * far a carried frame reaches, and going over it means bringing a bigger one. On a roof the limit
+ * is zero and there is nothing to raise the line with -- the parapet is where it attaches -- so
+ * quoting "over the 0 m an A-frame reaches" would state the rule and hide the reason.
+ */
+function rigViolations(ends: [RigEnd, RigEnd]): string[] {
+  return (['A', 'B'] as const)
+    .map((label, i) => ({ label, end: ends[i]! }))
+    .filter(({ end }) => end.aFrame > end.max + 1e-9)
+    .map(({ label, end }) =>
+      end.max > 0
+        ? `rigged ${end.aFrame.toFixed(1)} m up at ${label}, over the ${end.max} m an A-frame reaches`
+        : `rigged ${end.aFrame.toFixed(1)} m above the roof at ${label}, which attaches at roof level`,
     )
 }

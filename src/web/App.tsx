@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { LINE_KINDS } from '../shared/types.js'
 import type {
   AnchorDump,
   Candidate,
   Dataset,
+  HotspotArrays,
   Hotspots,
+  LineKind,
   MaskCells,
   StoredProfile,
   TileUsage,
@@ -14,7 +17,7 @@ import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
-import { ensureTerrain, groundSampler, onBuilding, surfaceSampler } from './terrain.js'
+import { ensureTerrain, groundSampler, onBuilding, roofs, surfaceSampler } from './terrain.js'
 import { coverAlong, ensureWater } from './landcover.js'
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
@@ -28,6 +31,13 @@ const OFFER_MS = 2000
 import { toWgs84 } from '../shared/geo.js'
 
 type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface'
+
+/** What each anchor class actually means for the trip, which the word alone does not say. */
+const KIND_HELP: Record<LineKind, string> = {
+  natural: 'Both ends on the ground. Walk in and rig.',
+  mixed: 'One end on a building, one on the ground.',
+  urban: 'Both ends on roofs. Needs access to both buildings and permission to rig off them.',
+}
 
 /**
  * What each debug view means, beside the map that draws it.
@@ -165,6 +175,11 @@ export function App() {
     Math.min(MIX_MAX, Math.max(0, initial.basemapMix ?? MIX_MAX)),
   )
   const [showLines, setShowLines] = useState(true)
+  /**
+   * Which anchor classes are shown. All three by default: the split exists so a person can put the
+   * town away when they want a forest line, not so the app decides for them which they wanted.
+   */
+  const [kinds, setKinds] = useState<ReadonlySet<LineKind>>(new Set(LINE_KINDS))
   const [showFilters, setShowFilters] = useState(true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
@@ -213,7 +228,7 @@ export function App() {
         // A shared candidate is restored by id if the dataset still has it. If regenerating moved
         // the anchor that names it, the link's own geometry rebuilds the same line as a planned
         // one instead -- stale rather than broken.
-        const found = d.candidates.find((c) => c.id === initial.lineId)
+        const found = LINE_KINDS.flatMap((k) => d.lines[k]).find((c) => c.id === initial.lineId)
         if (found) {
           setSelectedId(found.id)
           // The point parameters are either that candidate's own fallback geometry or a planned
@@ -228,6 +243,18 @@ export function App() {
   }, [])
 
   /**
+   * The three stored lists as one, with the kind each list implies written back onto its lines.
+   *
+   * The file omits it per line because the list already says it -- see Dataset.lines -- so this is
+   * where the two halves of that arrangement meet. Everything downstream then sees one shape and
+   * one list, exactly as it did when there was only ever one.
+   */
+  const candidates = useMemo(
+    () => (data ? LINE_KINDS.flatMap((kind) => data.lines[kind].map((c) => ({ ...c, kind }))) : []),
+    [data],
+  )
+
+  /**
    * Sag is re-applied client side rather than baked in: the stored profile carries terrain and
    * canopy heights, and the two attachment heights give the chord, so the line at any sag follows
    * without the raster. Only tightening is offered -- candidates the pipeline rejected are absent
@@ -235,11 +262,11 @@ export function App() {
    */
   const rescored = useMemo(() => {
     if (!data || sagPct === null) return []
-    if (sagPct === data.meta.params.sagRatio * 100) return data.candidates
-    return data.candidates
+    if (sagPct === data.meta.params.sagRatio * 100) return candidates
+    return candidates
       .map((c) => rescoreAtSag(c, sagPct / 100, data.meta.params))
       .filter((c): c is Candidate => c !== null)
-  }, [data, sagPct])
+  }, [data, candidates, sagPct])
 
   /**
    * The "where is anything possible at all" layer, loaded eagerly and shown by default: it is 6 KB,
@@ -276,6 +303,27 @@ export function App() {
       .then(setHotspots)
       .catch(() => setLayerError('hotspots.json missing — run `npm run pipeline`'))
   }, [])
+
+  /**
+   * The selected kinds' spots as one layer.
+   *
+   * The three are clustered independently in the pipeline, so a place where both a natural and an
+   * urban line work is a spot in two of them. Concatenating can therefore put two spots within a
+   * cluster radius of each other -- which is the honest picture: the heatmap is showing two
+   * different answers that happen to share a hillside, and it burns brighter where both hold.
+   */
+  const shownHotspots = useMemo((): HotspotArrays | null => {
+    if (!hotspots) return null
+    // flatMap rather than push(...spread): the spots are already in the thousands, and spreading an
+    // array of that size as arguments is what already broke the endpoint pooling in the pipeline.
+    const chosen = LINE_KINDS.filter((k) => kinds.has(k))
+    return {
+      lat: chosen.flatMap((k) => hotspots[k].lat),
+      lon: chosen.flatMap((k) => hotspots[k].lon),
+      count: chosen.flatMap((k) => hotspots[k].count),
+      score: chosen.flatMap((k) => hotspots[k].score),
+    }
+  }, [hotspots, kinds])
 
   const customUtm = useMemo(() => {
     if (!custom.a || !custom.b) return null
@@ -322,6 +370,7 @@ export function App() {
       sagPct / 100,
       data.meta.params,
       rig,
+      roofs,
     )
   }, [data, customUtm, sagPct, terrainVersion, rig])
 
@@ -344,6 +393,17 @@ export function App() {
     if (!complete) setRig(null)
     setSelectedId((cur) => (complete ? PLANNED_ID : cur === PLANNED_ID ? null : cur))
   }
+
+  /**
+   * Turns one anchor class on or off. Turning the last one off is refused: an empty map is not a
+   * filter setting anybody meant to choose, and the button that did it would look broken.
+   */
+  const toggleKind = (kind: LineKind) =>
+    setKinds((cur) => {
+      const next = new Set(cur)
+      if (!next.delete(kind)) next.add(kind)
+      return next.size ? next : cur
+    })
 
   /** Places one end of the planned line. */
   const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => commit(place(custom, which, at))
@@ -390,6 +450,7 @@ export function App() {
     return rescored
       .filter(
         (c) =>
+          kinds.has(c.kind) &&
           c.score >= minScore &&
           c.length >= minLength &&
           c.exposure >= minExposure &&
@@ -397,7 +458,7 @@ export function App() {
           c.offLevelRatio * 100 <= maxOffLevel,
       )
       .sort((a, b) => b.score - a.score)
-  }, [data, rescored, minScore, minLength, minExposure, maxCanopy, maxOffLevel])
+  }, [data, rescored, kinds, minScore, minLength, minExposure, maxCanopy, maxOffLevel])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
@@ -454,6 +515,7 @@ export function App() {
           sagRatio: sagPct / 100,
           params: data.meta.params,
           rig,
+          roofs,
           reach,
           onProbe: (e, n) => probes.push(e, n),
         },
@@ -611,7 +673,7 @@ export function App() {
   // Reduced rather than spread into Math.max: the dataset is tens of thousands of lines now, and
   // spreading that many arguments exceeds the call stack.
   const highest = (pick: (c: Candidate) => number, floor: number) =>
-    Math.ceil(data.candidates.reduce((m, c) => Math.max(m, pick(c)), floor))
+    Math.ceil(candidates.reduce((m, c) => Math.max(m, pick(c)), floor))
   const maxScore = highest((c) => c.score, 1)
   const maxLen = highest((c) => c.length, 100)
   const maxExp = highest((c) => c.exposure, 10)
@@ -681,7 +743,7 @@ export function App() {
               {visible.length} lines
             </button>
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
-              {hotspots ? `${hotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
+              {shownHotspots ? `${shownHotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
             </button>
             {/* anchors.json is gitignored, so this only exists where the pipeline has run.
                 Vite folds the constant away, dropping the button from the bundle entirely. */}
@@ -721,9 +783,30 @@ export function App() {
                 onChange={setSagPct}
               />
               <div className="note">
-                {rescored.length} of {data.candidates.length} lines still clear the terrain at{' '}
+                {rescored.length} of {candidates.length} lines still clear the terrain at{' '}
                 {sagPct.toFixed(1)} %. Cannot go below {sagFloor.toFixed(1)} % &mdash; the dataset
                 was generated there, so looser lines were never evaluated.
+              </div>
+
+              <h2 style={{ marginTop: 14 }}>Anchors</h2>
+              <div className="kinds">
+                {LINE_KINDS.map((kind) => (
+                  <button
+                    key={kind}
+                    data-active={kinds.has(kind)}
+                    onClick={() => toggleKind(kind)}
+                    title={KIND_HELP[kind]}
+                  >
+                    <b>{kind}</b>
+                    <span>{data.lines[kind].length.toLocaleString()}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="note">
+                By what the two ends stand on, not by what is around them &mdash; a ground line
+                threading between two houses is still natural. Getting onto a roof and being allowed
+                to rig off it is a different trip from walking into a forest, which is the
+                distinction worth filtering on.
               </div>
 
               <h2 style={{ marginTop: 14 }}>Filters</h2>
@@ -756,7 +839,7 @@ export function App() {
             selected={selected}
             basemapMix={basemapMix}
             anchorDump={anchorDump}
-            hotspots={showHotspots ? hotspots : null}
+            hotspots={showHotspots ? shownHotspots : null}
             mask={debugLayer === 'coarse' ? mask : null}
             tiles={debugLayer === 'terrain' || debugLayer === 'surface' ? tiles : null}
             tileLayer={debugLayer === 'surface' ? 'surface' : 'terrain'}

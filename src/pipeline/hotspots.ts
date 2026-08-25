@@ -1,3 +1,5 @@
+import type { LineKind } from '../shared/types.js'
+
 /**
  * Collapses every feasible line's anchors into a handful of "interesting spots".
  *
@@ -30,6 +32,8 @@
 export interface Endpoint {
   e: number
   n: number
+  /** The kind of the line this endpoint belongs to, which is what the three spot layers split on. */
+  kind: LineKind
   score: number
   /** Fraction of the span's interior that intersects canopy. */
   blocked: number

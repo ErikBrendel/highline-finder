@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { PLANNED_RIG_MAX, planLine } from './plan.js'
 import { Grid } from './grid.js'
+import type { Pos } from './grid.js'
+import type { Roofs } from './anchoring.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
 const p = DEFAULT_PARAMS
 
-/** A flat plateau at 50 m with a canyon floor at `floor` between e=50 and e=250. */
-function terrain(floor: number, canopy = 0): { ground: Grid; surface: Grid } {
+/**
+ * A flat plateau at 50 m with a canyon floor at `floor` between e=50 and e=250. `eastRim` lifts the
+ * far side, which is what makes the A-frame do any work: with both rims level the choice of
+ * attachment height is free.
+ */
+function terrain(floor: number, canopy = 0, eastRim = 50): { ground: Grid; surface: Grid } {
   const make = (fn: (e: number) => number) => {
     const g = Grid.filled(300, 300, 0, 300, 1)
     for (let row = 0; row < 300; row++) {
@@ -14,9 +20,14 @@ function terrain(floor: number, canopy = 0): { ground: Grid; surface: Grid } {
     }
     return g
   }
-  const base = (e: number) => (e <= 50 || e >= 250 ? 50 : floor)
+  const base = (e: number) => (e >= 250 ? eastRim : e <= 50 ? 50 : floor)
   return { ground: make(base), surface: make((e) => base(e) + (e > 50 && e < 250 ? canopy : 0)) }
 }
+
+/** A city model that puts a building under each of the given points and nowhere else. */
+const roofsAt = (...points: Pos[]): Roofs => ({
+  covers: (e, n) => points.some((q) => Math.hypot(q.e - e, q.n - n) < 2),
+})
 
 describe('planLine', () => {
   const a = { e: 45, n: 150 }
@@ -86,6 +97,36 @@ describe('planLine', () => {
     const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: PLANNED_RIG_MAX, b: PLANNED_RIG_MAX })!
     expect(r.violations.join(' ')).toMatch(/over the 1.5 m an A-frame reaches/)
     expect(r.candidate.clearanceMin).toBeGreaterThan(0)
+  })
+
+  it('takes the A-frame away from an anchor that stands on a roof', () => {
+    // 1.2 m of difference between the rims, which is inside what an A-frame can absorb.
+    const { ground, surface } = terrain(15, 0, 51.2)
+    const level = planLine(a, b, ground, surface, p.sagRatio, p)!
+    expect(level.candidate.offLevel).toBeCloseTo(0, 2)
+    expect(level.candidate.kind).toBe('natural')
+
+    const roofed = planLine(a, b, ground, surface, p.sagRatio, p, null, roofsAt(a))!
+    expect(roofed.candidate.a.aFrame).toBe(0)
+    // Nothing left to raise A with, so the difference the frame used to hide is now offlevel.
+    expect(roofed.candidate.offLevel).toBeCloseTo(1.2, 1)
+    expect(roofed.candidate.kind).toBe('mixed')
+    expect(roofed.violations).toEqual([])
+  })
+
+  it('calls a line between two roofs urban', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p, null, roofsAt(a, b))!
+    expect(r.candidate.kind).toBe('urban')
+    expect(r.candidate.a.aFrame).toBe(0)
+    expect(r.candidate.b.aFrame).toBe(0)
+  })
+
+  it('says a rig height above a roof is unreachable in terms of the roof', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: 1, b: 0 }, roofsAt(a))!
+    expect(r.violations.join(' ')).toMatch(/1.0 m above the roof at A/)
+    expect(r.penalty).toBeGreaterThan(0)
   })
 
   it('responds to the sag setting the same way the found candidates do', () => {

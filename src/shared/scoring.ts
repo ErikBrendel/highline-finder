@@ -244,10 +244,16 @@ export function penaltyOf(m: Metrics, length: number, offLevel: number, p: Param
   )
 }
 
-/** Points charged for rigging higher than an A-frame reaches, which no anchor move can fix. */
-export function rigPenalty(aFrameA: number, aFrameB: number, p: Params): number {
-  const over = (v: number) => Math.max(0, v - p.aFrameMax)
-  return PENALTY.rig * (over(aFrameA) + over(aFrameB))
+/** How high one end is rigged, against how high that anchor allows. See rigRange in anchoring.ts. */
+export interface RigEnd {
+  aFrame: number
+  max: number
+}
+
+/** Points charged for rigging higher than the anchor allows, which no anchor move can fix. */
+export function rigPenalty(a: RigEnd, b: RigEnd): number {
+  const over = (e: RigEnd) => Math.max(0, e.aFrame - e.max)
+  return PENALTY.rig * (over(a) + over(b))
 }
 
 /**

@@ -2,6 +2,7 @@ import { unzipSync } from 'fflate'
 import { Grid, type Pos, type Sampler } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
 import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
+import type { Roofs } from '../shared/anchoring.js'
 import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
 
@@ -239,6 +240,12 @@ export function onBuilding(e: number, n: number): boolean {
   const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
   return !!win && !Number.isNaN(win.roof.nearest(e, n))
 }
+
+/**
+ * The city model in the form the anchoring rules take, so a line placed here is rigged and
+ * classified by exactly the rule the pipeline applied to the found ones.
+ */
+export const roofs: Roofs = { covers: onBuilding }
 
 /**
  * Bare earth, ignoring anything standing on it. NaN where the window has not arrived.
