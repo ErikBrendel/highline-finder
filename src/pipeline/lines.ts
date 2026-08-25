@@ -68,9 +68,33 @@ import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
  *
  * Reading water on the centreline is deliberately more permissive than the real rule, which wants
  * the whole band over water before it discounts anything. More permissive is the safe direction for
- * a prefilter, and it costs one bitmask lookup per step. The band itself needs no such care: it
- * only ever finds more obstruction than the centreline, so the thin walk stays a superset.
+ * a prefilter. The band itself needs no such care: it only ever finds more obstruction than the
+ * centreline, so the thin walk stays a superset.
  */
+/**
+ * Whether one sample clears, asking the water layer only where the answer turns on it.
+ *
+ * Water is a bitmask over the whole region -- 25 MB for the largest -- so a lookup per sample is a
+ * cache miss per sample, on a walk that already streams a terrain grid far too big to cache. Asking
+ * at every step cost the pairing stage 121s -> 1926s on region 2, and almost nothing on the small
+ * regions, whose masks fit in cache: the sort of regression that only appears at scale.
+ *
+ * It is not needed at every step. Above the ground figure a sample clears whatever it stands over;
+ * below the loosest figure nothing can save it. Only between the two does it matter what is
+ * underneath, and over dry Brandenburg almost no sample lands there.
+ */
+function sampleClears(
+  clear: number,
+  e: number,
+  n: number,
+  p: Params,
+  water: WaterCover | null | undefined,
+): boolean {
+  if (clear >= p.minClearance) return true
+  if (clear < Math.min(p.minClearance, p.waterClearance)) return false
+  return clear >= clearanceNeeded(water?.covers(e, n) ?? false, p)
+}
+
 function clearsTerrain(
   a: Pos,
   b: Pos,
@@ -87,13 +111,12 @@ function clearsTerrain(
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
   if (inner1 <= inner0) return false
-  const needAt = (e: number, n: number) => clearanceNeeded(water?.covers(e, n) ?? false, p)
-
   // The deepest sag sits at midspan, so that is where a line most often meets the ground.
   const mid = length / 2
   const me = a.e + de * mid
   const mn = a.n + dn * mid
-  if (lineHeightAt(hA, hB, sag, 0.5) - ground.sample(me, mn) < needAt(me, mn)) return false
+  const midClear = lineHeightAt(hA, hB, sag, 0.5) - ground.sample(me, mn)
+  if (!sampleClears(midClear, me, mn, p, water)) return false
 
   let exposure = -Infinity
   for (let d = 0; d <= length; d += p.profileStep) {
@@ -103,7 +126,7 @@ function clearsTerrain(
     if (Number.isNaN(g)) return false
     const clear = lineHeightAt(hA, hB, sag, d / length) - g
     if (clear > exposure) exposure = clear
-    if (d >= inner0 && d <= inner1 && clear < needAt(e, n)) return false
+    if (d >= inner0 && d <= inner1 && !sampleClears(clear, e, n, p, water)) return false
   }
   return exposure >= p.minExposure
 }
