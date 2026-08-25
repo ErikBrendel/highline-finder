@@ -10,6 +10,7 @@ import type {
   TileUsage,
 } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
+import { shadedUrl } from './shaded.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import { installLoadingOverlay } from './loadingOverlay.js'
@@ -37,42 +38,57 @@ const OSM_ATTR = '&copy; OpenStreetMap contributors (ODbL)'
  */
 const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR]
 const wms = (path: string, layer: string) =>
-  cachedUrl(
-    `https://isk.geobasis-bb.de/mapproxy/${path}/service/wms?SERVICE=WMS&VERSION=1.3.0` +
-      `&REQUEST=GetMap&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
-      `&FORMAT=image/png&TRANSPARENT=false&BBOX={bbox-epsg-3857}`,
-  )
+  `https://isk.geobasis-bb.de/mapproxy/${path}/service/wms?SERVICE=WMS&VERSION=1.3.0` +
+  `&REQUEST=GetMap&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
+  `&FORMAT=image/png&TRANSPARENT=false&BBOX={bbox-epsg-3857}`
 
-/**
- * Ordered bottom to top. All three are stacked as raster layers and cross-faded with
- * raster-opacity, rather than swapped: that lets the GPU blend them for free, where combining tile
- * images ourselves would mean decoding, blending and re-encoding every PNG.
- *
- * The blend steps in tenths rather than continuously, so a position is reproducible and the tile
- * cache sees a small fixed set of blends instead of a new one per pixel of slider travel.
- */
+const ORTHO = wms('dop20c', 'bebb_dop20c')
+const SHADE = wms('dgm', 'dgmshade')
+const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+
+/** The three maps the slider is labelled with, and which its whole numbers land on. */
 export const BASEMAPS = [
-  { id: 'ortho', label: 'Ortho', tiles: wms('dop20c', 'bebb_dop20c'), attribution: LGB_ATTR },
-  { id: 'hillshade', label: 'Hillshade', tiles: wms('dgm', 'dgmshade'), attribution: LGB_ATTR },
-  {
-    id: 'osm',
-    label: 'OSM',
-    tiles: cachedUrl('https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-    attribution: OSM_ATTR,
-  },
+  { id: 'ortho', label: 'Ortho' },
+  { id: 'hillshade', label: 'Hillshade' },
+  { id: 'osm', label: 'OSM' },
 ] as const
 
 /** Highest mix value, one per gap between adjacent basemaps. */
 export const MIX_MAX = BASEMAPS.length - 1
 
 /**
- * Opacity of basemap `index` at mix position `mix`, where whole numbers are a pure basemap and
+ * What is actually stacked, bottom to top: the three maps with a shaded composite between each
+ * neighbouring pair.
+ *
+ * The composites exist because cross-fading a hillshade onto a map drags its colours toward grey,
+ * and grey is the one thing a relief map should not turn everything into. Halfway along the slider
+ * you now get the map re-shaded by the terrain instead -- full saturation, brightness varying with
+ * the hillside. See shaded.ts. Between those five fixed points a plain opacity cross-fade is
+ * exactly right, since both ends of every gap are already the picture you want.
+ *
+ * Two stops per gap, so `map=1` in an old link is still pure hillshade and `map=0.5` is now the
+ * composite rather than a half-washed lerp. The slider keeps its 0-2 range; only what sits under
+ * the halfway marks changed.
+ */
+export const BLEND_STOPS = [
+  { id: 'ortho', tiles: cachedUrl(ORTHO), attribution: LGB_ATTR },
+  { id: 'orthoShaded', tiles: shadedUrl('ortho', { base: ORTHO, shade: SHADE }), attribution: LGB_ATTR },
+  { id: 'hillshade', tiles: cachedUrl(SHADE), attribution: LGB_ATTR },
+  { id: 'osmShaded', tiles: shadedUrl('osm', { base: OSM, shade: SHADE }), attribution: `${OSM_ATTR} &middot; ${LGB_ATTR}` },
+  { id: 'osm', tiles: cachedUrl(OSM), attribution: OSM_ATTR },
+] as const
+
+/** Where a slider position sits among {@link BLEND_STOPS}. */
+export const stopAt = (mix: number) => mix * (BLEND_STOPS.length - 1) / MIX_MAX
+
+/**
+ * Opacity of stop `index` at stop position `at`, where whole numbers are one stop exactly and
  * fractions cross-fade to the next one up. The bottom layer stays fully opaque so there is never
  * bare background showing through.
  */
-export function basemapOpacity(index: number, mix: number): number {
+export function basemapOpacity(index: number, at: number): number {
   if (index === 0) return 1
-  return Math.min(1, Math.max(0, mix - (index - 1)))
+  return Math.min(1, Math.max(0, at - (index - 1)))
 }
 
 /**
@@ -80,10 +96,10 @@ export function basemapOpacity(index: number, mix: number): number {
  * behind an opaque layer above it, is switched off entirely -- MapLibre skips tile requests for a
  * hidden layer, so this is what stops all three basemaps downloading at once.
  */
-export function basemapVisible(index: number, mix: number, count: number): boolean {
-  if (basemapOpacity(index, mix) <= 0) return false
+export function basemapVisible(index: number, at: number, count: number): boolean {
+  if (basemapOpacity(index, at) <= 0) return false
   for (let above = index + 1; above < count; above++) {
-    if (basemapOpacity(above, mix) >= 1) return false
+    if (basemapOpacity(above, at) >= 1) return false
   }
   return true
 }
@@ -467,19 +483,19 @@ export function MapView({
       style: {
         version: 8,
         sources: Object.fromEntries(
-          BASEMAPS.map((b, i) => [
+          BLEND_STOPS.map((b, i) => [
             `base${i}`,
             { type: 'raster', tiles: [b.tiles], tileSize: 256, attribution: b.attribution },
           ]),
         ),
         layers: [
           { id: 'bg', type: 'background', paint: { 'background-color': '#0f1115' } },
-          ...BASEMAPS.map((_, i) => ({
+          ...BLEND_STOPS.map((_, i) => ({
             id: `base${i}`,
             type: 'raster' as const,
             source: `base${i}`,
-            layout: { visibility: basemapVisible(i, basemapMix, BASEMAPS.length) ? 'visible' as const : 'none' as const },
-            paint: { 'raster-opacity': basemapOpacity(i, basemapMix) },
+            layout: { visibility: basemapVisible(i, stopAt(basemapMix), BLEND_STOPS.length) ? 'visible' as const : 'none' as const },
+            paint: { 'raster-opacity': basemapOpacity(i, stopAt(basemapMix)) },
           })),
         ],
       },
@@ -949,11 +965,12 @@ export function MapView({
   useEffect(() => {
     const m = map.current
     if (!m || !ready) return
-    BASEMAPS.forEach((_, i) => {
+    const at = stopAt(basemapMix)
+    BLEND_STOPS.forEach((_, i) => {
       const id = `base${i}`
-      const visible = basemapVisible(i, basemapMix, BASEMAPS.length)
+      const visible = basemapVisible(i, at, BLEND_STOPS.length)
       m.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none')
-      if (visible) m.setPaintProperty(id, 'raster-opacity', basemapOpacity(i, basemapMix))
+      if (visible) m.setPaintProperty(id, 'raster-opacity', basemapOpacity(i, at))
     })
   }, [basemapMix, ready])
 

@@ -38,6 +38,17 @@ anchors only, one AOI, static viewer.
   local terrain shape in the line's direction already tells us which case we are in — it is
   computed during the openness scan and then thrown away.
 
+- **Known-good lines as a regression suite.** The pipeline's recall is currently unfalsifiable: we
+  can see what it finds, never what it missed. A handful of hand-picked lines that are known to be
+  riggable, checked on every run, turns that into a number — and each miss comes with a reason,
+  which is a list of the next things to fix. The first entry is a church-tower-to-rooftop line in
+  Eberswalde that the search does not currently produce:
+  `a=52.8321541,13.8205483` to `b=52.8291945,13.8212374`. Worth stating the suspects up front, since
+  they are all existing entries here: a church tower is a small footprint under a LoD1 model that
+  flattens each building to one height, and the coarse pre-pass judges a tile on bare earth so a
+  flat square with a tower on it is skipped before the city model is consulted. The value of the
+  suite is that it would say which.
+
 ## Physics
 
 - **Coupling the band to the sag control.** The band's half-width is `sideClearanceRatio` of the
