@@ -18,7 +18,8 @@ import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { ensureTerrain, groundSampler, onBuilding, roofs, surfaceSampler } from './terrain.js'
-import { coverAlong, ensureWater } from './landcover.js'
+import { coverAlong, ensureCover, roadsFailed, roadsFor } from './landcover.js'
+
 import { Details } from './Details.js'
 import { Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -209,6 +210,9 @@ export function App() {
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
   // computed, not held in state, so no effect has to write it.
   const [terrainVersion, setTerrainVersion] = useState(0)
+  // The same idea for land cover: bumped when an Overpass request delivers a corridor that was
+  // missing, which is what makes the planned line re-measure against the roads it just learned of.
+  const [coverVersion, setCoverVersion] = useState(0)
   const [terrainFailed, setTerrainFailed] = useState(false)
   const [fetchedProfile, setFetchedProfile] = useState<{ id: string; profile: StoredProfile } | null>(
     null,
@@ -353,6 +357,26 @@ export function App() {
   }, [customUtm])
 
   /**
+   * The layers a planned line is measured against, beyond the two elevation rasters.
+   *
+   * Roads are null until the corridor's Overpass request lands, and null is not "no roads" -- it is
+   * "not yet known". So `roadState` below reports which of the two it is, and the panel says so
+   * rather than presenting an unchecked line as a valid one.
+   */
+  const scene = useMemo(() => {
+    void coverVersion
+    return { roofs, roads: customUtm ? roadsFor(customUtm.a, customUtm.b) : null }
+  }, [customUtm, coverVersion])
+
+  const roadState: 'ok' | 'loading' | 'failed' = !customUtm
+    ? 'ok'
+    : scene.roads
+      ? 'ok'
+      : roadsFailed(customUtm.a, customUtm.b)
+        ? 'failed'
+        : 'loading'
+
+  /**
    * The planned line, measured by the same code the search uses.
    *
    * Derived rather than stored, so dragging an anchor cannot start a render loop: the two anchor
@@ -370,9 +394,9 @@ export function App() {
       sagPct / 100,
       data.meta.params,
       rig,
-      roofs,
+      scene,
     )
-  }, [data, customUtm, sagPct, terrainVersion, rig])
+  }, [data, customUtm, sagPct, terrainVersion, rig, scene])
 
   /**
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a
@@ -394,15 +418,12 @@ export function App() {
     setSelectedId((cur) => (complete ? PLANNED_ID : cur === PLANNED_ID ? null : cur))
   }
 
-  /**
-   * Turns one anchor class on or off. Turning the last one off is refused: an empty map is not a
-   * filter setting anybody meant to choose, and the button that did it would look broken.
-   */
+  /** Turns one anchor class on or off. All three off is a legitimate setting: no lines. */
   const toggleKind = (kind: LineKind) =>
     setKinds((cur) => {
       const next = new Set(cur)
       if (!next.delete(kind)) next.add(kind)
-      return next.size ? next : cur
+      return next
     })
 
   /** Places one end of the planned line. */
@@ -515,7 +536,7 @@ export function App() {
           sagRatio: sagPct / 100,
           params: data.meta.params,
           rig,
-          roofs,
+          scene,
           reach,
           onProbe: (e, n) => probes.push(e, n),
         },
@@ -594,19 +615,23 @@ export function App() {
   )
 
   /**
-   * Water along whatever line is on screen, purely so the chart can draw it.
+   * Land cover along whatever line is on screen: water for the chart to draw, and roads for the
+   * planner to hold the line to.
    *
    * Debounced, because dragging an anchor moves the line many times a second and this is a public
-   * Overpass instance. Buildings need no equivalent: they arrive with the elevation, since they
+   * Overpass instance. Buildings need no equivalent -- they arrive with the elevation, since they
    * are part of the measurement rather than an annotation on it.
+   *
+   * One fetch serves both because a planned line *is* the shown line whenever one is placed, so the
+   * corridor is the same and so is the cache key. A found candidate carries the crossings the
+   * pipeline measured, and only wants the water half.
    */
-  const [waterVersion, setWaterVersion] = useState(0)
   useEffect(() => {
     if (!shownEnds) return
     let stale = false
     const timer = setTimeout(() => {
-      ensureWater(shownEnds.a, shownEnds.b).then((arrived) => {
-        if (!stale && arrived) setWaterVersion((v) => v + 1)
+      ensureCover(shownEnds.a, shownEnds.b).then((arrived) => {
+        if (!stale && arrived) setCoverVersion((v) => v + 1)
       })
     }, 300)
     return () => {
@@ -617,9 +642,9 @@ export function App() {
 
   const cover = useMemo(() => {
     if (!shownEnds || !shownProfile) return null
-    void waterVersion
+    void coverVersion
     return coverAlong(shownEnds.a, shownEnds.b, shownProfile.length)
-  }, [shownEnds, shownProfile, waterVersion])
+  }, [shownEnds, shownProfile, coverVersion])
 
   /** Which ends stand on a roof rather than on the ground, so the panel can say so. */
   const onRoof = useMemo(
@@ -861,6 +886,8 @@ export function App() {
               c={detailed}
               profile={shownProfile}
               cover={cover}
+              params={data.meta.params}
+              roadState={selectedId === PLANNED_ID ? roadState : 'ok'}
               onRoof={onRoof}
               optimizing={optimizing}
               offer={offer}

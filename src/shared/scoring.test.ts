@@ -11,7 +11,7 @@ import {
 } from './scoring.js'
 import { packProfile, unpackProfile } from './profile.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
-import type { Candidate, ProfileSample } from './types.js'
+import type { Candidate, Crossing, ProfileSample } from './types.js'
 import type { Metrics } from './scoring.js'
 
 const p = DEFAULT_PARAMS
@@ -73,9 +73,9 @@ describe('metricsAt', () => {
 })
 
 describe('scoreOf', () => {
-  const base = {
+  const base: Metrics = {
     clearanceMin: 5, exposure: 20, canopyClearanceMin: 2, canopyBlockedFraction: 0,
-    clearanceDeficit: 0,
+    clearanceDeficit: 0, crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
   }
 
   it('scales exposure logarithmically so big lines stay distinguishable', () => {
@@ -137,6 +137,75 @@ describe('penaltyOf', () => {
       const failed = violationsOf(m, length, offLevel, p).length > 0
       expect(penaltyOf(m, length, offLevel, p) > 0).toBe(failed)
     }
+  })
+})
+
+describe('road crossings', () => {
+  /**
+   * The flat span, with the line 20 m over the floor at midspan once the sag is applied. Anything
+   * demanding more than that is a crossing the line cannot make.
+   */
+  const packed = packProfile(flatSpan())
+  const cross = (tier: 'path' | 'street' | 'highway', extra: Partial<Crossing> = {}): Crossing => ({
+    d: 100, kind: 'test', tier, half: 4, onBridge: false, ...extra,
+  })
+  const at = (crossings: Crossing[]) => rawMetricsAt(packed, 200, 50, 50, 0.05, p, crossings)!
+
+  it('costs nothing where the class asks for nothing beyond the base clearance', () => {
+    const m = at([cross('path')])
+    expect(m.crossingDeficit).toBe(0)
+    expect(m.worstCrossing).toBe(0)
+    // A footpath demands the 3 m every line owes, and there are 20 m here.
+    expect(m.worstClearance).toBeGreaterThan(p.minClearance)
+  })
+
+  it('reports the shortfall when the class asks for more air than there is', () => {
+    const m = at([cross('highway')])
+    // 23 m demanded against the 20 m the line actually has.
+    expect(m.crossingDeficit).toBeCloseTo(3, 1)
+    expect(violationsOf(m, 200, 0, p, [cross('highway')]).join(' ')).toMatch(
+      /passes 20.0 m over a test at 100 m, under the 23 m it needs/,
+    )
+    expect(penaltyOf(m, 200, 0, p)).toBeGreaterThan(0)
+  })
+
+  it('rejects the line outright, the way terrain clearance does', () => {
+    expect(metricsAt(packed, 200, 50, 50, 0.05, p, [cross('street')])).not.toBeNull()
+    expect(metricsAt(packed, 200, 50, 50, 0.05, p, [cross('highway')])).toBeNull()
+  })
+
+  it('reports the tightest crossing rather than the first', () => {
+    const m = at([cross('path'), cross('highway', { d: 60 })])
+    expect(m.worstCrossing).toBe(1)
+  })
+
+  it('measures a bridge against the deck rather than the ground beneath it', () => {
+    // A deck 15 m over the floor leaves only 5 m of air, where the ground would have said 20.
+    const decked = packProfile(
+      flatSpan().map((sm) => (sm.d >= 90 && sm.d <= 110 ? { ...sm, surface: 35 } : sm)),
+    )
+    const onGround = rawMetricsAt(decked, 200, 50, 50, 0.05, p, [cross('street')])!
+    const onDeck = rawMetricsAt(decked, 200, 50, 50, 0.05, p, [cross('street', { onBridge: true })])!
+    expect(onGround.crossingDeficit).toBe(0)
+    expect(onDeck.worstClearance).toBeCloseTo(5, 1)
+    expect(onDeck.crossingDeficit).toBeCloseTo(6, 1)
+  })
+
+  it('finds a road narrower than the profile spacing, by probing its own kerbs', () => {
+    // A hump under one kerb only, between two samples: checking the centreline alone would miss it.
+    const humped = packProfile(
+      flatSpan().map((sm) => (sm.d === 105 ? { ...sm, ground: 38 } : sm)),
+    )
+    const m = rawMetricsAt(humped, 200, 50, 50, 0.05, p, [cross('street', { d: 101, half: 4 })])!
+    expect(m.worstClearance).toBeLessThan(5)
+    expect(m.crossingDeficit).toBeGreaterThan(0)
+  })
+
+  it('shrinks the feasible sag, since more sag is less air over the road', () => {
+    const free = maxFeasibleSag(packed, 200, 50, 50, p)
+    const roaded = maxFeasibleSag(packed, 200, 50, 50, p, [cross('street')])
+    expect(roaded).toBeLessThan(free)
+    expect(roaded).toBeGreaterThan(0)
   })
 })
 
@@ -246,6 +315,11 @@ describe('rawMetricsAt', () => {
       canopyClearanceMin,
       canopyBlockedFraction: blocked / n,
       clearanceDeficit: weight > 0 ? deficit / weight : 0,
+      // This reference walks the profile alone; crossings come from the road network and are
+      // measured separately, so with none passed in these are what the real one must report.
+      crossingDeficit: 0,
+      worstCrossing: -1,
+      worstClearance: Infinity,
     }
   }
 

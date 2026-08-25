@@ -1,5 +1,7 @@
 import type { Pos } from '../shared/grid.js'
-import { toWgs84 } from '../shared/geo.js'
+import { toUtm33, toWgs84 } from '../shared/geo.js'
+import { classifyWay, RoadIndex, type Tags } from '../shared/roads.js'
+import type { Roads } from '../shared/scene.js'
 import { bareGround, onBuilding } from './terrain.js'
 
 /**
@@ -19,7 +21,15 @@ import { bareGround, onBuilding } from './terrain.js'
  *     a lake comes back blank. Checked, not assumed. OSM also covers Berlin, where the
  *     Brandenburg city model does not.
  *
- * The water half fails soft: a dead Overpass means the chart looks exactly as it did before.
+ *   roads and railways -- OpenStreetMap too, in the same request, because they are the same query
+ *     against the same bounding box. These are emphatically not decoration: a line over a road owes
+ *     it a great deal more air than it owes bare ground, and that is a hard constraint. See
+ *     shared/roads.ts.
+ *
+ * Which is why the failure behaviour is split. Water fails soft -- a dead Overpass means the chart
+ * looks as it did before. Roads cannot: silently reporting no roads would let the planner pass a
+ * line four metres over a Bundesstraße and call it valid. So a failed fetch is remembered and
+ * `roadsFailed` says so, for the planner to put in front of the user.
  */
 
 export const COVER_NONE = 0
@@ -37,9 +47,12 @@ const OVERPASS = 'https://overpass-api.de/api/interpreter'
 type Ring = { lat: number; lon: number }[]
 
 const waterCache = new Map<string, Ring[]>()
+const roadCache = new Map<string, RoadIndex>()
+const failed = new Set<string>()
 const inFlight = new Map<string, Promise<unknown>>()
 
 interface OverpassElement {
+  tags?: Tags
   geometry?: { lat: number; lon: number }[]
   members?: { role?: string; geometry?: { lat: number; lon: number }[] }[]
 }
@@ -64,27 +77,57 @@ function waterKeyFor(a: Pos, b: Pos): string {
   ].join(',')
 }
 
-async function loadWater(key: string): Promise<void> {
+/**
+ * Water and traffic for one bounding box, in a single request.
+ *
+ * Retried, because this is now load-bearing rather than cosmetic and one bad response should not
+ * cost the user their road check for the rest of the session.
+ */
+async function loadCover(key: string): Promise<void> {
   const query =
-    `[out:json][timeout:25];(` +
+    `[out:json][timeout:60];(` +
     `way["natural"="water"](${key});` +
     `way["waterway"="riverbank"](${key});` +
     `way["landuse"~"reservoir|basin"](${key});` +
     `relation["natural"="water"](${key});` +
+    `way["highway"](${key});` +
+    `way["railway"](${key});` +
     `);out geom;`
   // GET rather than POST: a string body would go out as text/plain, which Overpass reads as the
   // query itself rather than as a form field, and the encoded `data=` prefix would land in it.
-  const res = await fetch(`${OVERPASS}?${new URLSearchParams({ data: query })}`)
-  if (!res.ok) throw new Error(`overpass ${res.status}`)
-  const { elements } = (await res.json()) as { elements: OverpassElement[] }
-  const rings: Ring[] = []
-  for (const el of elements) {
-    if (el.geometry && el.geometry.length > 2) rings.push(el.geometry)
-    for (const m of el.members ?? []) {
-      if (m.role !== 'inner' && m.geometry && m.geometry.length > 2) rings.push(m.geometry)
+  let last: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${OVERPASS}?${new URLSearchParams({ data: query })}`)
+      if (!res.ok) throw new Error(`overpass ${res.status}`)
+      const { elements } = (await res.json()) as { elements: OverpassElement[] }
+      const rings: Ring[] = []
+      const index = new RoadIndex()
+      for (const el of elements) {
+        const classified = el.tags && el.geometry ? classifyWay(el.tags) : null
+        if (classified && el.geometry!.length > 1) {
+          const pts: number[] = []
+          for (const { lat, lon } of el.geometry!) pts.push(...toUtm33(lat, lon))
+          const bridge = !!el.tags!.bridge && el.tags!.bridge !== 'no'
+          index.add({ ...classified, bridge, pts })
+          continue
+        }
+        if (el.geometry && el.geometry.length > 2) rings.push(el.geometry)
+        for (const m of el.members ?? []) {
+          if (m.role !== 'inner' && m.geometry && m.geometry.length > 2) rings.push(m.geometry)
+        }
+      }
+      waterCache.set(key, rings)
+      roadCache.set(key, index)
+      failed.delete(key)
+      return
+    } catch (e) {
+      last = e
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)))
     }
   }
-  waterCache.set(key, rings)
+  failed.add(key)
+  throw last
 }
 
 /** Standard ray cast. Rings from Overpass are closed, so no wrap-around special case is needed. */
@@ -101,17 +144,34 @@ export function inRing(ring: Ring, lat: number, lon: number): boolean {
   return inside
 }
 
-/** Fetches the water in the corridor, if this box has not been asked for already. */
-export async function ensureWater(a: Pos, b: Pos): Promise<boolean> {
+/** Fetches the land cover for the corridor, if this box has not been asked for already. */
+export async function ensureCover(a: Pos, b: Pos): Promise<boolean> {
   const key = waterKeyFor(a, b)
   if (waterCache.has(key)) return false
   let job = inFlight.get(key)
   if (!job) {
-    job = loadWater(key).finally(() => inFlight.delete(key))
+    job = loadCover(key).finally(() => inFlight.delete(key))
     inFlight.set(key, job)
   }
   await job.catch(() => undefined)
   return true
+}
+
+/**
+ * The roads under a corridor, or null while they are unknown.
+ *
+ * Null and empty are different answers and the caller has to keep them apart: empty means Overpass
+ * said there is nothing there, null means nobody has asked yet or the asking failed. Measuring a
+ * line against null roads silently drops the clearance surcharge, so `roadsFailed` exists to say so
+ * out loud rather than letting a too-low line read as a valid one.
+ */
+export function roadsFor(a: Pos, b: Pos): Roads | null {
+  return roadCache.get(waterKeyFor(a, b)) ?? null
+}
+
+/** Whether the last attempt at this corridor's land cover failed outright. */
+export function roadsFailed(a: Pos, b: Pos): boolean {
+  return failed.has(waterKeyFor(a, b))
 }
 
 export interface Cover {

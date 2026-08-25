@@ -1,4 +1,4 @@
-import type { Candidate, LineKind, ProfileSample } from '../shared/types.js'
+import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import type { Cover } from './landcover.js'
 import { ProfileChart } from './ProfileChart.js'
@@ -82,6 +82,16 @@ interface Props {
   profile: ProfileSample[] | null
   /** Land cover per profile sample, or null when it is still loading or unavailable. */
   cover: Cover | null
+  /** The run's parameters, for the clearance rule the chart draws. */
+  params: Params
+  /**
+   * Whether the road network under a planned line is known yet.
+   *
+   * Only a planned line has one: a found candidate carries the crossings the pipeline measured. It
+   * has to be said out loud, because "no roads found" and "roads not checked" look identical on the
+   * chart and only one of them means the line is safe to believe.
+   */
+  roadState: 'ok' | 'loading' | 'failed'
   /** Which ends stand on a building rather than on terrain. */
   onRoof: { a: boolean; b: boolean } | null
   planned: PlannedLine | null
@@ -105,7 +115,8 @@ const KIND_TEXT: Record<LineKind, string> = {
 }
 
 export function Details({
-  c, profile, cover, onRoof, planned, at, failed, optimizing, offer, onOptimize, rig, onRig, onClose,
+  c, profile, cover, params, roadState, onRoof, planned, at, failed, optimizing, offer, onOptimize,
+  rig, onRig, onClose,
 }: Props) {
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
@@ -191,7 +202,7 @@ export function Details({
       <div className="cols">
         <div className="chart">
           {c && profile ? (
-            <ProfileChart c={c} profile={profile} cover={cover} />
+            <ProfileChart c={c} profile={profile} cover={cover} params={params} />
           ) : (
             <div className="chartwait">
               {failed ? (
@@ -258,6 +269,24 @@ export function Details({
             </div>
           )}
         </>
+      )}
+
+      {/* Said before the verdict, because it qualifies the verdict: a line can only be called clear
+          of the roads under it once we know what they are. */}
+      {isPlanned && roadState !== 'ok' && (
+        <div className="violations" data-tone={roadState === 'loading' ? 'wait' : 'bad'}>
+          <b>
+            {roadState === 'loading'
+              ? 'Checking what this line passes over…'
+              : 'Road data unavailable'}
+          </b>
+          <div>
+            {roadState === 'loading'
+              ? 'Clearance over roads and railways is not in the figures below yet.'
+              : 'OpenStreetMap could not be reached, so nothing below accounts for roads or ' +
+                'railways under this line. Move an anchor to retry.'}
+          </div>
+        </div>
       )}
 
       {isPlanned && planned && (

@@ -11,6 +11,10 @@
   --building: #9aa4b8;
   --water: #2f6f9e;
   --line: #f43f5e;
+  /* Roads and railways in the profile: the carriageway slab, its icon and the clearance it wants. */
+  --road: #c9b458;
+  /* Anything failing a hard constraint, so a too-low crossing reads as a problem at a glance. */
+  --bad: #f87171;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -283,6 +287,13 @@ header .spacer { flex: 1; }
   border-radius: 5px;
 }
 .violations b { color: #fecaca; }
+/* The same box, waiting rather than failing: a check still running is not a verdict. */
+.violations[data-tone='wait'] {
+  color: var(--muted);
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+.violations[data-tone='wait'] b { color: var(--accent); }
 .violations ul { margin: 4px 0 0; padding-left: 16px; }
 
 .details {

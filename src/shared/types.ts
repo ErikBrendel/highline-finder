@@ -32,6 +32,15 @@ export interface Params {
   /** Line must clear bare terrain by at least this much, on the interior of the span. */
   minClearance: number
   /**
+   * Extra clearance demanded above `minClearance` where the line passes over traffic, per class.
+   *
+   * A hard constraint, like terrain clearance and unlike canopy: a line six metres over a
+   * Bundesstraße is not something anyone rigs, whatever else is right about it. The extras rather
+   * than the totals, because the base figure is the same rule the rest of the span is held to and
+   * only the surcharge is about what is underneath.
+   */
+  roadClearance: Record<RoadTier, number>
+  /**
    * Distance from each anchor within which {@link minClearance} is NOT required.
    * Necessary because at the anchor the line sits at most `aFrameMax` above ground, and possibly
    * at ground level, so any whole-span clearance requirement would reject every line.
@@ -155,6 +164,31 @@ export type LineKind = (typeof LINE_KINDS)[number]
 /** One value per kind, which is how both the line list and the hotspot layer are stored. */
 export type ByKind<T> = Record<LineKind, T>
 
+/**
+ * Traffic classes, by how much air a line over them needs. See shared/roads.ts for what falls into
+ * each and why, and `Params.roadClearance` for the metres.
+ */
+export const ROAD_TIERS = ['path', 'cycle', 'street', 'road', 'highway'] as const
+
+export type RoadTier = (typeof ROAD_TIERS)[number]
+
+/** One place a line passes over something that carries traffic. */
+export interface Crossing {
+  /** Distance from anchor A along the span. */
+  d: number
+  /** The OSM value, so the chart can name what it drew. */
+  kind: string
+  /** Which clearance class it falls in. The metres come from `Params.roadClearance`. */
+  tier: RoadTier
+  /** Half the carriageway: the requirement holds this far either side of `d`. */
+  half: number
+  /**
+   * Traffic on a bridge deck, so the clearance is owed to the deck rather than to the ground under
+   * it. The terrain model is bare earth and has no bridge in it; the surface model does.
+   */
+  onBridge: boolean
+}
+
 export interface AnchorOut {
   lat: number
   lon: number
@@ -239,6 +273,15 @@ export interface Candidate {
    * once: it lets the sag control filter the whole dataset exactly, without a profile per line.
    */
   maxSagRatio: number
+  /**
+   * Everything the line passes over that carries traffic, nearest anchor first. Absent means none.
+   *
+   * Stored rather than derived, unlike most of this: the browser re-scores at a user-chosen sag
+   * without the raster, and it cannot re-derive a road it does not know is there. A handful of
+   * entries on the minority of lines that cross anything, against re-fetching the road network for
+   * every line opened.
+   */
+  crossings?: Crossing[]
   /**
    * Absent when the pipeline ran with `storeProfiles: false`, in which case the browser rebuilds it
    * from the elevation service for whichever line is actually opened.

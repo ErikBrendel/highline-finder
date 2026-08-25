@@ -94,6 +94,37 @@ parameters can move an anchor and orphan an id. That is why a shared candidate c
 too: if the id no longer resolves, the same line is rebuilt and measured live as a planned line, so
 the link goes stale rather than broken.
 
+### What the line passes over
+
+Terrain clearance is a flat 3 m, which is the right number over a field and the wrong one over a
+motorway. So every line is intersected with the OSM road and rail network, and each crossing raises
+the clearance owed at that point:
+
+| | extra | total | OSM |
+|---|---|---|---|
+| path | +0 m | 3 m | `path` `footway` `bridleway` `steps` `track` `pedestrian` |
+| cycle | +3 m | 6 m | `cycleway`, grade1–2 `track`, driveways |
+| street | +8 m | 11 m | `residential` `living_street` `unclassified` `service` |
+| road | +12 m | 15 m | `tertiary` `secondary` `primary` |
+| highway | +20 m | 23 m | `motorway` `trunk` `busway`, and every railway |
+
+The ladder is about what can be closed for a rigging day rather than about size alone: a forest path
+gets taped off for an afternoon, a motorway does not, and a railway carries 15 kV on a wire 5.5 m
+over the rail. For scale, German law wants 4.50 m of clearance over a road and 4.70 m under new
+motorway structures — these run to five times that, because a bridge deck is rigid and surveyed
+while a slackline sags under a walker.
+
+Vectors rather than a raster, because OSM gives a centreline plus an optional width tag: rasterising
+would mean inventing a width, drawing the invention at 1 m and then measuring it back. Intersecting
+the span with the segments gives the exact distance along it, which is also what the profile chart
+draws. Tunnels are ignored — a road in a tunnel is under the ground the line is already measured
+against — and a bridge is measured against its deck, which the terrain model has no idea exists but
+the photogrammetric surface model does.
+
+A failed road fetch is fatal to a pipeline run and stated loudly in the browser. Every other layer
+can fail soft; this one cannot, because "no roads here" and "roads not checked" produce the same
+silence and only one of them means the line is safe to believe.
+
 ### Natural, mixed and urban
 
 Every line is filed by what its two ends stand on — both on the ground is **natural**, both on roofs
@@ -143,6 +174,7 @@ never deployed — it is diagnostics for the scan, not a feature.
 | Ground | `dgm` — LiDAR terrain model | 1 m grid | **Hard constraint.** The line must clear it. |
 | Vegetation + structures | `bdom` — photogrammetric surface model | 0.2 m grid | **Scored, not enforced.** How much canopy the line runs through. |
 | Buildings | `3d_gebaeude` — LoD1 CityGML | per building | **Hard constraint, and an anchor.** Merged into the ground layer, so a line must clear a roof and may also be rigged off one. |
+| Roads and rail | OpenStreetMap via Overpass | vector centrelines | **Hard constraint.** Raises the clearance the line owes wherever it passes over traffic. |
 
 Heights are metres above sea level in DHHN2016. Measured agreement between the two models on
 open ground is ±0.2 m, which is the practical accuracy ceiling of the whole project.

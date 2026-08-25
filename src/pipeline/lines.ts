@@ -4,7 +4,8 @@ import type { Anchor } from './openness.js'
 import type { Endpoint } from './hotspots.js'
 import type { AnchorOut, Candidate, Params } from '../shared/types.js'
 import { chooseHeights, lineHeightAt, maxFeasibleSag, rescoreAtSag } from '../shared/scoring.js'
-import { lineKind, rigRange, type Roofs } from '../shared/anchoring.js'
+import { lineKind, rigRange } from '../shared/anchoring.js'
+import type { Scene } from '../shared/scene.js'
 import { buildProfile, packProfile } from '../shared/profile.js'
 
 /**
@@ -121,10 +122,11 @@ export function evaluateLine(
   surface: Grid,
   p: Params,
   /**
-   * Which points stand on a building, which decides both how the line may attach and what kind of
-   * line it is. Null means no city model, so everything is open ground.
+   * The city model, which decides both how a line may attach and what kind of line it is, and the
+   * road network, which decides how much air it owes what it passes over. Empty measures bare
+   * elevation, as the unit tests do.
    */
-  roofs: Roofs | null = null,
+  scene: Scene = {},
   /**
    * Set when the caller has already run the terrain gate on this exact pair, which the pair search
    * has: repeating it costs a full raster walk per surviving line and cannot change the answer.
@@ -140,8 +142,8 @@ export function evaluateLine(
   const length = Math.hypot(dE, dN)
   if (length < p.minLength || length > p.maxLength) return null
 
-  const onRoofA = roofs?.covers(a.e, a.n) ?? false
-  const onRoofB = roofs?.covers(b.e, b.n) ?? false
+  const onRoofA = scene.roofs?.covers(a.e, a.n) ?? false
+  const onRoofB = scene.roofs?.covers(b.e, b.n) ?? false
   const rangeA = rigRange(onRoofA, p)
   const rangeB = rigRange(onRoofB, p)
   const h = chooseHeights(
@@ -185,9 +187,12 @@ export function evaluateLine(
     score: 0,
     scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
     maxSagRatio: 0,
+    crossings: scene.roads?.crossings(a, b),
     profile: packProfile(buildProfile(a, b, hA, hB, roundedLength, ground, surface, p)),
   }
-  provisional.maxSagRatio = maxFeasibleSag(provisional.profile!, roundedLength, hA, hB, p)
+  provisional.maxSagRatio = maxFeasibleSag(
+    provisional.profile!, roundedLength, hA, hB, p, provisional.crossings,
+  )
 
   // Every measured field is filled in by the same function the web app uses, so the two cannot
   // disagree. Returns null if the line fails a hard constraint at the generation sag.
@@ -293,12 +298,12 @@ export function evaluatePairs(
   ground: Grid,
   surface: Grid,
   p: Params,
-  roofs: Roofs | null = null,
+  scene: Scene = {},
 ): FindResult {
   const feasible: Candidate[] = []
   const endpoints: Endpoint[] = []
   for (const [a, b] of found.pairs) {
-    const c = evaluateLine(a, b, ground, surface, p, roofs, true)
+    const c = evaluateLine(a, b, ground, surface, p, scene, true)
     if (!c) continue
     feasible.push(c)
     // Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
@@ -327,9 +332,9 @@ export function findLines(
   ground: Grid,
   surface: Grid,
   p: Params,
-  roofs: Roofs | null = null,
+  scene: Scene = {},
 ): FindResult {
-  return evaluatePairs(terrainPairs(anchors, ground, p), ground, surface, p, roofs)
+  return evaluatePairs(terrainPairs(anchors, ground, p), ground, surface, p, scene)
 }
 
 /** Offsets within `radius`, on a `step` lattice, ordered outward. Excludes the origin. */
@@ -376,7 +381,7 @@ export function refine(
   ground: Grid,
   surface: Grid,
   p: Params,
-  roofs: Roofs | null = null,
+  scene: Scene = {},
 ): RefineResult {
   if (p.refineRadius <= 0) {
     return { candidates, improved: 0, totalGain: 0, evaluations: 0 }
@@ -401,8 +406,8 @@ export function refine(
         for (const off of offsets) {
           const moved = { e: origin[end].e + off.e, n: origin[end].n + off.n }
           const c = end === 0
-            ? evaluateLine(moved, fixed, ground, surface, p, roofs)
-            : evaluateLine(fixed, moved, ground, surface, p, roofs)
+            ? evaluateLine(moved, fixed, ground, surface, p, scene)
+            : evaluateLine(fixed, moved, ground, surface, p, scene)
           evaluations++
           if (c && c.score > best.score) best = c
         }

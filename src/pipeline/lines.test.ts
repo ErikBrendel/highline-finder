@@ -41,10 +41,10 @@ const canyon = (floor: number) =>
 const rimsOf = (g: Grid) => [anchor(40, 200, g), anchor(260, 200, g)]
 
 /**
- * A city model covering the west rim only. Anchors carry their own attachment range, so the west
- * anchor is built roof-flat too -- that is what the openness scan does with the same mask.
+ * A scene whose city model covers the west rim only. Anchors carry their own attachment range, so
+ * the west anchor is built roof-flat too -- that is what the openness scan does with the same mask.
  */
-const westRoof = { covers: (e: number) => e < 150 }
+const westRoof = { roofs: { covers: (e: number) => e < 150 } }
 
 /** Midspan sag the pipeline will apply to a span of this length. */
 const sagOf = (length: number) => p.sagRatio * length

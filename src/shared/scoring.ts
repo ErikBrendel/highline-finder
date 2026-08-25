@@ -1,4 +1,5 @@
-import type { Candidate, Params, ScoreParts, StoredProfile } from './types.js'
+import { requiredOver } from './roads.js'
+import type { Candidate, Crossing, Params, ScoreParts, StoredProfile } from './types.js'
 
 /**
  * Sag geometry, clearance metrics and scoring, shared by the pipeline and the web app.
@@ -69,6 +70,36 @@ export interface Metrics {
    * anchor sitting inside a building has nothing telling it which way is out.
    */
   clearanceDeficit: number
+  /**
+   * Metres the worst road crossing is short of what it demands, 0 when every crossing is clear.
+   *
+   * The worst rather than the sum: a crossing is one place, and a line is stopped by the one it
+   * cannot clear, exactly as `clearanceMin` is a single worst sample.
+   *
+   * Deliberately not weighted toward midspan, unlike `clearanceDeficit`. The centrality weighting
+   * exists because ground beside an anchor is ground the walker is not going to fall onto; a road
+   * beside an anchor is a road, and `anchorZone` does not apply to it.
+   */
+  crossingDeficit: number
+  /** Which crossing that shortfall belongs to, as an index, or -1. */
+  worstCrossing: number
+  /** Clearance the line actually had over that crossing. */
+  worstClearance: number
+}
+
+/**
+ * A stored series read at an arbitrary fraction along the span.
+ *
+ * Crossings land wherever the road happens to be, not on a profile sample: at 120 points a 500 m
+ * line samples every 4.2 m, so a six-metre street can fall entirely between two of them.
+ */
+function seriesAt(series: number[], t: number): number {
+  const last = series.length - 1
+  if (last <= 0) return series[0] ?? NaN
+  const x = Math.min(last, Math.max(0, t * last))
+  const i = Math.floor(x)
+  const f = x - i
+  return f === 0 ? series[i]! : series[i]! * (1 - f) + series[Math.min(last, i + 1)]! * f
 }
 
 export function lineHeightAt(hA: number, hB: number, sag: number, t: number): number {
@@ -97,6 +128,8 @@ export function rawMetricsAt(
   hB: number,
   sagRatio: number,
   p: Params,
+  /** What the line passes over that carries traffic. Empty means nothing but ground and canopy. */
+  crossings: Crossing[] = [],
 ): Metrics | null {
   const last = sp.ground.length - 1
   const sag = sagRatio * length
@@ -131,12 +164,52 @@ export function rawMetricsAt(
   }
 
   if (samples === 0) return null
+
+  /**
+   * Road crossings, measured on their own terms.
+   *
+   * Three probes per crossing -- the centreline and both kerbs -- rather than whichever profile
+   * samples happen to fall inside it, because a residential street is narrower than the sample
+   * spacing and would otherwise be checked nowhere. The line is a smooth parabola and the ground
+   * under a carriageway is close to flat, so three points find the worst of it.
+   *
+   * A crossing on a bridge is owed its clearance to the deck, and the deck is in the surface model
+   * rather than the terrain -- the terrain model is bare earth and runs straight under it.
+   */
+  // Ranked on the shortfall including its sign, so the crossing reported is the tightest one rather
+  // than the first: with a floor at zero every clear crossing looks equally clear.
+  let worstShort = -Infinity
+  let worstCrossing = -1
+  let worstClearance = Infinity
+  for (let c = 0; c < crossings.length; c++) {
+    const x = crossings[c]!
+    const carrier = x.onBridge ? sp.surface : sp.ground
+    let clear = Infinity
+    for (const at of [x.d - x.half, x.d, x.d + x.half]) {
+      const t = Math.min(1, Math.max(0, at / length))
+      const under = seriesAt(carrier, t)
+      if (Number.isNaN(under)) continue
+      const gap = r2(lineHeightAt(hA, hB, sag, t)) - under
+      if (gap < clear) clear = gap
+    }
+    if (!Number.isFinite(clear)) continue
+    const short = requiredOver(x, p) - clear
+    if (short > worstShort) {
+      worstShort = short
+      worstCrossing = c
+      worstClearance = clear
+    }
+  }
+
   return {
     clearanceMin,
     exposure,
     canopyClearanceMin,
     canopyBlockedFraction: blocked / samples,
     clearanceDeficit: weight > 0 ? deficit / weight : 0,
+    crossingDeficit: Math.max(0, worstShort),
+    worstCrossing,
+    worstClearance,
   }
 }
 
@@ -148,10 +221,14 @@ export function metricsAt(
   hB: number,
   sagRatio: number,
   p: Params,
+  crossings: Crossing[] = [],
 ): Metrics | null {
-  const m = rawMetricsAt(sp, length, hA, hB, sagRatio, p)
+  const m = rawMetricsAt(sp, length, hA, hB, sagRatio, p, crossings)
   if (!m) return null
   if (m.clearanceMin < p.minClearance || m.exposure < p.minExposure) return null
+  // A hard constraint, like terrain and unlike canopy: a line six metres over a Bundesstraße is not
+  // something anyone rigs, and reporting it with a low score would be reporting it as a candidate.
+  if (m.crossingDeficit > 0) return null
   return m.canopyBlockedFraction > p.maxCanopyBlocked ? null : m
 }
 
@@ -167,6 +244,7 @@ export function violationsOf(
   length: number,
   offLevel: number,
   p: Params,
+  crossings: Crossing[] = [],
 ): string[] {
   const out: string[] = []
   if (length < p.minLength) out.push(`${length.toFixed(0)} m is under the ${p.minLength} m minimum`)
@@ -187,6 +265,13 @@ export function violationsOf(
     out.push(
       `inside canopy for ${(m.canopyBlockedFraction * 100).toFixed(0)} % of the span, over the ` +
         `${(p.maxCanopyBlocked * 100).toFixed(0)} % that still counts as a line`,
+    )
+  }
+  const worst = crossings[m.worstCrossing]
+  if (worst && m.crossingDeficit > 0) {
+    out.push(
+      `passes ${m.worstClearance.toFixed(1)} m over a ${worst.kind.replace(/_/g, ' ')} at ` +
+        `${worst.d.toFixed(0)} m, under the ${requiredOver(worst, p).toFixed(0)} m it needs`,
     )
   }
   const budget = p.maxOffLevelRatio * length
@@ -213,6 +298,11 @@ const PENALTY = {
   length: 20,
   /** Per metre the rig is raised past what an A-frame reaches. Applied by the planner, see plan.ts. */
   rig: 20,
+  /**
+   * A road crossing that is too low, charged on the same scale as terrain clearance: a metre short
+   * is a metre short, whichever of the two it is short of.
+   */
+  crossing: 40,
 } as const
 
 /**
@@ -236,6 +326,7 @@ export function penaltyOf(m: Metrics, length: number, offLevel: number, p: Param
   const budget = p.maxOffLevelRatio * length
   return (
     over(m.clearanceDeficit, p.minClearance, PENALTY.clearance) +
+    over(m.crossingDeficit, p.minClearance, PENALTY.crossing) +
     over(p.minExposure - m.exposure, p.minExposure, PENALTY.exposure) +
     over(m.canopyBlockedFraction - p.maxCanopyBlocked, 1 - p.maxCanopyBlocked, PENALTY.canopy) +
     over(offLevel - budget, budget, PENALTY.level) +
@@ -311,8 +402,9 @@ export function maxFeasibleSag(
   hA: number,
   hB: number,
   p: Params,
+  crossings: Crossing[] = [],
 ): number {
-  const feasible = (sag: number) => metricsAt(sp, length, hA, hB, sag, p) !== null
+  const feasible = (sag: number) => metricsAt(sp, length, hA, hB, sag, p, crossings) !== null
   let lo = 0
   let hi = 0.25
   if (!feasible(lo)) return 0
@@ -340,7 +432,7 @@ export function maxFeasibleSag(
 export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candidate | null {
   if (!c.profile) return sagRatio <= c.maxSagRatio + 1e-9 ? c : null
 
-  const m = metricsAt(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio, p)
+  const m = metricsAt(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio, p, c.crossings)
   if (!m) return null
 
   const { score, parts } = scoreOf(c.length, c.offLevel, m, p)

@@ -1,6 +1,6 @@
 import type { Pos, Sampler } from '../shared/grid.js'
 import { planLine, type RigHeights } from '../shared/plan.js'
-import type { Roofs } from '../shared/anchoring.js'
+import type { Scene } from '../shared/scene.js'
 import type { Params } from '../shared/types.js'
 
 /**
@@ -113,10 +113,11 @@ interface Options {
   params: Params
   rig: RigHeights | null
   /**
-   * The city model, so the walk knows which of the positions it tries stand on a building. Omit in
-   * tests over bare synthetic terrain, where nothing does.
+   * The city model and the road network, so the walk knows which of the positions it tries stand on
+   * a building and what the line it draws passes over. Omit in tests over bare synthetic terrain,
+   * where there is neither.
    */
-  roofs?: Roofs | null
+  scene?: Scene
   /**
    * Multiplier on the radius, and on the lattice spacing the scan starts at. The patch keeps its
    * 36 points and simply covers more ground. 1 is the careful default.
@@ -141,7 +142,7 @@ interface Options {
 }
 
 function rank(a: Pos, b: Pos, o: Options): { violations: number; score: number } | null {
-  const r = planLine(a, b, o.ground, o.surface, o.sagRatio, o.params, o.rig, o.roofs)
+  const r = planLine(a, b, o.ground, o.surface, o.sagRatio, o.params, o.rig, o.scene)
   if (!r) return null
   return { violations: r.violations.length, score: r.candidate.score }
 }

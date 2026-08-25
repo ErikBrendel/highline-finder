@@ -83,6 +83,14 @@ anchors only, one AOI, static viewer.
   so a line cannot run into unloaded terrain. It only pays where relief is sparse relative to the
   tile grid. Fetching terrain from the WCS by window instead of by published tile would let the mask
   work at its own resolution.
+- **Roads without Overpass.** The road network is fetched per 1 km tile from the public Overpass
+  API, which is a shared community service with a rate limit — fine for a few hundred tiles and the
+  wrong tool for a state. A Geofabrik extract (`brandenburg-latest.osm.pbf`, ~250 MB) read once into
+  the same `RoadIndex` would remove the limit and the network round trip both.
+- **Bridges we do not measure.** A crossing tagged `bridge=yes` takes its clearance from the surface
+  model, on the reasoning that the photogrammetric model sees the deck. It also sees whatever is
+  standing on the deck at the moment of capture, and the railings, so the figure runs a metre or two
+  conservative. The right source is the bridge's own surveyed height, which OSM does not carry.
 - **A cheaper vegetation source for screening.** With the surface model deferred to line corridors,
   it is still the largest single cost of a large run. A coarse canopy height model would let a line
   be rejected on vegetation before any 0.2 m data is fetched, with `bdom` only for final scoring.

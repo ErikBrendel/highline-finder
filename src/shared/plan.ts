@@ -10,7 +10,8 @@ import {
   violationsOf,
   type RigEnd,
 } from './scoring.js'
-import { lineKind, rigRange, type Roofs } from './anchoring.js'
+import { lineKind, rigRange } from './anchoring.js'
+import type { Scene } from './scene.js'
 import type { Candidate, Params } from './types.js'
 import { toWgs84 } from './geo.js'
 
@@ -65,8 +66,8 @@ export function planLine(
   sagRatio: number,
   p: Params,
   rig: RigHeights | null = null,
-  /** Null means no city model, so every anchor is treated as standing on open ground. */
-  roofs: Roofs | null = null,
+  /** The city model and the road network. Empty measures bare elevation, as the tests do. */
+  scene: Scene = {},
 ): PlannedLine | null {
   const gA = ground.sample(a.e, a.n)
   const gB = ground.sample(b.e, b.n)
@@ -75,8 +76,8 @@ export function planLine(
   const length = Math.hypot(b.e - a.e, b.n - a.n)
   if (length < 1) return null
 
-  const onRoofA = roofs?.covers(a.e, a.n) ?? false
-  const onRoofB = roofs?.covers(b.e, b.n) ?? false
+  const onRoofA = scene.roofs?.covers(a.e, a.n) ?? false
+  const onRoofB = scene.roofs?.covers(b.e, b.n) ?? false
   const rangeA = rigRange(onRoofA, p)
   const rangeB = rigRange(onRoofB, p)
   const h = rig
@@ -94,7 +95,8 @@ export function planLine(
   if (profile.some((s) => Number.isNaN(s.ground))) return null
 
   const stored = packProfile(profile)
-  const m = rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p)
+  const crossings = scene.roads?.crossings(a, b) ?? []
+  const m = rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings)
   if (!m) return null
 
   const r2 = (v: number) => Math.round(v * 100) / 100
@@ -127,10 +129,11 @@ export function planLine(
       // one decimal a gentle slope reads as flat and the walk stops after its first step.
       score: score - rigCharge,
       scoreParts: parts,
-      maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p),
+      maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p, crossings),
+      crossings,
       profile: stored,
     },
-    violations: [...violationsOf(m, length, h.offLevel, p), ...rigViolations(ends)],
+    violations: [...violationsOf(m, length, h.offLevel, p, crossings), ...rigViolations(ends)],
     penalty: penaltyOf(m, length, h.offLevel, p) + rigCharge,
   }
 }

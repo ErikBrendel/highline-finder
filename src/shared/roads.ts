@@ -1,0 +1,296 @@
+import type { Pos } from './grid.js'
+import type { Roads } from './scene.js'
+import type { Crossing, Params, RoadTier } from './types.js'
+
+/** Total clearance a crossing demands: the base every line owes, plus its class's surcharge. */
+export function requiredOver(x: Crossing, p: Params): number {
+  return p.minClearance + p.roadClearance[x.tier]
+}
+
+/**
+ * Roads, paths and railways under a line, and how much air each of them demands.
+ *
+ * A highline over a road is a normal thing to rig, with the local authority's blessing. What
+ * decides whether it is plausible is height: a forest path can be taped shut for an afternoon, a
+ * Bundesstraße cannot, and nothing at all can be done about an electrified railway. So this is a
+ * clearance rule keyed on what is underneath, not a rule against crossing things.
+ *
+ * For scale: German law wants 4.50 m of clearance over a road -- the 4.00 m a lorry may legally be
+ * plus half a metre -- and 4.70 m under new motorway structures. The figures in `roadClearance` run
+ * from two to five times that, deliberately. A bridge deck is rigid and its height is surveyed; a
+ * slackline sags under a walker, is rigged by hand, and can drop that walker onto whatever is
+ * beneath it. The road standard is the wrong reference class.
+ *
+ * Vectors, not a raster. OSM gives a centreline plus an optional width tag, so rasterising means
+ * inventing a width, drawing the invention at 1 m and then measuring it back. Intersecting the span
+ * with the segments uses the geometry that actually exists and returns the exact distance along the
+ * span, which is also what the profile chart needs to draw.
+ */
+
+/**
+ * OSM tag values that carry traffic, by how much air a line over them needs.
+ *
+ * Judgement calls, and the ones worth arguing about are noted. The tiers themselves are in
+ * params.ts, since which of them is 8 m and which is 12 is a tunable, not a fact.
+ *
+ *   path      Closable. A forest track or a footpath can be taped off for a rigging day, so it asks
+ *             for nothing beyond the clearance every line already needs.
+ *   cycle     Closable too, but a cyclist arrives fast, quietly and without looking up.
+ *   street    Cars at town speeds, and a lorry may still be 4 m tall.
+ *   road      A through road: lorries at 100, and closing it needs more than goodwill.
+ *   highway   Motorway, Kraftfahrstraße, and every railway. Nothing here can be stopped for you,
+ *             and a railway adds a 15 kV contact wire at 5.5 m over the rail.
+ */
+const HIGHWAY_TIERS: Record<string, RoadTier> = {
+  path: 'path',
+  footway: 'path',
+  bridleway: 'path',
+  steps: 'path',
+  // A closable street, but one that is full of people when it is not closed.
+  pedestrian: 'path',
+  via_ferrata: 'path',
+  cycleway: 'cycle',
+  // Promoted to 'cycle' by tracktype below: a made-up forest road carries forestry lorries.
+  track: 'path',
+  residential: 'street',
+  living_street: 'street',
+  unclassified: 'street',
+  road: 'street',
+  service: 'street',
+  tertiary: 'road',
+  secondary: 'road',
+  // Bundesstraße. Arguably the top tier -- it is the largest road that is not a motorway -- but it
+  // has junctions, cyclists and a lower limit, so it sits with the other through roads for now.
+  primary: 'road',
+  trunk: 'highway',
+  motorway: 'highway',
+  busway: 'highway',
+  bus_guideway: 'highway',
+  raceway: 'highway',
+}
+
+/** Half the carriageway, in metres, where the tags do not say. */
+const DEFAULT_HALF: Record<RoadTier, number> = {
+  path: 1,
+  cycle: 1.5,
+  street: 3,
+  road: 4,
+  highway: 12.5,
+}
+
+/** Metres per lane, for deriving a width from a lane count. */
+const LANE_WIDTH = 3.25
+
+export interface RoadWay {
+  tier: RoadTier
+  /** The OSM value, kept so the chart can name what it drew. */
+  kind: string
+  /** Half the carriageway width: the requirement holds this far either side of the centreline. */
+  half: number
+  /**
+   * Traffic on a deck rather than on the ground, so the clearance is owed to the deck. The terrain
+   * model is bare earth and has no bridge in it at all, but the surface model is photogrammetric
+   * and does -- so a crossing marked here is measured against that instead.
+   */
+  bridge: boolean
+  /** Centreline in EPSG:25833, flat as `[e, n, e, n, ...]`. */
+  pts: number[]
+}
+
+export type Tags = Record<string, string | undefined>
+
+/**
+ * What a tagged way demands, or null if it is not something a line has to clear.
+ *
+ * Tunnels are dropped: a road in a tunnel is not under the line, it is under the ground the line is
+ * already being measured against.
+ */
+export function classifyWay(tags: Tags): { tier: RoadTier; kind: string; half: number } | null {
+  if (tags.tunnel && tags.tunnel !== 'no') return null
+
+  const kind = tags.railway ?? tags.highway
+  if (!kind) return null
+  // Every railway sits at the top: a train cannot be stopped for a rigging day, and an electrified
+  // one carries 15 kV on a wire 5.5 m over the rail, which no amount of permission makes safe.
+  let tier = tags.railway ? ('highway' as RoadTier) : HIGHWAY_TIERS[kind]
+  if (!tier) return null
+
+  // A grade1 or grade2 track is a made-up surface, which is what forestry lorries drive on.
+  if (kind === 'track' && (tags.tracktype === 'grade1' || tags.tracktype === 'grade2')) {
+    tier = 'cycle'
+  }
+  if (kind === 'service' && (tags.service === 'driveway' || tags.service === 'parking_aisle')) {
+    tier = 'cycle'
+  }
+  if (tier === 'path' && tags.bicycle === 'designated') tier = 'cycle'
+
+  return { tier, kind, half: halfWidth(tags, tier) }
+}
+
+function halfWidth(tags: Tags, tier: RoadTier): number {
+  const width = Number(tags.width)
+  if (Number.isFinite(width) && width > 0) return width / 2
+  const lanes = Number(tags.lanes)
+  if (Number.isFinite(lanes) && lanes > 0) return (lanes * LANE_WIDTH) / 2
+  return DEFAULT_HALF[tier]
+}
+
+/**
+ * Where a span crosses each way, as a distance along it.
+ *
+ * Segment against segment, taking the parameter along the span. A way that touches the span more
+ * than once -- a hairpin, or a road running beside it and turning across it -- yields one crossing
+ * per touch, which is right: each is a separate place the line has to be high enough.
+ *
+ * Crossings outside the span are not clipped away by the caller, so the test is on both parameters
+ * rather than only on the way's.
+ */
+export function crossingsAlong(a: Pos, b: Pos, ways: Iterable<RoadWay>): Crossing[] {
+  const out: Crossing[] = []
+  const se = b.e - a.e
+  const sn = b.n - a.n
+  const length = Math.hypot(se, sn)
+  if (length === 0) return out
+
+  for (const way of ways) {
+    const { pts } = way
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const we = pts[i + 2]! - pts[i]!
+      const wn = pts[i + 3]! - pts[i + 1]!
+      const denom = se * wn - sn * we
+      // Parallel, including a zero-length segment. A road running exactly along the span is not a
+      // crossing, and the ways either side of it will be.
+      if (denom === 0) continue
+      const de = pts[i]! - a.e
+      const dn = pts[i + 1]! - a.n
+      const t = (de * wn - dn * we) / denom
+      const u = (de * sn - dn * se) / denom
+      if (t < 0 || t > 1 || u < 0 || u > 1) continue
+      out.push({
+        d: Math.round(t * length * 10) / 10,
+        kind: way.kind,
+        tier: way.tier,
+        half: way.half,
+        onBridge: way.bridge,
+      })
+    }
+  }
+  return out.sort((x, y) => x.d - y.d)
+}
+
+/**
+ * Ways bucketed on a lattice, so a span only pays for the ones near it.
+ *
+ * The overwhelming majority of spans cross nothing at all -- this is Brandenburg forest, and the
+ * search evaluates several million lines a run -- so what matters is that the empty answer costs a
+ * handful of map lookups rather than a scan of the road network.
+ *
+ * Ways are split into single segments and each is registered in every bucket its bounding box
+ * touches. A segment that crosses the span therefore always sits in a bucket the span itself enters
+ * -- which is why the walk below has to be an exact grid traversal rather than sampled steps: a
+ * span can clip the corner of a bucket without any sample landing in it, and the road inside would
+ * simply not be found.
+ */
+export class RoadIndex implements Roads {
+  /** Every segment, once. Buckets hold indices into this so a segment can be deduplicated by id. */
+  private readonly pieces: RoadWay[] = []
+  private readonly buckets = new Map<number, number[]>()
+  /** Query number each segment was last returned for, so a repeat costs a comparison. */
+  private stamps = new Int32Array(0)
+  private query = 0
+
+  constructor(private readonly cell = 100) {}
+
+  private static key(cx: number, cy: number): number {
+    // One integer rather than a string: this is built once per region over hundreds of thousands of
+    // segments, and string keys were most of that time.
+    return cx * 4294967296 + cy
+  }
+
+  add(way: RoadWay): void {
+    const { pts } = way
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const id = this.pieces.length
+      this.pieces.push({ ...way, pts: pts.slice(i, i + 4) })
+      const c0 = Math.floor(Math.min(pts[i]!, pts[i + 2]!) / this.cell)
+      const c1 = Math.floor(Math.max(pts[i]!, pts[i + 2]!) / this.cell)
+      const r0 = Math.floor(Math.min(pts[i + 1]!, pts[i + 3]!) / this.cell)
+      const r1 = Math.floor(Math.max(pts[i + 1]!, pts[i + 3]!) / this.cell)
+      for (let cx = c0; cx <= c1; cx++) {
+        for (let cy = r0; cy <= r1; cy++) {
+          const k = RoadIndex.key(cx, cy)
+          const bucket = this.buckets.get(k)
+          if (bucket) bucket.push(id)
+          else this.buckets.set(k, [id])
+        }
+      }
+    }
+  }
+
+  /**
+   * Every segment in a bucket the span passes through, each returned once.
+   *
+   * Amanatides-Woo traversal: step to whichever of the next column or the next row boundary the
+   * span reaches first, so exactly the buckets the segment enters are visited and none is stepped
+   * over.
+   */
+  near(a: Pos, b: Pos): RoadWay[] {
+    const out: RoadWay[] = []
+    if (!this.buckets.size) return out
+    if (this.stamps.length < this.pieces.length) this.stamps = new Int32Array(this.pieces.length)
+    const stamp = ++this.query
+
+    const { cell } = this
+    let cx = Math.floor(a.e / cell)
+    let cy = Math.floor(a.n / cell)
+    const endX = Math.floor(b.e / cell)
+    const endY = Math.floor(b.n / cell)
+    const de = b.e - a.e
+    const dn = b.n - a.n
+    const stepX = Math.sign(de)
+    const stepY = Math.sign(dn)
+    // Distance in t along the span between successive boundaries of each axis, and to the first one.
+    const tDeltaX = de === 0 ? Infinity : Math.abs(cell / de)
+    const tDeltaY = dn === 0 ? Infinity : Math.abs(cell / dn)
+    let tMaxX =
+      de === 0 ? Infinity : ((cx + (stepX > 0 ? 1 : 0)) * cell - a.e) / de
+    let tMaxY =
+      dn === 0 ? Infinity : ((cy + (stepY > 0 ? 1 : 0)) * cell - a.n) / dn
+
+    // Exactly the number of boundaries the span can cross, so the walk terminates on arithmetic
+    // rather than on a floating-point comparison landing the right way.
+    const visits = Math.abs(endX - cx) + Math.abs(endY - cy) + 1
+    for (let visit = 0; visit < visits; visit++) {
+      const bucket = this.buckets.get(RoadIndex.key(cx, cy))
+      if (bucket) {
+        for (const id of bucket) {
+          if (this.stamps[id] === stamp) continue
+          this.stamps[id] = stamp
+          out.push(this.pieces[id]!)
+        }
+      }
+      if (tMaxX < tMaxY) {
+        cx += stepX
+        tMaxX += tDeltaX
+      } else {
+        cy += stepY
+        tMaxY += tDeltaY
+      }
+    }
+    return out
+  }
+
+  crossings(a: Pos, b: Pos): Crossing[] {
+    const ways = this.near(a, b)
+    return ways.length ? crossingsAlong(a, b, ways) : []
+  }
+
+  /** Buckets holding at least one segment, for reporting how much road a region carries. */
+  get size(): number {
+    return this.buckets.size
+  }
+
+  get segments(): number {
+    return this.pieces.length
+  }
+}

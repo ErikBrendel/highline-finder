@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
 import { raiseOntoBuildings } from './buildings.js'
+import { loadRoads } from './roads.js'
 import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
@@ -213,8 +214,20 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
+  /**
+   * The road network, for the same corridors and for the same reason: only ground a line actually
+   * crosses can put traffic under it. Fetched here rather than with the terrain because the
+   * corridor set is not known until the pair search has run.
+   */
+  const roads = await stage('[5/6] roads under those corridors', () => loadRoads(used))
+  console.log(
+    `  ${roads.ways} ways in ${roads.index.segments} segments  ` +
+      `(${Object.entries(roads.byTier).map(([t, n]) => `${n} ${t}`).join(', ')})`,
+  )
+  const scene = { roofs, roads: roads.index }
+
   const r = await stage('[6/6] profiles and score', () =>
-    evaluatePairs(found, ground, surface, p, roofs),
+    evaluatePairs(found, ground, surface, p, scene),
   )
   console.log(`  pairs in length range      ${r.pairsInRange}`)
   console.log(
@@ -232,7 +245,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
 
   const ref = await stage('[6/6] local refinement', () =>
-    refine(r.candidates, ground, surface, p, roofs),
+    refine(r.candidates, ground, surface, p, scene),
   )
   const gain = ref.improved ? ref.totalGain / ref.improved : 0
   console.log(

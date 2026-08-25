@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { PLANNED_RIG_MAX, planLine } from './plan.js'
 import { Grid } from './grid.js'
 import type { Pos } from './grid.js'
-import type { Roofs } from './anchoring.js'
+import type { Scene } from './scene.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
 const p = DEFAULT_PARAMS
@@ -24,9 +24,9 @@ function terrain(floor: number, canopy = 0, eastRim = 50): { ground: Grid; surfa
   return { ground: make(base), surface: make((e) => base(e) + (e > 50 && e < 250 ? canopy : 0)) }
 }
 
-/** A city model that puts a building under each of the given points and nowhere else. */
-const roofsAt = (...points: Pos[]): Roofs => ({
-  covers: (e, n) => points.some((q) => Math.hypot(q.e - e, q.n - n) < 2),
+/** A scene whose city model puts a building under each of the given points and nowhere else. */
+const roofsAt = (...points: Pos[]): Scene => ({
+  roofs: { covers: (e, n) => points.some((q) => Math.hypot(q.e - e, q.n - n) < 2) },
 })
 
 describe('planLine', () => {

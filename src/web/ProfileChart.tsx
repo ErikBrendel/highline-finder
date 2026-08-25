@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Candidate, ProfileSample } from '../shared/types.js'
+import type { Candidate, Params, ProfileSample, RoadTier } from '../shared/types.js'
 import { COVER_BUILDING, type Cover, coverRuns } from './landcover.js'
 import { emitHoverPoint } from './hoverMarker.js'
 import { toWgs84 } from '../shared/geo.js'
@@ -12,6 +12,12 @@ import { toWgs84 } from '../shared/geo.js'
  * already the roof, because terrain.ts treats a roof as ground, so the building is drawn as the
  * column between the roof and the bare earth underneath, with the terrain fill continuing below
  * it. Water is a section through the body, filled to the axis.
+ *
+ * Roads get a required-clearance line rather than a marker: one series along the whole span, flat
+ * at `minClearance` over open ground and stepping up wherever something carrying traffic passes
+ * underneath. That is the entire clearance rule as one shape, and whether the line clears it is
+ * then a matter of looking at the picture. The icon under each step says what the traffic is; the
+ * dashed line says how much air it wants.
  *
  * Marker positions come from the resampled profile, but their labels come from the candidate's
  * stored metrics, which were measured on a finer step. Labelling from the profile instead would
@@ -32,13 +38,138 @@ interface Props {
   profile: ProfileSample[]
   /** Per profile sample, or null while the land cover is still loading or unavailable. */
   cover: Cover | null
+  /** The run's parameters, for the clearance rule the required-clearance line draws. */
+  params: Params
 }
 
-export function ProfileChart({ c, profile, cover }: Props) {
+/**
+ * A glyph for what uses the crossing, in a 16-wide box centred on the origin and sitting on it.
+ *
+ * Drawn rather than lettered: the label would be an OSM tag value, and "secondary" tells a reader
+ * nothing about whether a lorry is going to come along it.
+ */
+function TrafficIcon({ tier }: { tier: RoadTier }) {
+  const stroke = { stroke: 'var(--road)', strokeWidth: 1.2, fill: 'none' }
+  if (tier === 'path') {
+    return (
+      <g {...stroke}>
+        <circle cx="0" cy="-8.5" r="1.6" />
+        <path d="M0,-7 L0,-3 M0,-3 L-2,0 M0,-3 L2,0 M-2.5,-5.5 L2.5,-5.5" />
+      </g>
+    )
+  }
+  if (tier === 'cycle') {
+    return (
+      <g {...stroke}>
+        <circle cx="-3.5" cy="-2" r="2.2" />
+        <circle cx="3.5" cy="-2" r="2.2" />
+        <path d="M-3.5,-2 L0,-2 L1.5,-6 M0,-2 L3.5,-2 M-1,-6 L2.5,-6" />
+      </g>
+    )
+  }
+  if (tier === 'street') {
+    return (
+      <g {...stroke}>
+        <path d="M-6,-2 L-6,-4 L-3.5,-6.5 L3,-6.5 L6,-4 L6,-2 Z" />
+        <circle cx="-3.5" cy="-1.4" r="1.3" />
+        <circle cx="3.5" cy="-1.4" r="1.3" />
+      </g>
+    )
+  }
+  if (tier === 'road') {
+    return (
+      <g {...stroke}>
+        <path d="M-7,-2 L-7,-8 L1,-8 L1,-2 Z M1,-5.5 L4,-5.5 L6.5,-3.5 L6.5,-2 L1,-2" />
+        <circle cx="-4" cy="-1.4" r="1.3" />
+        <circle cx="4" cy="-1.4" r="1.3" />
+      </g>
+    )
+  }
+  return (
+    <g {...stroke}>
+      <path d="M-5,-2 L-5,-9 A4,4 0 0 1 5,-9 L5,-2 Z M-5,-6 L5,-6 M-2.5,-1.5 L-2.5,0 M2.5,-1.5 L2.5,0" />
+    </g>
+  )
+}
+
+export function ProfileChart({ c, profile, cover, params }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const p = profile
+  const crossings = c.crossings ?? []
+
+  /**
+   * Height of the thing a crossing's clearance is owed to, at any distance along the span.
+   *
+   * The ground series for a road on the ground; the surface series for one on a bridge, because
+   * the terrain model is bare earth and runs straight underneath a deck. Linearly interpolated:
+   * a crossing lands where the road is, which is almost never on a profile sample.
+   */
+  const carrierAt = (d: number, onBridge: boolean): number => {
+    const key = onBridge ? 'surface' : 'ground'
+    const last = p.length - 1
+    const t = c.length > 0 ? Math.min(1, Math.max(0, d / c.length)) : 0
+    const at = t * last
+    const i = Math.min(last, Math.floor(at))
+    const f = at - i
+    return f === 0 ? p[i]![key] : p[i]![key] * (1 - f) + p[Math.min(last, i + 1)]![key] * f
+  }
+
+  /** The sagging line's height at any distance, on the same interpolation as the carrier. */
+  const lineAt = (d: number): number => {
+    const last = p.length - 1
+    const t = c.length > 0 ? Math.min(1, Math.max(0, d / c.length)) : 0
+    const at = t * last
+    const i = Math.min(last, Math.floor(at))
+    const f = at - i
+    return f === 0 ? p[i]!.line : p[i]!.line * (1 - f) + p[Math.min(last, i + 1)]!.line * f
+  }
+
+  /** The crossings covering a distance, widest requirement first. */
+  const demandAt = (d: number) => {
+    let worst: { extra: number; x: (typeof crossings)[number] } | null = null
+    for (const x of crossings) {
+      if (d < x.d - x.half || d > x.d + x.half) continue
+      const extra = params.roadClearance[x.tier]
+      if (!worst || extra > worst.extra) worst = { extra, x }
+    }
+    return worst
+  }
+
+  /**
+   * The clearance rule as one series: flat at `minClearance` over open ground, stepping up over
+   * anything carrying traffic. Where the sagging line dips below it, the line does not qualify.
+   *
+   * Sampled at the profile's own points plus a pair either side of every kerb, so the steps are
+   * vertical rather than ramps a few metres wide.
+   */
+  const EDGE = 0.05
+  const requiredPoints = (() => {
+    const ds = new Set<number>(p.map((s) => s.d))
+    for (const x of crossings) {
+      for (const edge of [x.d - x.half, x.d + x.half]) {
+        ds.add(Math.max(0, Math.min(c.length, edge - EDGE)))
+        ds.add(Math.max(0, Math.min(c.length, edge + EDGE)))
+      }
+    }
+    return [...ds]
+      .sort((u, v) => u - v)
+      .map((d) => {
+        const worst = demandAt(d)
+        return {
+          d,
+          v: carrierAt(d, worst?.x.onBridge ?? false) + params.minClearance + (worst?.extra ?? 0),
+        }
+      })
+  })()
+
   const lo = Math.min(...p.map((s) => s.ground)) - 2
-  const hi = Math.max(...p.map((s) => Math.max(s.surface, s.line))) + 3
+  // The required-clearance line is part of the picture, so a 23 m demand over a railway has to fit
+  // in it rather than run off the top.
+  const hi =
+    Math.max(
+      ...p.map((s) => Math.max(s.surface, s.line)),
+      ...requiredPoints.map((q) => q.v),
+    ) + 3
   const iw = W - PAD.left - PAD.right
   const ih = H - PAD.top - PAD.bottom
 
@@ -168,6 +299,40 @@ export function ProfileChart({ c, profile, cover }: Props) {
       <text x={x(tightest.d) + 5} y={y(tightest.ground) - 4} fill="#fbbf24" fontSize="10">
         {c.clearanceMin.toFixed(1)} m
       </text>
+
+      {/* The clearance rule, drawn before the line so the line reads as sitting over or under it. */}
+      {requiredPoints.length > 1 && (
+        <path
+          d={requiredPoints
+            .map((q, i) => `${i ? 'L' : 'M'}${x(q.d).toFixed(1)},${y(q.v).toFixed(1)}`)
+            .join('')}
+          stroke="var(--road)"
+          strokeWidth="1.25"
+          strokeDasharray="5 3"
+          fill="none"
+          opacity="0.85"
+        />
+      )}
+      {crossings.map((r, i) => {
+        const carrier = carrierAt(r.d, r.onBridge)
+        const half = Math.max(2, x(r.half) - x(0))
+        const short = params.minClearance + params.roadClearance[r.tier] - (lineAt(r.d) - carrier)
+        return (
+          <g key={`${r.d}-${i}`}>
+            {/* The carriageway itself, as a slab on whatever carries it. */}
+            <rect
+              x={x(r.d) - half}
+              y={y(carrier) - 2}
+              width={half * 2}
+              height="4"
+              fill={short > 0 ? 'var(--bad)' : 'var(--road)'}
+            />
+            <g transform={`translate(${x(r.d)},${y(carrier) - 3})`}>
+              <TrafficIcon tier={r.tier} />
+            </g>
+          </g>
+        )
+      })}
 
       <path d={path('line')} stroke="var(--line)" strokeWidth="2" fill="none" />
       <circle cx={x(0)} cy={y(p[0]!.line)} r="3.5" fill="#f43f5e" />

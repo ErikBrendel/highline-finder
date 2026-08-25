@@ -21,6 +21,24 @@ export const DEFAULT_PARAMS: Params = {
   // Enough that a walker plus sag does not scrape. Applies only outside anchorZone.
   minClearance: 3.0,
 
+  // Extra metres demanded where the line passes over traffic, on top of minClearance.
+  //
+  // For scale: German law wants 4.50 m over a road -- the 4.00 m a lorry may legally be, plus half
+  // a metre -- and 4.70 m under new motorway structures. These run to five times that on purpose. A
+  // bridge deck is rigid and surveyed; a slackline sags under a walker, is rigged by hand, and can
+  // drop that walker onto whatever is beneath. The road standard is the wrong reference class.
+  //
+  // The ladder is about what can be closed for a rigging day rather than about size alone. A forest
+  // path or a footway is taped off for an afternoon and asks for nothing extra; a motorway or a
+  // railway cannot be stopped at all. Which OSM values land in which class is in shared/roads.ts.
+  roadClearance: {
+    path: 0,
+    cycle: 3,
+    street: 8,
+    road: 12,
+    highway: 20,
+  },
+
   // At the anchor the line sits at most aFrameMax up, and possibly at ground level, so the
   // clearance test has to exclude a window at each end or nothing would ever pass.
   anchorZone: 10.0,
