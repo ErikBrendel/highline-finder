@@ -409,13 +409,20 @@ export function App() {
    * consequence of the click, and an effect that both reads and writes the selection is exactly
    * what produced a maximum-update-depth loop before.
    */
-  const commit = (next: CustomPoints) => {
+  const commit = (next: CustomPoints, select: boolean) => {
     // Any hand movement ends an optimisation: it is descending from a point the user has left.
     setOptimizing(false)
     setCustom(next)
     const complete = !!next.a && !!next.b
     if (!complete) setRig(null)
-    setSelectedId((cur) => (complete ? PLANNED_ID : cur === PLANNED_ID ? null : cur))
+    setSelectedId((cur) => {
+      if (!complete) return cur === PLANNED_ID ? null : cur
+      // `select` is the difference between asking to see a line and merely moving one. Placing a
+      // point is a request for the panel; dragging an anchor is not, so a panel the user has closed
+      // stays closed while they rearrange things. An open one follows the line it is describing
+      // either way, including when a dragged candidate forks into the planned line.
+      return select || cur !== null ? PLANNED_ID : null
+    })
   }
 
   /** Turns one anchor class on or off. All three off is a legitimate setting: no lines. */
@@ -427,11 +434,12 @@ export function App() {
     })
 
   /** Places one end of the planned line. */
-  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => commit(place(custom, which, at))
+  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) =>
+    commit(place(custom, which, at), true)
 
   // One call, not two setCustomPoint calls: both would read the same pre-update `custom`, so the
   // second would put the first end back.
-  const clearCustom = () => commit({ a: null, b: null })
+  const clearCustom = () => commit({ a: null, b: null }, false)
 
   /**
    * Dragging an anchor handle. Dragging one that belongs to a *found* line forks that line into the
@@ -446,7 +454,7 @@ export function App() {
             b: { lat: selected.b.lat, lon: selected.b.lon },
           }
         : custom
-    commit(place(from, which, at))
+    commit(place(from, which, at), false)
   }
 
   /**
