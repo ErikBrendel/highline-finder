@@ -83,10 +83,11 @@ anchors only, one AOI, static viewer.
   so a line cannot run into unloaded terrain. It only pays where relief is sparse relative to the
   tile grid. Fetching terrain from the WCS by window instead of by published tile would let the mask
   work at its own resolution.
-- **Roads without Overpass.** The road network is fetched per 1 km tile from the public Overpass
-  API, which is a shared community service with a rate limit — fine for a few hundred tiles and the
-  wrong tool for a state. A Geofabrik extract (`brandenburg-latest.osm.pbf`, ~250 MB) read once into
-  the same `RoadIndex` would remove the limit and the network round trip both.
+- **OSM beyond Brandenburg.** The shipped blocks come from the Brandenburg extract, which includes
+  Berlin and stops at the state border. Extending the search into a neighbouring state means adding
+  its extract to `osmRefresh.ts` and re-running — the block grid and the format do not care, but
+  nothing currently notices when a region reaches past what was extracted, so it would read as
+  empty rather than as missing.
 - **Bridges we do not measure.** A crossing tagged `bridge=yes` takes its clearance from the surface
   model, on the reasoning that the photogrammetric model sees the deck. It also sees whatever is
   standing on the deck at the moment of capture, and the railings, so the figure runs a metre or two
