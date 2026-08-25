@@ -52,7 +52,13 @@ describe.skipIf(!present)('generated candidates.json', () => {
     for (const c of candidates) {
       expect(c.length).toBeGreaterThanOrEqual(params.minLength)
       expect(c.length).toBeLessThanOrEqual(params.maxLength)
-      expect(c.clearanceMin).toBeGreaterThanOrEqual(params.minClearance)
+      // The loosest figure any sample can earn, not the ordinary one: clearanceMin is the true gap
+      // and a line over open water is held to less. Which samples were over water is not in the
+      // dataset -- the gate itself lives in clearanceMargin, which is not stored -- so this is as
+      // far as the file can be checked from the outside.
+      expect(c.clearanceMin).toBeGreaterThanOrEqual(
+        Math.min(params.minClearance, params.waterClearance),
+      )
       expect(c.exposure).toBeGreaterThanOrEqual(params.minExposure)
       expect(c.canopyBlockedFraction).toBeLessThanOrEqual(params.maxCanopyBlocked + 1e-9)
       expect(c.offLevelRatio).toBeLessThanOrEqual(params.maxOffLevelRatio + 1e-9)

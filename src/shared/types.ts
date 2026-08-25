@@ -337,7 +337,14 @@ export interface Candidate {
   offLevel: number
   /** offLevel as a fraction of length. Always <= maxOffLevelRatio. */
   offLevelRatio: number
-  /** Smallest line-to-terrain gap on the interior of the span. Always >= minClearance. */
+  /**
+   * Smallest gap between the line and the worst thing anywhere across the band, on the interior.
+   *
+   * A true gap in metres, so it can sit below `minClearance` where the line runs over open water
+   * and is held to `waterClearance` instead. What a candidate satisfies is that every sample beat
+   * whatever *it* was held to; that margin is not stored, because nothing downstream re-decides
+   * candidacy -- lines that failed are simply absent.
+   */
   clearanceMin: number
   /** Largest line-to-terrain gap anywhere. How high the highline actually is. */
   exposure: number
