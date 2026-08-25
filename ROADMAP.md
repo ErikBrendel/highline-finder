@@ -38,6 +38,21 @@ anchors only, one AOI, static viewer.
   local terrain shape in the line's direction already tells us which case we are in — it is
   computed during the openness scan and then thrown away.
 
+- **Recompute one area without discarding the rest.** Two gaps, and the second is the expensive
+  one. Passing AOIs on the command line *replaces* the list rather than selecting from it, so a run
+  over one small area writes a dataset containing only that area — which makes the obvious move
+  ("just rebuild Sperenberg") quietly destructive. And a source change invalidates every region's
+  cache at once, so adding a 2 km² area after touching `scoring.ts` costs a full recompute of the
+  190 km² one next door. What is wanted is for command-line AOIs to choose what gets *recomputed*
+  while everything else is served from cache even when its fingerprint no longer matches, plus a
+  per-region record of what it was generated with so a mixed-vintage dataset says so instead of
+  pretending to be uniform. Note that the machinery is nearly all there already: each region is
+  cached whole on completion and keyed independently, so a full-list run today does reuse every
+  region it has not invalidated. The missing pieces are the selection and the honesty about
+  vintage. Do not reach for running two pipelines at once instead — `tileTiff` checks that a tile
+  exists and then writes it non-atomically, so a concurrent run hands the other one a truncated
+  GeoTIFF that looks complete.
+
 - **Known-good lines as a regression suite.** The pipeline's recall is currently unfalsifiable: we
   can see what it finds, never what it missed. A handful of hand-picked lines that are known to be
   riggable, checked on every run, turns that into a number — and each miss comes with a reason,
