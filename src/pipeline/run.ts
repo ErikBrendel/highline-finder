@@ -4,6 +4,7 @@ import { corridorTiles, loadProduct } from './raster.js'
 import { raiseOntoBuildings } from './buildings.js'
 import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
+import { trimProfile } from '../shared/profile.js'
 import { readRegion, regionKey, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
@@ -462,7 +463,7 @@ async function main() {
   // line found is stored.
   const deduped = (await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius))).map(locate)
   const finalCandidates = p.storeProfiles
-    ? deduped
+    ? deduped.map((c) => ({ ...c, profile: c.profile && trimProfile(c.profile, p) }))
     : deduped.map(({ profile: _profile, ...rest }) => rest)
   const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
   console.log(

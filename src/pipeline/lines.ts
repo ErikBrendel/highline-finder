@@ -14,7 +14,7 @@ import {
 } from '../shared/scoring.js'
 import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
-import { buildProfile, packProfile } from '../shared/profile.js'
+import { canopyProfile, groundProfile } from '../shared/profile.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -227,21 +227,37 @@ export function evaluateLine(
     scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
     maxSagRatio: 0,
     crossings,
-    profile: packProfile(buildProfile(a, b, hA, hB, roundedLength, ground, surface, p, scene), p),
   }
+
   /**
-   * Measured once and gated before anything expensive, which is both the cheaper order and the one
-   * that can say why. The loosest feasible sag costs a dozen more passes over the profile and is
-   * only wanted for a line that is going to be kept -- and better than nineteen in twenty are not.
+   * Terrain first, and gated on it, before the surface model is touched at all.
+   *
+   * Everything except canopy is decided by the terrain, and better than seven in ten pairs that get
+   * here fail one of those tests -- so the surface samples, the canopy band and the metrics that
+   * read them are work spent on a verdict already reached. Standing in for the surface with the
+   * terrain itself is what lets one call to `rejectionOf` serve both passes: with nothing above the
+   * ground, the canopy gate cannot trip, so this asks exactly the questions terrain can answer.
    */
-  const m = rawMetricsAt(provisional.profile!, roundedLength, hA, hB, p.sagRatio, p, crossings)
+  const terrain = groundProfile(a, b, roundedLength, ground, p, scene)
+  const probe = { ...terrain, surface: terrain.ground }
+  const early = rawMetricsAt(probe, roundedLength, hA, hB, p.sagRatio, p, crossings)
+  if (!early) return failed('geometry')
+  const earlyReject = rejectionOf(early, p)
+  if (earlyReject) {
+    const worst = earlyReject === 'crossing' ? crossings?.[early.worstCrossing] : undefined
+    const t = worst ? worst.d / roundedLength : 0
+    return failed(earlyReject, worst ? { e: a.e + dE * t, n: a.n + dN * t } : null)
+  }
+
+  // The canopy band is drawn rather than scored, so the search never pays for it. A profile that is
+  // going to be stored, or one the browser builds for a line being looked at, gets the full thing.
+  const canopy = canopyProfile(a, b, roundedLength, surface, terrain, p, p.storeProfiles)
+  provisional.profile = { ...terrain, ...canopy }
+
+  const m = rawMetricsAt(provisional.profile, roundedLength, hA, hB, p.sagRatio, p, crossings)
   if (!m) return failed('geometry')
   const reject = rejectionOf(m, p)
-  if (reject) {
-    const worst = reject === 'crossing' ? crossings?.[m.worstCrossing] : undefined
-    const t = worst ? worst.d / roundedLength : 0
-    return failed(reject, worst ? { e: a.e + dE * t, n: a.n + dN * t } : null)
-  }
+  if (reject) return failed(reject)
 
   provisional.maxSagRatio = maxFeasibleSag(
     provisional.profile!, roundedLength, hA, hB, p, provisional.crossings,
