@@ -21,6 +21,18 @@ import { installHoverMarker } from './hoverMarker.js'
  * decoration here: dl-de/by-2.0 requires naming GeoBasis-DE/LGB wherever the data is shown.
  */
 const LGB_ATTR = '&copy; GeoBasis-DE/LGB (dl-de/by-2.0)'
+const OSM_ATTR = '&copy; OpenStreetMap contributors (ODbL)'
+
+/**
+ * Attribution for the data behind the measurements, shown whatever basemap is on.
+ *
+ * A source's attribution only appears while a layer using it is visible, so tying these to the
+ * basemaps meant the OSM credit vanished on the ortho view and the LGB credit vanished on the OSM
+ * view -- while both datasets were still deciding what every line was worth. Both licences require
+ * naming the source wherever the data is shown, and a line's clearance figure is the data being
+ * shown. The strings match the basemap ones exactly so they collapse into one when both apply.
+ */
+const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR]
 const wms = (path: string, layer: string) =>
   cachedUrl(
     `https://isk.geobasis-bb.de/mapproxy/${path}/service/wms?SERVICE=WMS&VERSION=1.3.0` +
@@ -43,7 +55,7 @@ export const BASEMAPS = [
     id: 'osm',
     label: 'OSM',
     tiles: cachedUrl('https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-    attribution: '&copy; OpenStreetMap contributors',
+    attribution: OSM_ATTR,
   },
 ] as const
 
@@ -402,6 +414,7 @@ export function MapView({
     }
     const m = new maplibregl.Map({
       container: el.current,
+      attributionControl: { customAttribution: DATA_ATTRIBUTION },
       style: {
         version: 8,
         sources: Object.fromEntries(

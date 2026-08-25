@@ -458,6 +458,18 @@ async function main() {
           attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
           note: 'includes vegetation and structures; different survey epoch than the DGM',
         },
+        {
+          name: 'LoD1 city model (3d_gebaeude)',
+          url: 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml/',
+          attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
+          note: 'extruded footprints with one roof height each; merged into the ground so a roof is both an anchor and an obstacle. Brandenburg only, so no buildings in Berlin',
+        },
+        {
+          name: 'OpenStreetMap roads, railways and water',
+          url: 'https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf',
+          attribution: 'OpenStreetMap contributors, ODbL',
+          note: 'extracted once by `npm run osm` and shipped as blocks under public/osm; sets the clearance a line owes over traffic. Brandenburg extract, which includes Berlin',
+        },
       ],
       stats: {
         anchorsScanned: totals.anchorsScanned,
