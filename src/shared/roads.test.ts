@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { RoadIndex, classifyWay, crossingsAlong, requiredOver, type RoadWay } from './roads.js'
+import {
+  RoadIndex,
+  classifyWay,
+  crossingsAlong,
+  requiredOver,
+  withSpan,
+  type RoadWay,
+} from './roads.js'
+import type { Crossing } from './types.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
 const p = DEFAULT_PARAMS
@@ -57,6 +65,23 @@ describe('classifyWay', () => {
     expect(classifyWay({ highway: 'residential' })?.half).toBe(3)
     // A lane count only counts when it parses.
     expect(classifyWay({ highway: 'residential', lanes: 'yes' })?.half).toBe(3)
+  })
+})
+
+describe('withSpan', () => {
+  it('gives a crossing from an older dataset the stretch it never carried', () => {
+    const old = { d: 100, half: 4, kind: 'residential', tier: 'street', onBridge: false }
+    const fixed = withSpan(old as unknown as Crossing)
+    expect(fixed.from).toBe(96)
+    expect(fixed.to).toBe(104)
+    expect(fixed.offset).toBe(0)
+  })
+
+  it('leaves a current crossing exactly as it is', () => {
+    const now: Crossing = {
+      d: 100, from: 90, to: 110, offset: 2, kind: 'x', tier: 'street', onBridge: false,
+    }
+    expect(withSpan(now)).toBe(now)
   })
 })
 

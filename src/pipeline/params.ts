@@ -75,7 +75,7 @@ export const DEFAULT_PARAMS: Params = {
   // Scales the right way for what it is for: a 60 m urban line gets +/-2.4 m at midspan, which is
   // what stops a line threading a corridor between two buildings, while a 400 m line over a valley
   // gets +/-16 m of air it was never going to touch anything with.
-  sideClearanceRatio: 0,
+  sideClearanceRatio: 0.04,
 
   // Most lateral samples taken per side at any one station. Beyond this the step grows instead of
   // the count, so a 16 m half-width costs the same as a 2 m one: a band that wide is looking for

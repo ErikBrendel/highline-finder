@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { LINE_KINDS } from '../shared/types.js'
+import { withSpan } from '../shared/roads.js'
 import type {
   AnchorDump,
   Candidate,
@@ -303,9 +304,22 @@ export function App() {
    * The file omits it per line because the list already says it -- see Dataset.lines -- so this is
    * where the two halves of that arrangement meet. Everything downstream then sees one shape and
    * one list, exactly as it did when there was only ever one.
+   *
+   * Crossings are repaired here for the same reason: a dataset written before crossings became a
+   * stretch of span carries neither end of one, and one place to put that right beats a fallback at
+   * every point that reads them.
    */
   const candidates = useMemo(
-    () => (data ? LINE_KINDS.flatMap((kind) => data.lines[kind].map((c) => ({ ...c, kind }))) : []),
+    () =>
+      data
+        ? LINE_KINDS.flatMap((kind) =>
+            data.lines[kind].map((c) => ({
+              ...c,
+              kind,
+              crossings: c.crossings?.map(withSpan),
+            })),
+          )
+        : [],
     [data],
   )
 

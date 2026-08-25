@@ -269,7 +269,7 @@ export function Details({
 
       <div className="cols">
         <div className="chart">
-          {c && profile ? (
+          {c && profile?.length ? (
             <ProfileChart c={c} profile={profile} cover={cover} params={params} />
           ) : (
             <div className="chartwait">

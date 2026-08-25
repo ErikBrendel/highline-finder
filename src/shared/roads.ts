@@ -3,6 +3,21 @@ import { sideHalfWidthAt } from './profile.js'
 import type { Roads } from './scene.js'
 import type { Crossing, Params, RoadTier } from './types.js'
 
+/**
+ * A crossing from an older dataset, given the stretch every consumer now expects.
+ *
+ * Crossings used to be a point plus half a carriageway; they are now the stretch of span the road
+ * is under the band for. A file written before that change has neither `from` nor `to`, and the
+ * chart asks for a profile series at `undefined` -- so the shape is repaired once, on load, rather
+ * than defended against everywhere it is read.
+ */
+export function withSpan(x: Crossing): Crossing {
+  if (x.from !== undefined && x.to !== undefined) return x
+  // The old field, which the type no longer carries but the old JSON still does.
+  const half = (x as Crossing & { half?: number }).half ?? 0
+  return { ...x, from: x.d - half, to: x.d + half, offset: x.offset ?? 0 }
+}
+
 /** Total clearance a crossing demands: the base every line owes, plus its class's surcharge. */
 export function requiredOver(x: Crossing, p: Params): number {
   return p.minClearance + p.roadClearance[x.tier]
