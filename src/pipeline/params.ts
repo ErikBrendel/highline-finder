@@ -145,11 +145,27 @@ export const DEFAULT_PARAMS: Params = {
   maskRadius: 32,
   maskMinDrop: 10,
   maskMinCoverage: 0.02,
-  // Anchorable roofs a tile needs before it is fetched for its buildings alone. The mirror of
-  // maskMinCoverage, and 1 because a single tall building really is an anchor -- whether that is
-  // too generous over a whole state, where every village would qualify, is a measurement waiting
-  // to be made rather than a guess to bake in here.
+  // Anchorable roofs a tile needs before it is fetched for its buildings alone, and how tall each
+  // has to stand above the ground nearby. The mirror of maskMinDrop and maskMinCoverage.
+  //
+  // The measurement that was waiting to be made has been made, on chunk 52_728: at
+  // maskMinRoofDrop = minDropDepth this rule pulled in 96 of 121 tiles that the terrain rule had
+  // rejected, because one building 10 m above its surroundings qualifies a tile and the result is
+  // dilated by maxLength -- so every village claimed its whole 3x3 neighbourhood and the pre-pass
+  // switched itself off wherever people live.
+  //
+  // 25 m is deliberately far more than a line needs. A roof only has to clear minDropDepth to be
+  // worth anchoring on, so this is not the rule saying what is riggable; it is the rule saying what
+  // is worth *fetching a whole tile at 1 m for*, and that is a different and much stricter
+  // question. Set here to the height of a decent tower block, so the urban search goes looking for
+  // the handful of exceptional lines rather than for every church steeple in Brandenburg. Most good
+  // lines are natural anyway.
+  //
+  // The cost is real and one-sided: an ordinary rooftop line in a small settlement is not missed,
+  // it is never looked for, because its tile is never fetched. Lower this when urban coverage
+  // matters more than statewide reach.
   maskMinRoofs: 1,
+  maskMinRoofDrop: 25,
   maskExportRes: 128,
   // The web app re-derives clearances from this profile rather than the raster, so its resolution
   // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m

@@ -246,9 +246,18 @@ Only 20 of the 121 were fetched at 0.2 m. So the roof rule costs terrain bandwid
 not the expensive layer: statewide it is the difference between ~8 GB and the full ~44 GB of DGM,
 and between scanning 20 % of the ground and all of it. The surface estimate above stands.
 
-Worth tuning before a statewide run even so, in one of two directions: require more than one
-anchorable roof per tile, or dilate roofs by less than `maxLength`, since a rooftop line's far end
-is usually another rooftop nearby rather than open ground half a kilometre away.
+**Tuned, by raising the bar rather than the count.** `maskMinRoofDrop` is now 25 m, well above the
+`minDropDepth` of 10 m a line actually has to clear -- deciding a tile is worth fetching at 1 m is a
+stricter question than deciding a roof is worth anchoring on. Re-measured on the same chunk: 121 ->
+69 tiles loaded (44 for roofs rather than 96), 20 -> 13 surface tiles, 4.0 M -> 2.0 M points scanned,
+and 293 -> 274 candidates. The 19 lost are all urban, the best of them scoring 66.0 against a best
+kept of 67.1.
+
+The trade is one-sided and worth restating: an ordinary rooftop line in a small settlement is not
+missed, it is never looked for, because its tile is never fetched. And "most good lines are natural"
+is only true at the very top -- across the dataset the split is 47/6/47 natural/mixed/urban, and
+urban is 63 % of the top thousand, giving way to natural only in the top hundred (75 %) and top
+twenty (80 %). Lower this when urban coverage matters more than statewide reach.
 
 Left, in order: the remaining three chunks, which give the first seam between two searched chunks;
 then work-stealing tile handout; then dirty-set selection (a recompute area implies every chunk

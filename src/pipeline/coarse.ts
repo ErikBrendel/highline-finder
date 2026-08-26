@@ -143,10 +143,16 @@ export function dropField(g: Grid, radius: number): Grid {
  * of drop against a 10 m threshold -- so all 3,629 of them exist only because a hill within 500 m
  * dragged their tile in. On the flat, which is most of Brandenburg, nothing would drag them in.
  *
- * The test mirrors the one the anchor scan will actually apply: an anchor on a roof attaches at
- * roof level, so the ground within `dropSearchRadius` has to lie `minDropDepth` below it. The
- * lowest nearby terrain is read off the same coarse grid the terrain rule uses, so this costs one
- * min-filter and no new data at all.
+ * The test has the same shape as the one the anchor scan will apply -- an anchor on a roof attaches
+ * at roof level, so the ground within `dropSearchRadius` has to lie below it -- but a much higher
+ * bar: `maskMinRoofDrop` rather than `minDropDepth`. At the scan's own threshold this rule pulled in
+ * 96 of the 121 tiles on chunk 52_728 that the terrain rule had rejected, since one 10 m building
+ * qualifies a tile and the result is then dilated, so a village claims its neighbourhood and the
+ * pre-pass stops filtering anything. Deciding a tile is worth fetching at 1 m is a stricter question
+ * than deciding a roof is worth anchoring on; see params.ts for what that trade gives up.
+ *
+ * The lowest nearby terrain is read off the same coarse grid the terrain rule uses, so this costs
+ * one min-filter and no new data at all.
  *
  * Dilated by `reach` like the terrain set and for the same reason: a line from that roof runs up to
  * `maxLength` away, and the ground it crosses has to be loaded.
@@ -164,7 +170,7 @@ export function tilesWithRoofAnchors(
     for (const { ring, z } of tileFaces) {
       // The ring's first corner is enough: a LoD1 footprint is small next to a 16 m coarse cell.
       const near = lowest.nearest(ring[0]!, ring[1]!)
-      if (!Number.isNaN(near) && z - near >= p.minDropDepth) anchorable++
+      if (!Number.isNaN(near) && z - near >= p.maskMinRoofDrop) anchorable++
     }
     if (anchorable < p.maskMinRoofs) continue
     const [te, tn] = tile.slice(2).split('-').map(Number) as [number, number]

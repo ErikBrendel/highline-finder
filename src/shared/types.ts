@@ -168,6 +168,12 @@ export interface Params {
   maskMinCoverage: number
   /** Anchorable roofs a tile needs to be fetched on the strength of its buildings alone. */
   maskMinRoofs: number
+  /**
+   * How far the ground must fall below a roof before that roof can pull its tile in, in metres.
+   *
+   * Deliberately far above `minDropDepth`, which is what a line actually needs. See params.ts.
+   */
+  maskMinRoofDrop: number
   /** Cell size the mask is aggregated to for the debug overlay, in metres. */
   maskExportRes: number
   /** Samples kept in the serialised profile, to bound output size. */

@@ -63,10 +63,12 @@ describe('tilesWithRoofAnchors', () => {
     return { ring: [e0, n0, e0 + 20, n0, e0 + 20, n0 + 20, e0, n0 + 20, e0, n0], z }
   }
   const p = { ...DEFAULT_PARAMS, maskMinRoofs: 1 }
+  /** A roof exactly at the bar this rule sets, which is well above the one a line has to clear. */
+  const tall = 40 + p.maskMinRoofDrop
 
   it('keeps a tile for a building tall enough to anchor on, where the terrain says nothing', () => {
     const coarse = flat()
-    const faces = new Map([['33401-5801', [faceIn('33401-5801', 40 + p.minDropDepth)]]])
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', tall)]]])
     // The terrain rule, on this ground, wants nothing at all.
     expect(tilesWorthLoading(dropField(coarse, p.maskRadius), p.maskMinDrop, p.maskMinCoverage, 0).size)
       .toBe(0)
@@ -74,12 +76,21 @@ describe('tilesWithRoofAnchors', () => {
   })
 
   it('ignores a building the ground does not fall far enough below', () => {
-    const faces = new Map([['33401-5801', [faceIn('33401-5801', 40 + p.minDropDepth - 0.1)]]])
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', tall - 0.1)]]])
+    expect(tilesWithRoofAnchors(faces, flat(), p, 0).size).toBe(0)
+  })
+
+  it('holds roofs to a far higher bar than a line does', () => {
+    // The point of maskMinRoofDrop. A building a line could happily anchor on is not on its own
+    // worth fetching a square kilometre at 1 m for, or every village in Brandenburg qualifies.
+    const anchorable = 40 + p.minDropDepth
+    expect(anchorable).toBeLessThan(tall)
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', anchorable)]]])
     expect(tilesWithRoofAnchors(faces, flat(), p, 0).size).toBe(0)
   })
 
   it('pulls in the ground a line off that roof would cross', () => {
-    const faces = new Map([['33401-5801', [faceIn('33401-5801', 60)]]])
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', tall)]]])
     const near = tilesWithRoofAnchors(faces, flat(), p, 500)
     // The eight neighbours as well, since a line runs up to maxLength from the roof.
     expect(near.size).toBe(9)
@@ -88,7 +99,7 @@ describe('tilesWithRoofAnchors', () => {
   })
 
   it('respects the roof count a tile has to reach', () => {
-    const faces = new Map([['33401-5801', [faceIn('33401-5801', 60)]]])
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', tall)]]])
     expect(tilesWithRoofAnchors(faces, flat(), { ...p, maskMinRoofs: 2 }, 0).size).toBe(0)
   })
 })
