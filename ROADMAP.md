@@ -126,11 +126,27 @@ anchors only, one AOI, static viewer.
 
 ### All of Brandenburg + Berlin: superchunks
 
-30,545 km², i.e. 30,545 source tiles. Scaling region 7 linearly gives 35 M anchors, 106 billion
-pairs in range, 1.1 M distinct lines and 151 M hotspot endpoints; the raw surface model would be
-~950 GB. Linear is the wrong model and the difference decides the project: the coarse pre-pass
-rejects flat ground before a single 1 m tile is fetched, and most of Brandenburg is flat. At the
-67 % keep rate region 7 saw, the surface download is ~287 GB; at 10 % it is ~43 GB.
+**31,291 source tiles carry terrain, and the coarse pre-pass keeps 5,769 of them -- 18.4 %.**
+Measured over the whole cached coarse grid by `src/tools/tileCensus.ts`, 64 windows in 47 s. That
+lands near the optimistic end of the range this section used to guess at, and it is the number
+everything below rests on: scaling region 7 linearly would have predicted a 67 % keep rate and a
+~287 GB surface download.
+
+- Surface model **~190 GB** if every kept tile turns out to carry a line, and ~101 GB at the 53 %
+  rate the current seven regions show (336 terrain tiles fetched, 179 of them wanted at 0.2 m).
+  Against ~1,033 GB for the state unfiltered.
+- Terrain model ~8 GB.
+- **562 superchunks of 8x8 km hold any terrain; 357 hold a tile worth loading.** A working
+  superchunk averages 16.2 of its 64 tiles, so the 10x10 halo load is a ceiling almost nothing
+  reaches.
+
+Two caveats. This is the *terrain* rule alone -- `tilesWithRoofAnchors` adds tiles on flat ground
+with a building tall enough to anchor on, worth +84 on 193 for region 7, and measuring it statewide
+means a LoD1 fetch for all 31,291 tiles. And the census counts tiles the pre-pass would *fetch*, not
+tiles that yield a line: 88 of the 336 fetched today were barren.
+
+Scaling region 7 linearly gives 35 M anchors, 106 billion pairs in range, 1.1 M distinct lines and
+151 M hotspot endpoints.
 
 **What the pre-pass misses, measured on Mueggelberge: nothing.** Simulating thresholds and scoring
 against the real anchors could only speak about tightening -- the anchors it scored against were
