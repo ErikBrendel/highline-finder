@@ -14,7 +14,15 @@ import {
 } from './coarse.js'
 import { packAnchors, packSectors, scanAnchors } from './openness.js'
 import { dedupe, locate, pairsOf } from './lines.js'
-import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
+import {
+  HOTSPOT_RADIUS,
+  SPOT_RES,
+  clusterSpots,
+  gridSpots,
+  isWalkable,
+  spotOf,
+  type Spot,
+} from './hotspots.js'
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Anchor } from './openness.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
@@ -56,12 +64,6 @@ const MASK_OUT = new URL('../web/public/mask.json', import.meta.url).pathname
 const TILES_OUT = new URL('../web/public/tiles.json', import.meta.url).pathname
 
 /**
- * Radius the hotspot layer collapses line endpoints over. Ten times the candidate `dedupRadius`:
- * this answers "is this valley worth a trip", where two spots 60 m apart are the same answer.
- */
-const HOTSPOT_RADIUS = 50
-
-/**
  * Everything one region contributes, in a form that survives a round trip through JSON.
  *
  * Serialisable on purpose: regions are independent, so a region whose inputs have not changed is
@@ -77,10 +79,14 @@ interface AreaResult {
   /** Anchors inside the AOIs, already in the shape the debug dump wants. */
   anchors: { lat: number[]; lon: number[]; ground: number[]; drop: number[]; open: string[] }
   /**
-   * Anchors of every feasible line, for the hotspot layer. `kind` is an index into LINE_KINDS
-   * rather than the word: there are millions of these, and the word is most of the record.
+   * The hotspot layer's input, already reduced to a `SPOT_RES` grid -- see hotspots.ts. Split by
+   * kind because the three layers are clustered independently, and columnar because even reduced
+   * this is the largest thing in the file.
    */
-  endpoints: { e: number[]; n: number[]; kind: number[]; score: number[]; blocked: number[] }
+  spots: ByKind<{ e: number[]; n: number[]; count: number[]; score: number[] }>
+  /** Feasible line endpoints, and how many of those were clear enough to reach the grid. */
+  endpointsFeasible: number
+  endpointsWalkable: number
   candidates: Candidate[]
   improved: number
   totalGain: number
@@ -157,18 +163,21 @@ function dumpAnchors(anchors: Anchor[]): AreaResult['anchors'] {
   return dump
 }
 
-/** Line endpoints as parallel arrays, with the kind as its index -- there are millions of these. */
-function packEndpoints(endpoints: Endpoint[]): AreaResult['endpoints'] {
-  const packed: AreaResult['endpoints'] = { e: [], n: [], kind: [], score: [], blocked: [] }
-  for (const e of endpoints) {
-    packed.e.push(e.e)
-    packed.n.push(e.n)
-    packed.kind.push(LINE_KINDS.indexOf(e.kind))
-    packed.score.push(e.score)
-    packed.blocked.push(e.blocked)
+const emptySpots = () => ({ e: [] as number[], n: [] as number[], count: [] as number[], score: [] as number[] })
+
+const packSpots = (spots: Spot[]) => {
+  const packed = emptySpots()
+  for (const s of spots) {
+    packed.e.push(s.e)
+    packed.n.push(s.n)
+    packed.count.push(s.count)
+    packed.score.push(s.score)
   }
   return packed
 }
+
+const unpackSpots = (packed: ReturnType<typeof emptySpots>): Spot[] =>
+  packed.e.map((e, i) => ({ e, n: packed.n[i]!, count: packed.count[i]!, score: packed.score[i]! }))
 
 function exportMask(drop: Grid, p: Params): MaskCells {
   const cells = aggregateDrops(drop, p.maskExportRes)
@@ -379,7 +388,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   try {
     const found = await stage(
       'pairing and terrain gate',
-      () => pairInParallel(pool, table, p),
+      () => pairInParallel(pool, table, area.owns ?? null),
       (r) => ({
         from: [anchors.length, 'anchors'],
         to: [r.count, 'pairs'],
@@ -449,6 +458,25 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       allTiles, anchors, r.roadKills, wantedTiles, wanted, buildings.cellsPerTile,
     )
 
+    /**
+     * The hotspot layer's input, reduced here rather than at the end of the run.
+     *
+     * Three million endpoints a region is both more than a region file should carry and more than
+     * the pooled run should hold, and the grid is exactly mergeable, so nothing is gained by
+     * carrying the raw points any further. See hotspots.ts.
+     */
+    const walkable = r.endpoints.filter(isWalkable)
+    const spots = byKind(emptySpots)
+    for (const kind of LINE_KINDS) {
+      const cells = gridSpots(walkable.filter((e) => e.kind === kind).map(spotOf), SPOT_RES)
+      spots[kind] = packSpots(cells)
+    }
+    record('endpoint grid', {
+      from: [r.endpoints.length, 'feasible endpoints'],
+      to: [LINE_KINDS.reduce((n, k) => n + spots[k].e.length, 0), `${SPOT_RES}m cells`],
+      steps: [['clear enough to count', walkable.length]],
+    })
+
     return {
       region: {
         aois: area.aois,
@@ -467,7 +495,9 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       mask: exportMask(drop, p),
       tiles,
       anchors: dumpAnchors(anchors),
-      endpoints: packEndpoints(r.endpoints),
+      spots,
+      endpointsFeasible: r.endpoints.length,
+      endpointsWalkable: walkable.length,
       candidates: ref.candidates,
       improved: ref.improved,
       totalGain: ref.totalGain,
@@ -538,7 +568,9 @@ async function main() {
   const regions: Region[] = []
   const dumpAnchors: AreaResult['anchors'] = { lat: [], lon: [], ground: [], drop: [], open: [] }
   const refinedAll: Candidate[] = []
-  const endpoints: Endpoint[] = []
+  const spotCells = byKind<Spot[]>(() => [])
+  let endpointsFeasible = 0
+  let endpointsWalkable = 0
   const maskCells: MaskCells[] = []
   const tileUse: TileUsage[] = []
   const totals = {
@@ -596,15 +628,9 @@ async function main() {
       dumpAnchors.drop.push(found.anchors.drop[i]!)
       dumpAnchors.open.push(found.anchors.open[i]!)
     }
-    for (let i = 0; i < found.endpoints.e.length; i++) {
-      endpoints.push({
-        e: found.endpoints.e[i]!,
-        n: found.endpoints.n[i]!,
-        kind: LINE_KINDS[found.endpoints.kind[i]!]!,
-        score: found.endpoints.score[i]!,
-        blocked: found.endpoints.blocked[i]!,
-      })
-    }
+    for (const kind of LINE_KINDS) spotCells[kind].push(...unpackSpots(found.spots[kind]))
+    endpointsFeasible += found.endpointsFeasible
+    endpointsWalkable += found.endpointsWalkable
     for (const c of found.candidates) refinedAll.push(c)
     maskCells.push(found.mask)
     tileUse.push(found.tiles)
@@ -759,11 +785,13 @@ async function main() {
    * and an urban line work really is two answers: a spot only appears in a layer if that kind of
    * line can actually be rigged there, which is what makes switching the filter mean something.
    */
-  const walkable = endpoints.filter(isWalkable)
   const hotspots: Hotspots = { radius: HOTSPOT_RADIUS, ...byKind<HotspotArrays>(emptyHotspots) }
+  const cells = LINE_KINDS.reduce((n, k) => n + spotCells[k].length, 0)
   const spotCounts = await stage('hotspot clustering', () =>
     LINE_KINDS.map((kind) => {
-      const spots = clusterEndpoints(walkable.filter((e) => e.kind === kind), HOTSPOT_RADIUS)
+      // Merged through the same grid the regions were reduced on, so two regions that overlap a
+      // cell contribute to one cell rather than to two spots on top of each other.
+      const spots = clusterSpots(gridSpots(spotCells[kind], SPOT_RES), HOTSPOT_RADIUS)
       spots.sort((a, b) => b.count - a.count)
       for (const s of spots) {
         const { lat, lon } = toWgs84(s.e, s.n)
@@ -775,13 +803,14 @@ async function main() {
       return spots.length
     }),
   (out) => ({
-    from: [walkable.length, 'clear endpoints'],
+    from: [cells, `${SPOT_RES}m cells`],
     to: [out.reduce((n, spots) => n + spots, 0), 'spots'],
   }))
   await writeFile(HOTSPOTS_OUT, JSON.stringify(hotspots))
   const hotKb = (JSON.stringify(hotspots).length / 1024).toFixed(0)
   console.log(
-    `hotspots: ${endpoints.length} feasible endpoints, ${walkable.length} clear of canopy ` +
+    `hotspots: ${endpointsFeasible} feasible endpoints, ${endpointsWalkable} clear of canopy ` +
+      `-> ${cells} cells @${SPOT_RES}m ` +
       `-> ${LINE_KINDS.map((k, i) => `${spotCounts[i]} ${k}`).join(', ')} spots ` +
       `@${HOTSPOT_RADIUS}m (${hotKb} KB)`,
   )
