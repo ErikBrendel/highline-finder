@@ -566,9 +566,15 @@ header .external:hover { border-color: var(--accent); }
    trace at all. */
 .softfail {
   position: fixed;
-  left: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 12px;
   z-index: 998;
+  /* The panel is as wide as the list gets, so without this the button would sit against its left
+     edge rather than under the middle of the screen. Bottom-anchored, so the list opens upwards. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   max-width: min(520px, calc(100vw - 24px));
   font-size: 11px;
   color: #fcd9b6;
