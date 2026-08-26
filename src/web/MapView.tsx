@@ -7,6 +7,7 @@ import type {
   HotspotArrays,
   MaskCells,
   Params,
+  Region,
   TileUsage,
 } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
@@ -118,7 +119,26 @@ export const DEBUG_COLORS = {
   /** Lines killed by a road crossing, palest where one died and hottest where hundreds did. */
   killsFew: '#3f2d1a',
   killsMany: '#f97316',
+  /** Region vintage: computed by this code just now, computed by it a while ago, or not by it. */
+  fresh: '#22c55e',
+  aged: '#f59e0b',
+  outdated: '#f43f5e',
 } as const
+
+/** How old a region has to be before its box is drawn fully aged. */
+export const VINTAGE_DAYS = 30
+
+export const ageInDays = (iso: string, now: number): number =>
+  Math.max(0, (now - Date.parse(iso)) / 86_400_000)
+
+/** How long ago, at whatever unit makes the number readable. */
+export function ageText(iso: string, now: number): string {
+  const days = ageInDays(iso, now)
+  if (days >= 1) return `${Math.round(days)}d ago`
+  const hours = days * 24
+  if (hours >= 1) return `${Math.round(hours)}h ago`
+  return `${Math.max(1, Math.round(hours * 60))}m ago`
+}
 
 const SCORE_COLOR: maplibregl.ExpressionSpecification = [
   'interpolate', ['linear'], ['get', 'score'],
@@ -390,6 +410,36 @@ function tilesGeoJson(t: TileUsage | null, layer: TileLayer): GeoJSON.FeatureCol
   }
 }
 
+/**
+ * Each region's rasterised box, carrying how old its results are.
+ *
+ * The one debug view that needs no extra file: vintage is already in candidates.json, because a run
+ * can be told to recompute one area and keep the rest. Drawn because that is otherwise invisible --
+ * a line from a region marked stale was scored under rules the rest of the file no longer follows,
+ * and once the run is cut into fixed chunks rather than areas of interest this becomes the map of
+ * what has been covered and when.
+ */
+function regionsGeoJson(regions: Region[] | null, now: number): GeoJSON.FeatureCollection {
+  if (!regions) return { type: 'FeatureCollection', features: [] }
+  return {
+    type: 'FeatureCollection',
+    features: regions.map((r) => {
+      const { minE, minN, maxE, maxN } = r.bbox25833
+      const corners = [
+        [minE, minN], [maxE, minN], [maxE, maxN], [minE, maxN], [minE, minN],
+      ].map(([e, n]) => {
+        const { lat, lon } = toWgs84(e!, n!)
+        return [lon, lat]
+      })
+      return {
+        type: 'Feature',
+        properties: { days: ageInDays(r.generatedAt, now), current: r.current ? 1 : 0 },
+        geometry: { type: 'Polygon', coordinates: [corners] },
+      }
+    }),
+  }
+}
+
 function anchorPointsGeoJson(dump: AnchorDump | null): GeoJSON.FeatureCollection {
   if (!dump) return { type: 'FeatureCollection', features: [] }
   return {
@@ -466,6 +516,8 @@ interface Props {
   mask: MaskCells | null
   tiles: TileUsage | null
   tileLayer: TileLayer
+  /** The regions whose vintage to draw, or null when that view is off. */
+  regions: Region[] | null
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
   custom: CustomPoints
@@ -488,6 +540,7 @@ export function MapView({
   mask,
   tiles,
   tileLayer,
+  regions,
   initialBbox,
   custom,
   showLines,
@@ -508,6 +561,7 @@ export function MapView({
   const wedgeMetres = useRef(40)
   const dropRadius = useRef(25)
   const anchorMarkers = useRef<Partial<Record<'a' | 'b', maplibregl.Marker>>>({})
+  const regionMarkers = useRef<maplibregl.Marker[]>([])
   const dragging = useRef<'a' | 'b' | null>(null)
   const onMoveAnchorRef = useRef(onMoveAnchor)
   onMoveAnchorRef.current = onMoveAnchor
@@ -666,6 +720,36 @@ export function MapView({
         type: 'line',
         source: 'mask',
         paint: { 'line-color': '#0b1220', 'line-width': 0.4, 'line-opacity': 0 },
+      })
+
+      m.addSource('regions', { type: 'geojson', data: regionsGeoJson(null, 0) })
+      m.addLayer({
+        id: 'regions',
+        type: 'fill',
+        source: 'regions',
+        paint: {
+          // Green when this code produced it, fading to amber as the results age, red when it was
+          // kept on purpose from a run under different rules.
+          'fill-color': [
+            'case',
+            ['==', ['get', 'current'], 0], DEBUG_COLORS.outdated,
+            ['interpolate', ['linear'], ['get', 'days'],
+              0, DEBUG_COLORS.fresh,
+              VINTAGE_DAYS, DEBUG_COLORS.aged,
+            ],
+          ],
+          'fill-opacity': 0,
+        },
+      })
+      m.addLayer({
+        id: 'regionsEdge',
+        type: 'line',
+        source: 'regions',
+        paint: {
+          'line-color': ['case', ['==', ['get', 'current'], 0], DEBUG_COLORS.outdated, '#e2e8f0'],
+          'line-width': 1.5,
+          'line-opacity': 0,
+        },
       })
 
       m.addSource('hotspots', { type: 'geojson', data: hotspotsGeoJson(null) })
@@ -980,6 +1064,33 @@ export function MapView({
       : 0)
     m.setPaintProperty('maskEdge', 'line-opacity', mask ? 0.35 : 0)
   }, [mask, ready])
+
+  /**
+   * The region boxes, with a stamp on each saying when it was last computed.
+   *
+   * The stamps are DOM markers rather than a symbol layer, for the same reason the anchor labels
+   * are: text in a layer needs a `glyphs` source in the style, and there are at most a handful of
+   * these. Rebuilt wholesale whenever the view changes, since a handful is not worth diffing.
+   */
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('regions') as maplibregl.GeoJSONSource | undefined
+    src?.setData(regionsGeoJson(regions, Date.now()))
+    m.setPaintProperty('regions', 'fill-opacity', regions ? 0.18 : 0)
+    m.setPaintProperty('regionsEdge', 'line-opacity', regions ? 0.8 : 0)
+
+    for (const marker of regionMarkers.current) marker.remove()
+    regionMarkers.current = (regions ?? []).map((r) => {
+      const node = document.createElement('div')
+      node.className = 'chunkstamp'
+      node.dataset.outdated = String(!r.current)
+      node.textContent = `${r.generatedAt.slice(0, 10)} · ${ageText(r.generatedAt, Date.now())}`
+      const { minE, minN, maxE, maxN } = r.bbox25833
+      const { lat, lon } = toWgs84((minE + maxE) / 2, (minN + maxN) / 2)
+      return new maplibregl.Marker({ element: node }).setLngLat([lon, lat]).addTo(m)
+    })
+  }, [regions, ready])
 
   useEffect(() => {
     const m = map.current

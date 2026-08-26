@@ -214,6 +214,24 @@ header .spacer { flex: 1; }
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
+/* When a region was last computed, stamped in the middle of its box. Debug view only. */
+.chunkstamp {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #e2e8f0;
+  border: 1px solid rgba(226, 232, 240, 0.35);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chunkstamp[data-outdated='true'] {
+  color: #fecdd3;
+  border-color: #f43f5e;
+}
+
 .cachebadge {
   display: flex;
   align-items: center;

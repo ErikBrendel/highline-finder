@@ -9,12 +9,13 @@ import type {
   Hotspots,
   LineKind,
   MaskCells,
+  Region,
   StoredProfile,
   TileUsage,
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
-import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView } from './MapView.js'
+import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, VINTAGE_DAYS, type TileLayer } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
@@ -33,7 +34,7 @@ import { emitProbes } from './probeOverlay.js'
 const OFFER_MS = 2000
 import { toWgs84 } from '../shared/geo.js'
 
-type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roads'
+type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roads' | 'regions'
 
 /** What each anchor class actually means for the trip, which the word alone does not say. */
 const KIND_HELP: Record<LineKind, string> = {
@@ -49,11 +50,12 @@ const KIND_HELP: Record<LineKind, string> = {
  * The figures live here rather than in the button because they are the reading, not the label.
  */
 function DebugLegend({
-  layer, mask, tiles,
+  layer, mask, tiles, regions,
 }: {
   layer: Exclude<DebugLayer, 'none'>
   mask: MaskCells | null
   tiles: TileUsage | null
+  regions: Region[]
 }) {
   const key = (color: string, opacity: number, text: string) => (
     <div className="key" key={text}>
@@ -80,6 +82,34 @@ function DebugLegend({
           in 1 km tiles, so this verdict is acted on a tile at a time: compare it with the terrain
           view, whose squares are eight times wider, to see that gap. It measures bare earth, which
           is its other blind spot &mdash; the buildings view counts what that skips.
+        </div>
+      </div>
+    )
+  }
+
+  if (layer === 'regions') {
+    const outdated = regions.filter((r) => !r.current)
+    const oldest = regions.reduce(
+      (worst, r) => (Date.parse(r.generatedAt) < Date.parse(worst.generatedAt) ? r : worst),
+      regions[0]!,
+    )
+    return (
+      <div className="legendbox">
+        <h3>Region vintage</h3>
+        {key(DEBUG_COLORS.fresh, 0.5, 'computed by this code, recently')}
+        {key(DEBUG_COLORS.aged, 0.5, `computed by this code, ${VINTAGE_DAYS} days ago or more`)}
+        {key(DEBUG_COLORS.outdated, 0.5, 'kept from an older run — scored under rules that have moved on')}
+        <div className="stat">
+          {regions.length} region{regions.length === 1 ? '' : 's'}, oldest{' '}
+          {oldest.generatedAt.slice(0, 10)}
+          {outdated.length ? `, ${outdated.length} not rebuilt with this code` : ''}
+        </div>
+        <div className="about">
+          A run recomputes whatever is stale, or only the areas named on the command line &mdash; so
+          a dataset is not necessarily of one vintage, and a red box holds lines that are not
+          strictly comparable with the ones beside them. The boxes are areas of interest today.
+          Once the search is cut into fixed chunks instead, this becomes the map of what has been
+          covered and when.
         </div>
       </div>
     )
@@ -355,22 +385,40 @@ export function App() {
    * Cycles the debug views: the coarse pre-pass, then what was actually fetched per source tile for
    * terrain and for surface. Off by default -- these are views of the pipeline, not of the terrain.
    */
-  const DEBUG_ORDER = ['none', 'coarse', 'terrain', 'surface', 'buildings', 'roads'] as const
+  const DEBUG_ORDER =
+    ['none', 'coarse', 'terrain', 'surface', 'buildings', 'roads', 'regions'] as const
+  /** Which gitignored file each view needs. Region vintage rides along in candidates.json. */
+  const DEBUG_FILE: Partial<Record<DebugLayer, 'mask.json' | 'tiles.json'>> = {
+    coarse: 'mask.json',
+    terrain: 'tiles.json',
+    surface: 'tiles.json',
+    buildings: 'tiles.json',
+    roads: 'tiles.json',
+  }
   const cycleDebug = () => {
     const next = DEBUG_ORDER[(DEBUG_ORDER.indexOf(debugLayer) + 1) % DEBUG_ORDER.length]!
     setDebugLayer(next)
     setLayerError(null)
-    const need = next === 'coarse' ? !mask : next !== 'none' && !tiles
-    if (!need) return
-    const file = next === 'coarse' ? 'mask.json' : 'tiles.json'
+    const file = DEBUG_FILE[next]
+    if (!file || (file === 'mask.json' ? mask : tiles)) return
     fetch(`${import.meta.env.BASE_URL}${file}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d) => (next === 'coarse' ? setMask(d) : setTiles(d)))
+      .then((d) => (file === 'mask.json' ? setMask(d) : setTiles(d)))
       .catch((e: unknown) => {
         report(`loading ${file} for the ${next} debug layer`, e)
         setLayerError(`${file}: ${failureText(e)} — run \`npm run pipeline\` if it is missing`)
       })
   }
+
+  /**
+   * Which of the per-tile questions the squares are answering, or null when the current view is not
+   * one of them. Both the source and the colouring key off this, so they cannot drift apart.
+   */
+  const tileLayer: TileLayer | null =
+    debugLayer === 'terrain' || debugLayer === 'surface' ||
+    debugLayer === 'buildings' || debugLayer === 'roads'
+      ? debugLayer
+      : null
 
   const DEBUG_LABELS: Record<DebugLayer, string> = {
     none: 'debug layers',
@@ -379,6 +427,7 @@ export function App() {
     surface: 'surface tiles',
     buildings: 'buildings',
     roads: 'road kills',
+    regions: 'region vintage',
   }
 
   useEffect(() => {
@@ -928,7 +977,12 @@ export function App() {
           </div>
           {layerError && <div className="togglenote">{layerError}</div>}
           {import.meta.env.DEV && debugLayer !== 'none' && (
-            <DebugLegend layer={debugLayer} mask={mask} tiles={tiles} />
+            <DebugLegend
+              layer={debugLayer}
+              mask={mask}
+              tiles={tiles}
+              regions={data.meta.regions}
+            />
           )}
 
           {showFilters && (
@@ -1018,8 +1072,9 @@ export function App() {
             anchorDump={anchorDump}
             hotspots={showHotspots ? shownHotspots : null}
             mask={debugLayer === 'coarse' ? mask : null}
-            tiles={debugLayer === 'none' || debugLayer === 'coarse' ? null : tiles}
-            tileLayer={debugLayer === 'coarse' || debugLayer === 'none' ? 'terrain' : debugLayer}
+            regions={debugLayer === 'regions' ? data.meta.regions : null}
+            tiles={tileLayer ? tiles : null}
+            tileLayer={tileLayer ?? 'terrain'}
             initialBbox={initial.bbox}
             custom={custom}
             showLines={showLines}

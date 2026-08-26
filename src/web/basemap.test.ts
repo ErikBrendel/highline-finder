@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BLEND_STOPS,
+  ageText,
   MIX_MAX,
   basemapOpacity,
   basemapVisible,
@@ -142,5 +143,20 @@ describe('line emphasis', () => {
     const width = (e: number) => at(lineWidth(e), 9).plain
     expect(width(0.5)).toBeGreaterThan(width(0))
     expect(width(0.5)).toBeLessThan(width(1))
+  })
+})
+
+describe('ageText', () => {
+  const now = Date.parse('2026-08-26T12:00:00Z')
+  const ago = (ms: number) => ageText(new Date(now - ms).toISOString(), now)
+
+  it('picks the unit that makes the number readable', () => {
+    expect(ago(4 * 86_400_000)).toBe('4d ago')
+    expect(ago(5 * 3_600_000)).toBe('5h ago')
+    expect(ago(90_000)).toBe('2m ago')
+  })
+
+  it('never reads as in the future, for a region written moments ago', () => {
+    expect(ago(-5000)).toBe('1m ago')
   })
 })
