@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Grid } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
@@ -45,16 +45,29 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** Decodes one tile down to `res` and writes it to the cache. */
+/**
+ * Decodes one tile down to `res` and writes it to the cache.
+ *
+ * The source .tif is deleted once the reduced grid is on disk. It is a decode intermediate that
+ * nothing reads again -- this is its only caller, and only when the reduced grid is missing -- and
+ * it is the larger half of the cache by a wide margin: a surface tile is ~30 MB of .tif against
+ * 4 MB of reduced grid. Statewide that is the difference between 244 GB of cache and 122 GB.
+ *
+ * The cost is that a second working resolution would have to redownload rather than re-decode.
+ * There is one resolution and no reason to expect a second, and disk is the constraint that
+ * actually binds.
+ */
 export async function buildTile(product: Product, tile: string, res: number): Promise<Grid> {
   const grid = gridForTile(tile, res)
-  const buf = await readFile(await tileTiff(product, tile))
+  const tif = await tileTiff(product, tile)
+  const buf = await readFile(tif)
   await blitGeoTiff(
     buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
     grid,
   )
   await mkdir(CACHE_DIR, { recursive: true })
   await writeFile(cachePath(product, tile, res), Buffer.from(grid.data.buffer))
+  await rm(tif, { force: true })
   return grid
 }
 

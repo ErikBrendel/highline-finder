@@ -47,7 +47,8 @@ async function exists(path: string): Promise<boolean> {
 
 /**
  * Returns the local path of the GeoTIFF for one product/tile, downloading and unzipping it
- * on first use. The unzipped .tif is what gets cached; the .zip is not retained.
+ * on first use. Neither the .zip nor the .tif is retained: the caller reduces the tile to the
+ * working resolution and deletes the source, so what survives on disk is the reduced grid alone.
  *
  * Retried, because a run now fetches hundreds of tiles of tens of megabytes each and a single
  * dropped connection two hundred tiles in should not cost the whole run. Failures are transport
