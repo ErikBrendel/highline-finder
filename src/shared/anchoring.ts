@@ -77,7 +77,8 @@ export class RoofMask implements Roofs {
   }
 
   share(): MaskShare {
-    return { buffer: this.bits.buffer as SharedArrayBuffer, w: this.w, h: this.h, e0: this.e0, n1: this.n1, res: this.res }
+    const { w, h, e0, n1, res } = this
+    return { buffer: this.bits.buffer as SharedArrayBuffer, w, h, e0, n1, res }
   }
 
   static adopt(v: MaskShare): RoofMask {

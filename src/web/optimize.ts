@@ -95,7 +95,7 @@ export const NEIGHBOURHOOD: Pos[] = (() => {
  * Scaled by reach, so a wide run takes about as long as a narrow one -- otherwise a reach-32 run
  * would be four hundred frames of watching an anchor cross a field.
  */
-export const PLANNED_REFINE_PACE = 2
+const PLANNED_REFINE_PACE = 2
 
 /**
  * Steps a frame may take however little ground they cover, so a walk that has converged cannot spin

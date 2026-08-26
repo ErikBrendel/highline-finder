@@ -1,6 +1,6 @@
 import { availableParallelism } from 'node:os'
 import { Worker } from 'node:worker_threads'
-import type { Anchor } from './openness.js'
+import type { AnchorTable } from './openness.js'
 import type { GridShare } from '../shared/grid.js'
 import type { MaskShare } from '../shared/anchoring.js'
 import type { Candidate, Params } from '../shared/types.js'
@@ -23,11 +23,12 @@ import type { Candidate, Params } from '../shared/types.js'
  *
  * Determinism is a requirement, not a bonus: dedup keeps the best line in each neighbourhood by a
  * stable sort, so the order candidates arrive in decides which of two equal-scoring lines survives.
- * Every stage therefore splits its input into one contiguous chunk per worker and concatenates the
- * results back in chunk order, which reproduces the serial order exactly.
+ * Every stage therefore splits its input into contiguous chunks and concatenates the results back
+ * in chunk order, which reproduces the serial order exactly -- see parallel.ts.
  */
 
-export interface Scene {
+/** One region's read-only data, in the form the workers adopt it. */
+export interface SharedRegion {
   ground: GridShare
   roofs: MaskShare | null
   water: MaskShare | null
@@ -35,72 +36,33 @@ export interface Scene {
   params: Params
 }
 
-/** Anchors as flat arrays, so the pair search can read them from shared memory. */
-export interface AnchorTable {
-  /** `[e, n, ground, anchorMin, anchorMax, dropDepth]` per anchor. */
-  fields: SharedArrayBuffer
-  /** `sectorCount` bytes per anchor, one per sector. */
-  open: SharedArrayBuffer
-  count: number
-  sectorCount: number
-}
-
-export const ANCHOR_FIELDS = 6
-
-export function shareAnchors(anchors: Anchor[], sectorCount: number): AnchorTable {
-  const fields = new Float64Array(new SharedArrayBuffer(anchors.length * ANCHOR_FIELDS * 8))
-  const open = new Uint8Array(new SharedArrayBuffer(anchors.length * sectorCount))
-  anchors.forEach((a, i) => {
-    const at = i * ANCHOR_FIELDS
-    fields[at] = a.e
-    fields[at + 1] = a.n
-    fields[at + 2] = a.ground
-    fields[at + 3] = a.anchorMin
-    fields[at + 4] = a.anchorMax
-    fields[at + 5] = a.dropDepth
-    open.set(a.open, i * sectorCount)
-  })
-  return {
-    fields: fields.buffer as SharedArrayBuffer,
-    open: open.buffer as SharedArrayBuffer,
-    count: anchors.length,
-    sectorCount,
-  }
-}
-
-export function readAnchors(table: AnchorTable): Anchor[] {
-  const fields = new Float64Array(table.fields)
-  const open = new Uint8Array(table.open)
-  const out: Anchor[] = []
-  for (let i = 0; i < table.count; i++) {
-    const at = i * ANCHOR_FIELDS
-    const bits = open.subarray(i * table.sectorCount, (i + 1) * table.sectorCount)
-    out.push({
-      e: fields[at]!,
-      n: fields[at + 1]!,
-      ground: fields[at + 2]!,
-      anchorMin: fields[at + 3]!,
-      anchorMax: fields[at + 4]!,
-      dropDepth: fields[at + 5]!,
-      open: bits,
-      openCount: bits.reduce((s, v) => s + v, 0),
-    })
-  }
-  return out
-}
-
 export type Job =
   | { kind: 'pairs'; anchors: AnchorTable; from: number; to: number }
-  | { kind: 'score'; pairs: SharedArrayBuffer; total: number; anchors: AnchorTable; from: number; to: number }
+  | {
+      kind: 'score'
+      /** An Int32Array of index pairs, and how many of them the buffer holds. */
+      pairs: SharedArrayBuffer
+      total: number
+      anchors: AnchorTable
+      from: number
+      to: number
+    }
   | { kind: 'refine'; candidates: Candidate[] }
   | { kind: 'surface'; grid: GridShare }
 
 export interface Done {
   /** Whatever the job produced, shaped by its kind. */
   value: unknown
-  /** Seconds per phase and counts per tally, so the run report still sees inside the hot loops. */
+  /** Milliseconds per phase and counts per tally, so the run report still sees inside hot loops. */
   phases: [string, number][]
   counts: [string, number][]
+}
+
+/** A job that has been handed to a worker and is waiting on its answer. */
+interface Waiting {
+  job: Job
+  resolve: (d: Done) => void
+  reject: (e: Error) => void
 }
 
 /** One less than the cores, so the main thread stays responsive while the pool works. */
@@ -109,15 +71,15 @@ export const poolSize = () => Math.max(1, Math.min(16, availableParallelism() - 
 export class Pool {
   private readonly workers: Worker[] = []
   private readonly idle: Worker[] = []
-  private readonly queue: { job: Job; resolve: (d: Done) => void; reject: (e: Error) => void }[] = []
-  private readonly busy = new Map<Worker, { resolve: (d: Done) => void; reject: (e: Error) => void }>()
-  private ready: Promise<void>
+  private readonly queue: Waiting[] = []
+  private readonly busy = new Map<Worker, Waiting>()
+  private readonly ready: Promise<void>
 
-  constructor(scene: Scene, size = poolSize()) {
+  constructor(region: SharedRegion, size = poolSize()) {
     const url = new URL('./workerBoot.mjs', import.meta.url)
     const starts: Promise<void>[] = []
     for (let i = 0; i < size; i++) {
-      const worker = new Worker(url, { workerData: scene })
+      const worker = new Worker(url, { workerData: region })
       this.workers.push(worker)
       starts.push(
         new Promise<void>((resolve, reject) => {
@@ -172,7 +134,7 @@ export class Pool {
         (worker) =>
           new Promise<Done>((resolve, reject) => {
             this.idle.splice(this.idle.indexOf(worker), 1)
-            this.busy.set(worker, { resolve, reject })
+            this.busy.set(worker, { job, resolve, reject })
             worker.postMessage(job)
           }),
       ),
@@ -208,7 +170,7 @@ export class Pool {
   }
 }
 
-/** Contiguous ranges covering `total`, one per worker, so the results concatenate in input order. */
+/** Contiguous ranges covering `total`, so concatenating their results reproduces input order. */
 export function chunks(total: number, parts: number): [number, number][] {
   if (total === 0) return []
   const per = Math.ceil(total / parts)

@@ -1,6 +1,13 @@
 import { addPhase, phaseCount } from '../shared/phases.js'
-import { chunks, type AnchorTable, type Done, type Pool } from './pool.js'
-import { poolScored, type FindResult, type RefineResult, type Scored, type TerrainPairs } from './lines.js'
+import { chunks, type Done, type Pool } from './pool.js'
+import type { AnchorTable } from './openness.js'
+import {
+  poolScored,
+  type FindResult,
+  type RefineResult,
+  type Scored,
+  type TerrainPairs,
+} from './lines.js'
 import type { Candidate, Params } from '../shared/types.js'
 
 /**
@@ -12,11 +19,13 @@ import type { Candidate, Params } from '../shared/types.js'
  * produce the dataset a serial one would. Contiguous chunks concatenated in order reproduce the
  * serial sequence exactly, for any number of chunks.
  *
- * Four chunks per worker rather than one, because anchors are not spread evenly over a region: one
+ * Many chunks per worker rather than one, because anchors are not spread evenly over a region: one
  * chunk per worker leaves whichever worker drew the town centre still running while the rest idle.
+ * At four the pool was still finishing at 4.2 of a possible 9 -- the last chunk decides the stage,
+ * so the chunks want to be small enough that the tail is short.
  */
 
-const SPLIT = 4
+const SPLIT = 16
 
 /** What the workers measured inside their hot loops, folded back into this thread's report. */
 function fold(results: Done[]): void {

@@ -1,6 +1,15 @@
 import type { Grid, Pos } from '../shared/grid.js'
 import { bearingOf, oppositeBearing, sectorOf, toWgs84 } from '../shared/geo.js'
-import type { Anchor } from './openness.js'
+import {
+  ANCHOR_FIELDS,
+  AT_E,
+  AT_MAX,
+  AT_MIN,
+  AT_N,
+  packAnchors,
+  type Anchor,
+  type AnchorTable,
+} from './openness.js'
 import type { Endpoint } from './hotspots.js'
 import type { AnchorOut, Candidate, Params } from '../shared/types.js'
 import {
@@ -97,8 +106,10 @@ function sampleClears(
 }
 
 function clearsTerrain(
-  a: Pos,
-  b: Pos,
+  ae: number,
+  an: number,
+  be: number,
+  bn: number,
   hA: number,
   hB: number,
   length: number,
@@ -107,22 +118,22 @@ function clearsTerrain(
   water?: WaterCover | null,
 ): boolean {
   const sag = p.sagRatio * length
-  const de = (b.e - a.e) / length
-  const dn = (b.n - a.n) / length
+  const de = (be - ae) / length
+  const dn = (bn - an) / length
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
   if (inner1 <= inner0) return false
   // The deepest sag sits at midspan, so that is where a line most often meets the ground.
   const mid = length / 2
-  const me = a.e + de * mid
-  const mn = a.n + dn * mid
+  const me = ae + de * mid
+  const mn = an + dn * mid
   const midClear = lineHeightAt(hA, hB, sag, 0.5) - ground.sample(me, mn)
   if (!sampleClears(midClear, me, mn, p, water)) return false
 
   let exposure = -Infinity
   for (let d = 0; d <= length; d += p.profileStep) {
-    const e = a.e + de * d
-    const n = a.n + dn * d
+    const e = ae + de * d
+    const n = an + dn * d
     const g = ground.sample(e, n)
     if (Number.isNaN(g)) return false
     const clear = lineHeightAt(hA, hB, sag, d / length) - g
@@ -231,7 +242,8 @@ export function evaluateLine(
 
   const tGate = phaseAt()
   const clears =
-    terrainAlreadyChecked || clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)
+    terrainAlreadyChecked ||
+    clearsTerrain(a.e, a.n, b.e, b.n, h.hA, h.hB, length, ground, p, scene.water)
   phaseDone('terrain gate', tGate)
   if (!clears) return failed('terrain')
 
@@ -376,12 +388,20 @@ export interface TerrainPairs {
 
 /** The pairs as coordinates, without materialising four million objects to hold them. */
 export function* pairsOf(
-  anchors: Anchor[],
+  table: AnchorTable,
   pairs: Int32Array,
   from = 0,
   to = pairs.length / 2,
 ): Generator<[Pos, Pos]> {
-  for (let k = from; k < to; k++) yield [anchors[pairs[2 * k]!]!, anchors[pairs[2 * k + 1]!]!]
+  const fields = new Float64Array(table.fields)
+  for (let k = from; k < to; k++) {
+    const i = pairs[2 * k]! * ANCHOR_FIELDS
+    const j = pairs[2 * k + 1]! * ANCHOR_FIELDS
+    yield [
+      { e: fields[i + AT_E]!, n: fields[i + AT_N]! },
+      { e: fields[j + AT_E]!, n: fields[j + AT_N]! },
+    ]
+  }
 }
 
 /**
@@ -392,26 +412,30 @@ export function* pairsOf(
  * the ones a line already crosses, and those cannot be known until this pass has run. Everything
  * here reads `ground` alone.
  */
-export function terrainPairs(
-  anchors: Anchor[],
-  ground: Grid,
-  p: Params,
-  /** For the water layer, which decides how much air each sample of the gate is held to. */
-  scene: Scene = {},
+export interface PairSearchRange {
   /**
    * Which anchors this call is responsible for, as the `i` of each pair. Every anchor is still
    * bucketed, since a partner can be any of them; only the outer loop is split. Each unordered pair
    * has exactly one `i`, so ranges partition the pairs without overlap or omission.
    */
-  from = 0,
-  to = anchors.length,
+  from?: number
+  to?: number
   /**
    * The bucket index, when the caller holds one. Every chunk of a split search needs the whole
    * index -- a partner can be any anchor -- so building it per chunk means building it once per
    * chunk instead of once per region, which on the biggest region was most of the extra processor
    * time the pool cost.
    */
-  index?: AnchorIndex,
+  index?: AnchorIndex
+}
+
+export function terrainPairs(
+  table: AnchorTable,
+  ground: Grid,
+  p: Params,
+  /** For the water layer, which decides how much air each sample of the gate is held to. */
+  scene: Scene = {},
+  { from = 0, to = table.count, index }: PairSearchRange = {},
 ): TerrainPairs {
   let pairsInRange = 0
   let pairsSectorPassed = 0
@@ -430,43 +454,59 @@ export function terrainPairs(
   }
 
   const cell = p.maxLength
-  const buckets = index ?? bucketAnchors(anchors, cell)
+  const buckets = index ?? bucketAnchors(table, cell)
+  const fields = new Float64Array(table.fields)
+  const open = new Uint8Array(table.open)
+  const { sectorCount } = table
+  // Compared squared, so the overwhelming majority of pairs are rejected without a square root.
+  // `Math.hypot` is the careful one that guards against overflow, and measured on this loop it is
+  // eight times the cost of the multiply-and-compare that answers the same question here.
+  const minLength2 = p.minLength * p.minLength
+  const maxLength2 = p.maxLength * p.maxLength
 
   for (let i = from; i < to; i++) {
-    const a = anchors[i]!
-    const cx = Math.floor(a.e / cell)
-    const cy = Math.floor(a.n / cell)
+    const ai = i * ANCHOR_FIELDS
+    const ae = fields[ai + AT_E]!
+    const an = fields[ai + AT_N]!
+    const cx = Math.floor(ae / cell)
+    const cy = Math.floor(an / cell)
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
-        for (const j of buckets.get(`${cx + dx}_${cy + dy}`) ?? []) {
+        const bucket = buckets.get(`${cx + dx}_${cy + dy}`)
+        if (!bucket) continue
+        for (let slot = 0; slot < bucket.length; slot++) {
+          const j = bucket[slot]!
           // Each unordered pair is visited once, exactly as the double loop did.
           if (j <= i) continue
-          const b = anchors[j]!
-          const dE = b.e - a.e
-          const dN = b.n - a.n
-          const length = Math.hypot(dE, dN)
-          if (length < p.minLength || length > p.maxLength) continue
+          const bi = j * ANCHOR_FIELDS
+          const be = fields[bi + AT_E]!
+          const bn = fields[bi + AT_N]!
+          const dE = be - ae
+          const dN = bn - an
+          const d2 = dE * dE + dN * dN
+          if (d2 < minLength2 || d2 > maxLength2) continue
           pairsInRange++
 
           const bearing = bearingOf(dE, dN)
-          if (!a.open[sectorOf(bearing, p.sectorCount)]) continue
-          if (!b.open[sectorOf(oppositeBearing(bearing), p.sectorCount)]) continue
+          if (!open[i * sectorCount + sectorOf(bearing, sectorCount)]) continue
+          if (!open[j * sectorCount + sectorOf(oppositeBearing(bearing), sectorCount)]) continue
           pairsSectorPassed++
 
           // Cheap pre-check on the same rule evaluateLine will apply, so the offlevel funnel stays
           // observable in the logs instead of hiding inside the profile rejection count.
+          const length = Math.sqrt(d2)
           const h = chooseHeights(
-            a.anchorMin,
-            a.anchorMax,
-            b.anchorMin,
-            b.anchorMax,
+            fields[ai + AT_MIN]!,
+            fields[ai + AT_MAX]!,
+            fields[bi + AT_MIN]!,
+            fields[bi + AT_MAX]!,
             p.maxOffLevelRatio * length,
           )
           if (!h) continue
           pairsLevelEnough++
 
           const tGate = phaseAt()
-          const clears = clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)
+          const clears = clearsTerrain(ae, an, be, bn, h.hA, h.hB, length, ground, p, scene.water)
           phaseDone('terrain gate (raster walk)', tGate)
           if (clears) keep(i, j)
         }
@@ -534,18 +574,21 @@ export function scorePairs(
  * exact rather than approximate -- two points within `cell` cannot land more than one bucket apart
  * on a lattice of that size.
  */
-export type AnchorIndex = Map<string, number[]>
+export type AnchorIndex = Map<string, Int32Array>
 
-export function bucketAnchors(anchors: Anchor[], cell: number): AnchorIndex {
-  const buckets: AnchorIndex = new Map()
-  for (let i = 0; i < anchors.length; i++) {
-    const a = anchors[i]!
-    const key = `${Math.floor(a.e / cell)}_${Math.floor(a.n / cell)}`
-    const bucket = buckets.get(key)
+export function bucketAnchors(table: AnchorTable, cell: number): AnchorIndex {
+  const fields = new Float64Array(table.fields)
+  const growing = new Map<string, number[]>()
+  for (let i = 0; i < table.count; i++) {
+    const at = i * ANCHOR_FIELDS
+    const key = `${Math.floor(fields[at + AT_E]! / cell)}_${Math.floor(fields[at + AT_N]! / cell)}`
+    const bucket = growing.get(key)
     if (bucket) bucket.push(i)
-    else buckets.set(key, [i])
+    else growing.set(key, [i])
   }
-  return buckets
+  // Frozen into typed arrays: the inner loop walks a bucket a billion times over, and a number[]
+  // holds boxed values the engine has to unbox on every read.
+  return new Map([...growing].map(([key, ids]) => [key, Int32Array.from(ids)]))
 }
 
 /** Fills in the WGS84 coordinates a candidate carries for display. */
@@ -558,15 +601,15 @@ export function locate(c: Candidate): Candidate {
 }
 
 /** Scores terrain-passing pairs against the surface model, and collapses near-duplicates. */
-export function evaluatePairs(
-  anchors: Anchor[],
+function evaluatePairs(
+  table: AnchorTable,
   found: TerrainPairs,
   ground: Grid,
   surface: Grid,
   p: Params,
   scene: Scene = {},
 ): FindResult {
-  return poolScored([scorePairs(pairsOf(anchors, found.pairs), ground, surface, p, scene)], found, p)
+  return poolScored([scorePairs(pairsOf(table, found.pairs), ground, surface, p, scene)], found, p)
 }
 
 /**
@@ -613,8 +656,9 @@ export function findLines(
   p: Params,
   scene: Scene = {},
 ): FindResult {
-  const found = terrainPairs(anchors, ground, p, scene)
-  return evaluatePairs(anchors, found, ground, surface, p, scene)
+  const table = packAnchors(anchors, p.sectorCount)
+  const found = terrainPairs(table, ground, p, scene)
+  return evaluatePairs(table, found, ground, surface, p, scene)
 }
 
 /** Offsets within `radius`, on a `step` lattice, ordered outward. Excludes the origin. */

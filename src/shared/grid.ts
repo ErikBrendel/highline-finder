@@ -124,7 +124,8 @@ export class Grid {
 
   /** Everything a worker needs to read this grid, and nothing that would have to be copied. */
   share(): GridShare {
-    return { buffer: this.data.buffer as SharedArrayBuffer, w: this.w, h: this.h, e0: this.e0, n1: this.n1, res: this.res }
+    const { w, h, e0, n1, res } = this
+    return { buffer: this.data.buffer as SharedArrayBuffer, w, h, e0, n1, res }
   }
 
   static adopt(v: GridShare): Grid {
@@ -178,15 +179,19 @@ export class Grid {
 }
 
 /**
- * Sliding-window minimum along one axis, in one pass, using a monotonic deque.
+ * Sliding-window minimum over each of `lines` runs of `len` values, in van Herk's two scans.
  *
- * The deque holds the indices of the only values that can still win: anything with a smaller value
- * to its right is already beaten for every remaining window, so it is dropped on the way in. Each
- * index is pushed once and popped once, which makes the cost per cell a constant independent of the
- * window -- against the naive scan's one comparison per cell of the window.
+ * Cut the run into blocks the width of the window. Scan each block forwards keeping a running
+ * minimum, and again backwards keeping another. A window is exactly one block wide, so it always
+ * lands inside two neighbouring blocks -- and the answer for it is the smaller of the backward
+ * minimum where it starts and the forward minimum where it ends. Three comparisons a cell, whatever
+ * the radius, against the naive scan's one per cell of the window.
  *
- * Written once and used for both axes: `step` walks the axis being filtered and `lineStep` walks
- * between lines, so a horizontal pass is (1, w) and a vertical pass is (w, 1).
+ * `step` walks the axis being filtered and `lineStep` walks between lines, so a horizontal pass is
+ * (1, w) and a vertical one is (w, 1). The vertical pass strides a 700 MB array, which sounds
+ * ruinous and is not: both scans read straight through with a constant stride and touch each value
+ * about twice, so the prefetcher keeps up. A monotonic deque, which is the other way to do this, was
+ * measured at twice the cost here for the bookkeeping.
  */
 function slidingMin(
   read: Float32Array,
@@ -196,23 +201,35 @@ function slidingMin(
   lineStep: number,
   step: number,
   r: number,
-  dq: Int32Array,
+  forward: Float32Array,
+  backward: Float32Array,
 ): void {
+  const window = 2 * r + 1
   for (let line = 0; line < lines; line++) {
     const base = line * lineStep
-    let head = 0
-    let tail = 0
-    const push = (i: number) => {
-      const v = read[base + i * step]!
-      while (tail > head && read[base + dq[tail - 1]! * step]! >= v) tail--
-      dq[tail++] = i
+    for (let start = 0; start < len; start += window) {
+      const end = Math.min(start + window, len)
+      let m = Infinity
+      for (let i = start; i < end; i++) {
+        const v = read[base + i * step]!
+        if (v < m) m = v
+        forward[i] = m
+      }
+      m = Infinity
+      for (let i = end - 1; i >= start; i--) {
+        const v = read[base + i * step]!
+        if (v < m) m = v
+        backward[i] = m
+      }
     }
-    // Everything the first output can see; from then on one index enters and one leaves per cell.
-    for (let i = 0, last = Math.min(r, len - 1); i <= last; i++) push(i)
     for (let i = 0; i < len; i++) {
-      write[base + i * step] = read[base + dq[head]! * step]!
-      if (dq[head] === i - r) head++
-      if (i + r + 1 < len) push(i + r + 1)
+      const from = i - r
+      // Clamped at both ends rather than wrapped: a window hanging off the run covers the part of
+      // it that is there, which is what the naive scan did with its Math.max/Math.min bounds.
+      const to = i + r < len ? i + r : len - 1
+      const ahead = forward[to]!
+      const behind = from >= 0 ? backward[from]! : Infinity
+      write[base + i * step] = behind < ahead ? behind : ahead
     }
   }
 }
@@ -225,15 +242,14 @@ function slidingMin(
  * enough to run before the directional scan rather than after it.
  *
  * Separable: a horizontal pass then a vertical one, which is exact for a square window and close
- * enough to a disc for a prefilter. Both passes are monotonic deques, because this is sized by the
- * *area* rather than by the anchor lattice -- so it is the one part of the anchor scan that does not
- * get cheaper when the lattice is coarsened, and on a 198 km2 region the naive scan was 51 seconds,
- * 14% of the entire run, for 51 comparisons per cell per axis.
+ * enough to a disc for a prefilter. It is sized by the *area* rather than by the anchor lattice, so
+ * it is the one part of the anchor scan that does not get cheaper when the lattice is coarsened --
+ * and on a 198 km2 region the naive scan was 51 seconds, 14% of the entire run.
  *
  * No-data is carried as +Infinity through both passes and turned back at the end. That reproduces
  * what the naive version did with its `v < m || isNaN(m)` test -- a hole is ignored while any real
  * value is in the window, and only an entirely empty window comes back empty -- without a NaN,
- * which no comparison the deque makes would order correctly.
+ * which no comparison the scans make would order correctly.
  */
 export function minFilter(src: Grid, radius: number): Grid {
   const r = Math.max(0, Math.round(radius / src.res))
@@ -244,9 +260,10 @@ export function minFilter(src: Grid, radius: number): Grid {
     const v = src.data[i]!
     out[i] = Number.isNaN(v) ? Infinity : v
   }
-  const dq = new Int32Array(Math.max(w, h))
-  slidingMin(out, mid, h, w, w, 1, r, dq)
-  slidingMin(mid, out, w, h, 1, w, r, dq)
+  const forward = new Float32Array(Math.max(w, h))
+  const backward = new Float32Array(Math.max(w, h))
+  slidingMin(out, mid, h, w, w, 1, r, forward, backward)
+  slidingMin(mid, out, w, h, 1, w, r, forward, backward)
   for (let i = 0; i < out.length; i++) if (out[i] === Infinity) out[i] = NaN
   return new Grid(out, w, h, src.e0, src.n1, src.res)
 }

@@ -6,13 +6,15 @@ import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
 import { readRegion, regionId, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
-import { packSectors, scanAnchors } from './openness.js'
+import { packAnchors, packSectors, scanAnchors } from './openness.js'
 import { dedupe, locate, pairsOf } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
+import type { Grid, Pos } from '../shared/grid.js'
+import type { Anchor } from './openness.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
 import { record, renderReport, stage } from './report.js'
-import { Pool, poolSize, shareAnchors } from './pool.js'
+import { Pool, poolSize } from './pool.js'
 import { pairInParallel, refineInParallel, scoreInParallel } from './parallel.js'
 import { enablePhases } from '../shared/phases.js'
 import { LINE_KINDS } from '../shared/types.js'
@@ -92,7 +94,77 @@ function byKind<T>(make: () => T): ByKind<T> {
 
 const emptyHotspots = (): HotspotArrays => ({ lat: [], lon: [], count: [], score: [] })
 
-function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCells {
+/** Rounded to a metre-ish, which is all any coordinate in an exported file needs. */
+const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+
+const kmTile = (e: number, n: number) => `${Math.floor(e / 1000)}_${Math.floor(n / 1000)}`
+
+function countPerTile(points: Iterable<Pos>): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const at of points) {
+    const key = kmTile(at.e, at.n)
+    out.set(key, (out.get(key) ?? 0) + 1)
+  }
+  return out
+}
+
+/** What each source tile was fetched for and what it yielded, for the coverage overlay. */
+function tileUsage(
+  allTiles: string[],
+  anchors: Anchor[],
+  roadKills: Pos[],
+  terrainWanted: Set<string> | null,
+  surfaceWanted: Set<string>,
+  roofCells: Map<string, number>,
+): TileUsage {
+  const perAnchor = countPerTile(anchors)
+  const perKill = countPerTile(roadKills)
+  const tiles: TileUsage = {
+    size: 1000,
+    lat: [], lon: [], terrain: [], surface: [], anchors: [], roofCells: [], roadKills: [],
+  }
+  for (const id of allTiles) {
+    const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
+    const { lat, lon } = toWgs84(e * 1000 + 500, n * 1000 + 500)
+    tiles.lat.push(r6(lat))
+    tiles.lon.push(r6(lon))
+    tiles.terrain.push(!terrainWanted || terrainWanted.has(id))
+    tiles.surface.push(surfaceWanted.has(id))
+    tiles.anchors.push(perAnchor.get(`${e}_${n}`) ?? 0)
+    tiles.roofCells.push(roofCells.get(id) ?? 0)
+    tiles.roadKills.push(perKill.get(`${e}_${n}`) ?? 0)
+  }
+  return tiles
+}
+
+/** The anchors as the debug layer wants them: parallel arrays, rounded, sectors packed to hex. */
+function dumpAnchors(anchors: Anchor[]): AreaResult['anchors'] {
+  const dump: AreaResult['anchors'] = { lat: [], lon: [], ground: [], drop: [], open: [] }
+  for (const a of anchors) {
+    const { lat, lon } = toWgs84(a.e, a.n)
+    dump.lat.push(r6(lat))
+    dump.lon.push(r6(lon))
+    dump.ground.push(Math.round(a.ground * 10) / 10)
+    dump.drop.push(Math.round(a.dropDepth * 10) / 10)
+    dump.open.push(packSectors(a.open))
+  }
+  return dump
+}
+
+/** Line endpoints as parallel arrays, with the kind as its index -- there are millions of these. */
+function packEndpoints(endpoints: Endpoint[]): AreaResult['endpoints'] {
+  const packed: AreaResult['endpoints'] = { e: [], n: [], kind: [], score: [], blocked: [] }
+  for (const e of endpoints) {
+    packed.e.push(e.e)
+    packed.n.push(e.n)
+    packed.kind.push(LINE_KINDS.indexOf(e.kind))
+    packed.score.push(e.score)
+    packed.blocked.push(e.blocked)
+  }
+  return packed
+}
+
+function exportMask(drop: Grid, p: Params): MaskCells {
   const cells = aggregateDrops(drop, p.maskExportRes)
   const out: MaskCells = {
     res: p.maskExportRes,
@@ -102,7 +174,6 @@ function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCell
     lon: [],
     drop: [],
   }
-  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
   for (const c of cells) {
     const { lat, lon } = toWgs84(c.e, c.n)
     out.lat.push(r6(lat))
@@ -124,7 +195,7 @@ const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 
 async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
   const { bbox, boxes } = area
 
-  const countValid = (g: import('../shared/grid.js').Grid, atLeast = -Infinity) => {
+  const countValid = (g: Grid, atLeast = -Infinity) => {
     let n = 0
     for (const v of g.data) if (!Number.isNaN(v) && v >= atLeast) n++
     return n
@@ -278,7 +349,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     params: p,
   })
   console.log(`  ${poolSize()} worker threads on the pair search, profiles and refinement`)
-  const table = shareAnchors(anchors, p.sectorCount)
+  const table = packAnchors(anchors, p.sectorCount)
 
   try {
     const found = await stage(
@@ -302,7 +373,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
      * and canopy is never a hard constraint -- so paying for it over the whole area of interest buys
      * canopy figures for ground no line ever crosses.
      */
-    const wanted = corridorTiles(pairsOf(anchors, found.pairs), p.refineRadius + p.profileStep)
+    const wanted = corridorTiles(pairsOf(table, found.pairs), p.refineRadius + p.profileStep)
     const used = allTiles.filter((t) => wanted.has(t))
     record('surface tile choice', {
       from: [allTiles.length, 'tiles'],
@@ -349,49 +420,9 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
         `mean +${gain.toFixed(2)} score`,
     )
 
-    const anchorsPerTile = new Map<string, number>()
-    for (const a of anchors) {
-      const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
-      anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
-    }
-    const killsPerTile = new Map<string, number>()
-    for (const at of r.roadKills) {
-      const key = `${Math.floor(at.e / 1000)}_${Math.floor(at.n / 1000)}`
-      killsPerTile.set(key, (killsPerTile.get(key) ?? 0) + 1)
-    }
-    const tiles: TileUsage = {
-      size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [], roofCells: [], roadKills: [],
-    }
-    for (const id of allTiles) {
-      const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
-      const { lat, lon } = toWgs84(e * 1000 + 500, n * 1000 + 500)
-      tiles.lat.push(Math.round(lat * 1e6) / 1e6)
-      tiles.lon.push(Math.round(lon * 1e6) / 1e6)
-      tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
-      tiles.surface.push(wanted.has(id))
-      tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
-      tiles.roofCells.push(buildings.cellsPerTile.get(id) ?? 0)
-      tiles.roadKills.push(killsPerTile.get(`${e}_${n}`) ?? 0)
-    }
-
-    const r6 = (v: number) => Math.round(v * 1e6) / 1e6
-    const dump = { lat: [], lon: [], ground: [], drop: [], open: [] } as AreaResult['anchors']
-    for (const a of anchors) {
-      const { lat, lon } = toWgs84(a.e, a.n)
-      dump.lat.push(r6(lat))
-      dump.lon.push(r6(lon))
-      dump.ground.push(Math.round(a.ground * 10) / 10)
-      dump.drop.push(Math.round(a.dropDepth * 10) / 10)
-      dump.open.push(packSectors(a.open))
-    }
-    const packed = { e: [], n: [], kind: [], score: [], blocked: [] } as AreaResult['endpoints']
-    for (const e of r.endpoints) {
-      packed.e.push(e.e)
-      packed.n.push(e.n)
-      packed.kind.push(LINE_KINDS.indexOf(e.kind))
-      packed.score.push(e.score)
-      packed.blocked.push(e.blocked)
-    }
+    const tiles = tileUsage(
+      allTiles, anchors, r.roadKills, wantedTiles, wanted, buildings.cellsPerTile,
+    )
 
     return {
       region: {
@@ -410,8 +441,8 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       },
       mask: exportMask(drop, p),
       tiles,
-      anchors: dump,
-      endpoints: packed,
+      anchors: dumpAnchors(anchors),
+      endpoints: packEndpoints(r.endpoints),
       candidates: ref.candidates,
       improved: ref.improved,
       totalGain: ref.totalGain,

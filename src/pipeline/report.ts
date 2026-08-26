@@ -259,8 +259,10 @@ export function renderReport(wallSeconds: number): void {
 
   console.log('\nwhere the time went and what flowed through, in the order it happens:')
   console.log(
-    row({ label: 'stage', time: 'cpu', wall: 'clock', pct: 'share', from: 'in', to: 'out', kept: 'kept' })
-      .replace(' -> ', '    '),
+    row({
+      label: 'stage', time: 'cpu', wall: 'clock', pct: 'share',
+      from: 'in', to: 'out', kept: 'kept',
+    }).replace(' -> ', '    '),
   )
   for (const l of rendered) console.log(row(l))
   console.log(

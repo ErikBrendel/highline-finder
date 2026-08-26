@@ -288,7 +288,3 @@ function samplerFor(layer: Layer): Sampler {
 
 export const groundSampler = samplerFor('ground')
 export const surfaceSampler = samplerFor('surface')
-
-export function terrainStats(): { windows: number } {
-  return { windows: loaded.size }
-}

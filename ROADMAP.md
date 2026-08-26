@@ -139,14 +139,11 @@ anchors only, one AOI, static viewer.
   on every refinement step, and it re-walks the bucket grid from scratch each time. Two obvious
   moves: cache the near-set per anchor pair across a refinement's steps, since the line barely
   moves; and skip it entirely where the corridor's buckets are empty, which is most of Brandenburg.
-- **The pair enumeration is what is left.** With the pool in, region 7 spends 151s of processor
-  time walking 904M candidate pairs and 43s testing the 37M that survive against the raster. The
-  enumeration also costs 1.8x more processor time in parallel than serial, which is the string-keyed
-  bucket map allocating in nine threads at once. An integer-keyed index over a flat lattice would
-  remove both the allocation and most of the lookup.
-- **The min filter is memory-bound now, not compute-bound.** The deque took it from 51s to 12s; the
-  rest is the vertical pass striding a 700 MB array by one row per read. Processing columns in
-  cache-width strips would take most of what is left.
+- **The pool is bounded by its slowest chunk, not by its total work.** Region 7 runs 401s of
+  processor time in 92s of clock, which is 4.4 of a possible 9. Sixteen chunks per worker took it
+  from 4.2; finer still trades against the per-chunk message, and the real fix is chunks sized by
+  the anchors they contain rather than by index range, since a band over a town holds far more pairs
+  than one over a lake.
 
 ## Viewer
 

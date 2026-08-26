@@ -4,10 +4,17 @@ import { RoofMask } from '../shared/anchoring.js'
 import { WaterMask } from '../shared/water.js'
 import { enablePhases, takeCounts, takePhases } from '../shared/phases.js'
 import { loadRoads } from './roads.js'
-import { bucketAnchors, pairsOf, refine, scorePairs, terrainPairs, type AnchorIndex } from './lines.js'
-import { readAnchors, type AnchorTable, type Done, type Job, type Scene } from './pool.js'
-import type { Anchor } from './openness.js'
-import type { Scene as SceneRefs } from '../shared/scene.js'
+import {
+  bucketAnchors,
+  pairsOf,
+  refine,
+  scorePairs,
+  terrainPairs,
+  type AnchorIndex,
+} from './lines.js'
+import type { Done, Job, SharedRegion } from './pool.js'
+import type { AnchorTable } from './openness.js'
+import type { Scene } from '../shared/scene.js'
 
 /**
  * One worker's share of a region.
@@ -21,20 +28,21 @@ import type { Scene as SceneRefs } from '../shared/scene.js'
  * cannot affect the answer.
  */
 
-const scene = workerData as Scene
+const region = workerData as SharedRegion
 const port = parentPort!
 
-const ground = Grid.adopt(scene.ground)
-/**
- * The surface model arrives after the pool is running, because which tiles of it are worth fetching
- * is decided by the pair search the pool has yet to do. Until then it stands in as the terrain,
- * which is what the pair search reads anyway.
- */
-let surfaceRef = ground
-const refs: SceneRefs = {
-  roofs: scene.roofs ? RoofMask.adopt(scene.roofs) : undefined,
-  water: scene.water ? WaterMask.adopt(scene.water) : undefined,
+const ground = Grid.adopt(region.ground)
+const scene: Scene = {
+  roofs: region.roofs ? RoofMask.adopt(region.roofs) : undefined,
+  water: region.water ? WaterMask.adopt(region.water) : undefined,
 }
+
+/**
+ * The surface model arrives after the pool is running, because which of its tiles are worth
+ * fetching is decided by the pair search the pool has yet to do. Until then it stands in as the
+ * terrain, which is what the pair search reads anyway.
+ */
+let surface = ground
 
 enablePhases()
 
@@ -44,42 +52,46 @@ function withMeasurements(value: unknown): Done {
 }
 
 /**
- * The anchor table, unpacked once per region rather than once per job.
+ * The bucket index, built once per region rather than once per job.
  *
- * A worker takes several chunks of the same region, and rebuilding three hundred thousand anchor
- * objects for each of them is most of what the pair search would otherwise spend its time
- * allocating. Keyed on the buffer, so a new region replaces it rather than being served the old one.
+ * A worker takes several chunks of the same region and every chunk needs the whole index -- a
+ * partner can be any anchor -- so building it per chunk is building it once per chunk instead of
+ * once per region. Keyed on the buffer, so a new region replaces it rather than being served the
+ * old one.
  */
-let unpacked: { from: SharedArrayBuffer; anchors: Anchor[]; index: AnchorIndex } | null = null
+let indexed: { from: SharedArrayBuffer; index: AnchorIndex } | null = null
 
-function anchorsOf(table: AnchorTable): { anchors: Anchor[]; index: AnchorIndex } {
-  if (unpacked?.from !== table.fields) {
-    const anchors = readAnchors(table)
-    unpacked = { from: table.fields, anchors, index: bucketAnchors(anchors, scene.params.maxLength) }
+function indexOf(table: AnchorTable): AnchorIndex {
+  if (indexed?.from !== table.fields) {
+    indexed = { from: table.fields, index: bucketAnchors(table, region.params.maxLength) }
   }
-  return unpacked
+  return indexed.index
 }
 
 function handle(job: Job): unknown {
   if (job.kind === 'pairs') {
-    const { anchors, index } = anchorsOf(job.anchors)
-    const found = terrainPairs(anchors, ground, scene.params, refs, job.from, job.to, index)
+    const found = terrainPairs(job.anchors, ground, region.params, scene, {
+      from: job.from,
+      to: job.to,
+      index: indexOf(job.anchors),
+    })
     // Copied out of the growable buffer so the message carries the pairs and nothing else.
     return { ...found, pairs: Int32Array.from(found.pairs) }
   }
   if (job.kind === 'score') {
-    const { anchors } = anchorsOf(job.anchors)
     const pairs = new Int32Array(job.pairs, 0, job.total * 2)
-    return scorePairs(pairsOf(anchors, pairs, job.from, job.to), ground, surfaceRef, scene.params, refs)
+    return scorePairs(
+      pairsOf(job.anchors, pairs, job.from, job.to), ground, surface, region.params, scene,
+    )
   }
-  if (job.kind === 'refine') return refine(job.candidates, ground, surfaceRef, scene.params, refs)
-  surfaceRef = Grid.adopt(job.grid)
+  if (job.kind === 'refine') return refine(job.candidates, ground, surface, region.params, scene)
+  surface = Grid.adopt(job.grid)
   return { attached: true }
 }
 
-loadRoads(scene.bbox)
+loadRoads(region.bbox)
   .then((roads) => {
-    refs.roads = roads.index
+    scene.roads = roads.index
     port.postMessage({ ready: true })
     port.on('message', (job: Job) => {
       try {

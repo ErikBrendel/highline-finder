@@ -189,3 +189,50 @@ export function packSectors(open: Uint8Array): string {
   }
   return out
 }
+
+/**
+ * The anchors as flat numbers rather than objects.
+ *
+ * The pair search is a numeric kernel: it walks a billion candidate pairs on the biggest region and
+ * touches nothing about an anchor but its coordinates, its attachment range and its open sectors.
+ * Reading those out of three hundred thousand scattered objects is a cache miss per pair, and
+ * measured on that shape the same loop runs nine times faster over typed arrays.
+ *
+ * Only the four fields that loop reads are here. Ground height and drop depth stay on the `Anchor`,
+ * where the debug dump reads them once -- putting them in the table would cost a third more memory
+ * and, worse, push the four that are read apart in the cache line. Sharing the table with the
+ * worker threads costs nothing extra: it is already the layout a SharedArrayBuffer wants.
+ */
+export interface AnchorTable {
+  /** `ANCHOR_FIELDS` doubles per anchor, laid out by the `AT_*` offsets below. */
+  fields: SharedArrayBuffer
+  /** `sectorCount` bytes per anchor, one per sector. */
+  open: SharedArrayBuffer
+  count: number
+  sectorCount: number
+}
+
+export const ANCHOR_FIELDS = 4
+export const AT_E = 0
+export const AT_N = 1
+export const AT_MIN = 2
+export const AT_MAX = 3
+
+export function packAnchors(anchors: Anchor[], sectorCount: number): AnchorTable {
+  const fields = new Float64Array(new SharedArrayBuffer(anchors.length * ANCHOR_FIELDS * 8))
+  const open = new Uint8Array(new SharedArrayBuffer(anchors.length * sectorCount))
+  anchors.forEach((a, i) => {
+    const at = i * ANCHOR_FIELDS
+    fields[at + AT_E] = a.e
+    fields[at + AT_N] = a.n
+    fields[at + AT_MIN] = a.anchorMin
+    fields[at + AT_MAX] = a.anchorMax
+    open.set(a.open, i * sectorCount)
+  })
+  return {
+    fields: fields.buffer as SharedArrayBuffer,
+    open: open.buffer as SharedArrayBuffer,
+    count: anchors.length,
+    sectorCount,
+  }
+}

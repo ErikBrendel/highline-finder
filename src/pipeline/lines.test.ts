@@ -4,7 +4,7 @@ import { chunks } from './pool.js'
 import { chooseHeights } from '../shared/scoring.js'
 import { gridFrom } from './testing.js'
 import { DEFAULT_PARAMS } from './params.js'
-import type { Anchor } from './openness.js'
+import { packAnchors, type Anchor } from './openness.js'
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Candidate, Params } from '../shared/types.js'
 import { unpackProfile } from '../shared/profile.js'
@@ -492,12 +492,13 @@ describe('splitting the pair search', () => {
       anchor(40, 180, g), anchor(40, 200, g), anchor(40, 220, g),
       anchor(260, 180, g), anchor(260, 200, g), anchor(260, 220, g),
     ]
-    const whole = terrainPairs(anchors, g, p)
+    const table = packAnchors(anchors, p.sectorCount)
+    const whole = terrainPairs(table, g, p)
     expect(whole.count).toBeGreaterThan(0)
 
     for (const parts of [2, 3, 6]) {
       const ranges = chunks(anchors.length, parts)
-      const split = ranges.map(([from, to]) => terrainPairs(anchors, g, p, {}, from, to))
+      const split = ranges.map(([from, to]) => terrainPairs(table, g, p, {}, { from, to }))
       expect([...split.flatMap((s) => [...s.pairs])]).toEqual([...whole.pairs])
       expect(split.reduce((s, x) => s + x.pairsInRange, 0)).toBe(whole.pairsInRange)
     }

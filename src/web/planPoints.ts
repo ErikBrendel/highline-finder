@@ -44,7 +44,7 @@ export function spanGeometry(a: LatLon, b: LatLon): { length: number; bearing: n
   }
 }
 
-export function spanMetres(a: LatLon, b: LatLon): number {
+function spanMetres(a: LatLon, b: LatLon): number {
   return spanGeometry(a, b).length
 }
 
