@@ -93,6 +93,25 @@ function lowestInDisc(ground: Grid, e: number, n: number, radius: number): numbe
  * and therefore tightens both the drop test and the fall-away envelope below. Null means no city
  * model, so everything counts as open ground.
  */
+/**
+ * The first lattice point at or after `edge`, on a lattice fixed to the projection.
+ *
+ * Fixed to EPSG:25833 rather than to the region's own corner, so that where the search looks does
+ * not depend on where the region happens to start. Laying the lattice out from `ground.e0` meant
+ * that widening an area of interest moved every anchor in it: growing Eberswalde west by 5,738 m
+ * shifted the whole lattice by 3 m, which changed 720 lines in the *east* -- ground the expansion
+ * never touched -- and jittered the score of nearly every line that survived. Different anchors
+ * give different candidates, different dedup winners and different refinement starts, so none of
+ * that churn was the search finding better answers.
+ *
+ * Cells are sampled at their centres, so the lattice is offset by half a step: on a 5 m step the
+ * points sit at 2.5, 7.5, 12.5 and so on, whatever region is being searched.
+ */
+function latticeFrom(edge: number, step: number): number {
+  const half = step / 2
+  return Math.ceil((edge - half) / step) * step + half
+}
+
 export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null): ScanResult {
   const anchors: Anchor[] = []
   const { sectorCount } = p
@@ -112,15 +131,15 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
   const lowestNearby = minFilter(ground, p.dropSearchRadius)
   phaseDone('min filter over the whole grid', tFilter)
 
-  const minE = ground.e0
   const maxE = ground.e0 + ground.w * ground.res
-  const minN = ground.n1 - ground.h * ground.res
   const maxN = ground.n1
+  const firstE = latticeFrom(ground.e0, p.anchorStep)
+  const firstN = latticeFrom(ground.n1 - ground.h * ground.res, p.anchorStep)
 
   let scanned = 0
   let passedDropTest = 0
-  for (let n = minN + p.anchorStep / 2; n < maxN; n += p.anchorStep) {
-    for (let e = minE + p.anchorStep / 2; e < maxE; e += p.anchorStep) {
+  for (let n = firstN; n < maxN; n += p.anchorStep) {
+    for (let e = firstE; e < maxE; e += p.anchorStep) {
       const g = ground.nearest(e, n)
       if (Number.isNaN(g)) continue
       scanned++

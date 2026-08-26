@@ -139,6 +139,12 @@ anchors only, one AOI, static viewer.
   on every refinement step, and it re-walks the bucket grid from scratch each time. Two obvious
   moves: cache the near-set per anchor pair across a refinement's steps, since the line barely
   moves; and skip it entirely where the corridor's buckets are empty, which is most of Brandenburg.
+- **The dedup and refinement order is still region-relative.** The anchor lattice is now fixed to
+  the projection, so growing an area of interest scans the same ground at the same points. What
+  still moves is which of several near-identical candidates dedup keeps: it walks the list in score
+  order and a new neighbour can displace an old winner, and refinement then hill-climbs from a
+  different start. That is a much smaller effect than the lattice was, and it only reaches as far as
+  `dedupRadius`, but it means an expansion is not yet strictly additive.
 - **The pool is bounded by its slowest chunk, not by its total work.** Region 7 runs 401s of
   processor time in 92s of clock, which is 4.4 of a possible 9. Sixteen chunks per worker took it
   from 4.2; finer still trades against the per-chunk message, and the real fix is chunks sized by

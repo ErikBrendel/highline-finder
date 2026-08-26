@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { packSectors, scanAnchors } from './openness.js'
 import { gridFrom } from './testing.js'
+import { Grid } from '../shared/grid.js'
 import { DEFAULT_PARAMS } from './params.js'
 import { sectorOf } from '../shared/geo.js'
 import type { Params } from '../shared/types.js'
@@ -119,5 +120,32 @@ describe('disc confirmation', () => {
     const rim = scanAnchors(cliff(20), p).anchors.find((a) => Math.abs(a.e - 197.5) <= 2.5)!
     // Attachment is aFrameMax above 50 m ground, floor at 30 m.
     expect(rim.dropDepth).toBeCloseTo(50 + p.aFrameMax - 30, 1)
+  })
+})
+
+describe('the anchor lattice', () => {
+  /**
+   * The property that makes growing an area of interest additive: where the search looks is fixed
+   * to the projection, so ground that was already covered is scanned at the same points as before.
+   * Laying the lattice out from the region's own corner instead moved every anchor in Eberswalde
+   * by 3 m when its west edge moved, which changed hundreds of lines nowhere near the new ground.
+   */
+  it('puts anchors at the same absolute coordinates whatever the region starts at', () => {
+    // The same cliff seen by two grids whose left edges are 3 m apart -- not a multiple of the step.
+    const terrain = (e: number) => (e < 200 ? 50 : 30)
+    const wide = gridFrom(400, 400, (e) => terrain(e))
+    const narrow = new Grid(new Float32Array(397 * 400), 397, 400, 3, 400, 1)
+    for (let row = 0; row < 400; row++) {
+      for (let col = 0; col < 397; col++) narrow.data[row * 397 + col] = terrain(col + 3 + 0.5)
+    }
+
+    const eastings = (g: Grid) =>
+      [...new Set(scanAnchors(g, p).anchors.map((a) => a.e))].sort((x, y) => x - y)
+    const fromWide = eastings(wide)
+    const fromNarrow = eastings(narrow)
+    expect(fromNarrow.length).toBeGreaterThan(0)
+    // Every column the narrow grid scanned is one the wide grid scanned too, at the same easting.
+    expect(fromWide).toEqual(expect.arrayContaining(fromNarrow))
+    expect(fromWide.every((e) => (e - p.anchorStep / 2) % p.anchorStep === 0)).toBe(true)
   })
 })
