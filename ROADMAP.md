@@ -227,10 +227,32 @@ pooled dataset, but selected, cached and recomputed independently, so ground can
 mechanism to the other a piece at a time. Four chunks south of Eberswalde are claimed and seeded
 empty.
 
-Left, in order: search those four for real, which is the first end-to-end test of the ownership
-rule; then work-stealing tile handout; then dirty-set selection (a recompute area implies every
-chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
-The roof rule is still unmeasured against ground it skipped -- Eberswalde is the region for that.
+**Chunk 52_728 is searched, and the ownership rule holds on real ground.** 293 candidates, and all
+293 have their first anchor inside the owned square. 18 of them reach outside it, up to 190 m, which
+is the halo doing exactly its job -- those lines exist only because anchors a kilometre beyond the
+chunk were scanned as partners. 26.8 s of processor in 607 s of clock, essentially all of it
+downloading. The 10x10 km load is 100 M cells per raster, as designed.
+
+**The roof rule is the pre-pass's weak point, and this is the first measurement of it.** On this
+chunk the terrain rule kept 25 of 121 tiles -- 21 %, right in line with the statewide 18.4 % -- and
+`tilesWithRoofAnchors` then pulled in the other 96. `maskMinRoofs: 1` qualifies a tile on a single
+building 10 m above nearby ground, and the result is dilated by `maxLength`, so one village claims
+its whole 3x3 neighbourhood. Mueggelberge could not see this: it is in Berlin, where the city model
+is empty.
+
+What that costs is narrower than it first looks, because the surface model is gated by
+`corridorTiles` -- the tiles a surviving line actually crosses -- and not by the pre-pass at all.
+Only 20 of the 121 were fetched at 0.2 m. So the roof rule costs terrain bandwidth and scan compute,
+not the expensive layer: statewide it is the difference between ~8 GB and the full ~44 GB of DGM,
+and between scanning 20 % of the ground and all of it. The surface estimate above stands.
+
+Worth tuning before a statewide run even so, in one of two directions: require more than one
+anchorable roof per tile, or dilate roofs by less than `maxLength`, since a rooftop line's far end
+is usually another rooftop nearby rather than open ground half a kilometre away.
+
+Left, in order: the remaining three chunks, which give the first seam between two searched chunks;
+then work-stealing tile handout; then dirty-set selection (a recompute area implies every chunk
+within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
 
 One refinement for later: halo anchors are re-scanned by each neighbouring chunk (~23 % redundant at
 8 km). Persisting the per-chunk anchor table and letting neighbours read it removes that; the tables
