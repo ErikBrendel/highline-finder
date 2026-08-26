@@ -868,8 +868,11 @@ export function App() {
   const { stats, regions } = data.meta
   const aoiCount = regions.reduce((n, r) => n + r.aois.length, 0)
   const areaKm2 = regions.reduce((s, r) => s + r.width * r.height, 0) / 1e6
-  const groundMin = Math.min(...regions.map((r) => r.groundMin))
-  const groundMax = Math.max(...regions.map((r) => r.groundMax))
+  // Only regions that were actually searched know their terrain range; one that has merely been
+  // claimed on the map reports zeros, and would drag the floor down to sea level.
+  const measured = regions.filter((r) => r.anchorsScanned > 0)
+  const groundMin = Math.min(...measured.map((r) => r.groundMin))
+  const groundMax = Math.max(...measured.map((r) => r.groundMax))
   // Reduced rather than spread into Math.max: the dataset is tens of thousands of lines now, and
   // spreading that many arguments exceeds the call stack.
   const highest = (pick: (c: Candidate) => number, floor: number) =>

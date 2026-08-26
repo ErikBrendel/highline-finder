@@ -45,7 +45,22 @@ describe.skipIf(!present)('generated candidates.json', () => {
   it('produced candidates, over ground with real relief', () => {
     expect(candidates.length).toBeGreaterThan(0)
     expect(regions.length).toBeGreaterThan(0)
-    for (const r of regions) expect(r.groundMax - r.groundMin).toBeGreaterThan(10)
+    // A region can be claimed on the map without having been searched -- see tools/seedRegion.ts --
+    // and one of those knows no terrain range because it never loaded any. `anchorsScanned` is what
+    // tells the two apart, since no real search of any area scans nothing.
+    const searched = regions.filter((r) => r.anchorsScanned > 0)
+    expect(searched.length).toBeGreaterThan(0)
+    for (const r of searched) expect(r.groundMax - r.groundMin).toBeGreaterThan(10)
+  })
+
+  it('claims no lines for ground it never searched', () => {
+    // The placeholder must stay distinguishable from a real empty answer: if a seeded region ever
+    // carried candidates, something built them out of terrain that was never loaded.
+    for (const r of regions.filter((x) => x.anchorsScanned === 0)) {
+      expect(r.anchorsKept).toBe(0)
+      const inRegion = candidates.filter((c) => r.aois.map(boxOf).some((b) => contains(b, c.a.e, c.a.n)))
+      expect(inRegion).toHaveLength(0)
+    }
   })
 
   it('respects every hard filter it claims to enforce', () => {

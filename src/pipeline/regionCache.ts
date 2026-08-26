@@ -77,14 +77,15 @@ export async function readRegion<T>(aois: Aoi[]): Promise<CacheHit<T> | null> {
   return { value: held.value, generatedAt: held.generatedAt }
 }
 
-export async function writeRegion<T>(aois: Aoi[], p: Params, value: T): Promise<number> {
+export async function writeRegion<T>(
+  aois: Aoi[],
+  p: Params,
+  value: T,
+  /** Overridden only to backdate a placeholder; a real search is always written as of now. */
+  generatedAt = new Date().toISOString(),
+): Promise<number> {
   await mkdir(CACHE_DIR, { recursive: true })
-  const held: Envelope<T> = {
-    format: FORMAT,
-    params: JSON.stringify(p),
-    generatedAt: new Date().toISOString(),
-    value,
-  }
+  const held: Envelope<T> = { format: FORMAT, params: JSON.stringify(p), generatedAt, value }
   const text = JSON.stringify(held)
   await writeFile(pathFor(regionId(aois)), text)
   return text.length
