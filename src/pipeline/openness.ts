@@ -1,4 +1,5 @@
 import { Grid, minFilter } from '../shared/grid.js'
+import { phaseAt, phaseDone } from '../shared/phases.js'
 import { rigRange, type Roofs } from '../shared/anchoring.js'
 import type { Params } from '../shared/types.js'
 
@@ -104,7 +105,12 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
     cos[s] = Math.cos(b)
   }
 
+  // Over the whole grid, not over the scanned points -- so this cost is set by the area and does
+  // not fall when anchorStep rises. Timed because that makes it the part of the scan that no
+  // coarsening of the lattice can reach.
+  const tFilter = phaseAt()
   const lowestNearby = minFilter(ground, p.dropSearchRadius)
+  phaseDone('min filter over the whole grid', tFilter)
 
   const minE = ground.e0
   const maxE = ground.e0 + ground.w * ground.res
@@ -120,15 +126,20 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
       scanned++
 
       // Test A, measured from the highest attachment because that is the most permissive case.
-      // The square window first, then the disc it is only an approximation of.
+      const tDrop = phaseAt()
       const range = rigRange(roofs?.covers(e, n) ?? false, p)
       const anchorH = g + range.max
       const deepEnough = anchorH - p.minDropDepth
-      if (!(lowestNearby.nearest(e, n) <= deepEnough)) continue
-      const lowest = lowestInDisc(ground, e, n, p.dropSearchRadius)
+      // The square window first, then the disc it is only an approximation of.
+      const lowest =
+        lowestNearby.nearest(e, n) <= deepEnough
+          ? lowestInDisc(ground, e, n, p.dropSearchRadius)
+          : Infinity
+      phaseDone('drop test per scanned point', tDrop)
       if (!(lowest <= deepEnough)) continue
       passedDropTest++
 
+      const tSectors = phaseAt()
       const open = new Uint8Array(sectorCount)
       let openCount = 0
       for (let s = 0; s < sectorCount; s++) {
@@ -146,6 +157,7 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
         open[s] = 1
         openCount++
       }
+      phaseDone('sector probes per surviving point', tSectors)
 
       if (openCount > 0) {
         anchors.push({

@@ -43,6 +43,14 @@ export function phaseCount(name: string, n = 1): void {
   tallies.set(name, (tallies.get(name) ?? 0) + n)
 }
 
+/**
+ * Folds in what a worker thread measured, so a stage that runs in the pool reports the same phase
+ * breakdown a serial one would. Milliseconds, as `takePhases` hands them over.
+ */
+export function addPhase(name: string, ms: number): void {
+  elapsed.set(name, (elapsed.get(name) ?? 0) + ms)
+}
+
 /** Milliseconds per phase since the last call, which also clears them. */
 export function takePhases(): Map<string, number> {
   const out = new Map(elapsed)

@@ -191,8 +191,9 @@ export function reportLines(): Line[] {
   const total = totalCpu()
   const out: Line[] = []
   for (const row of rows.values()) {
-    // A stage whose two clocks agree gets one number; the gap is the interesting case, not the norm.
-    const drifted = row.wall > row.cpu * 1.2 + 1
+    // A stage whose two clocks agree gets one number. They part in both directions and both are
+    // worth seeing: a download or a sleep leaves the clock ahead, a pool of threads leaves it behind.
+    const drifted = row.wall > row.cpu * 1.2 + 1 || row.cpu > row.wall * 1.2 + 1
     out.push({
       label: row.label,
       time: `${row.cpu.toFixed(1)}s`,
@@ -266,5 +267,8 @@ export function renderReport(wallSeconds: number): void {
     `  ${'total'.padEnd(cols.label)}  ${total.toFixed(1).concat('s').padStart(cols.time)} ` +
       `${wallSeconds.toFixed(0).concat('s').padStart(cols.wall)}`,
   )
-  console.log('\n  cpu is processor time; clock is shown only where it ran ahead (download, or sleep).')
+  console.log(
+    '\n  cpu is processor time summed over every thread; clock is shown where the two differ --\n' +
+      '  ahead of cpu for a download or a sleep, behind it wherever the worker pool ran.',
+  )
 }

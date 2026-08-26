@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { dedupe, evaluateLine, findLines, refine } from './lines.js'
+import { dedupe, evaluateLine, findLines, refine, terrainPairs } from './lines.js'
+import { chunks } from './pool.js'
 import { chooseHeights } from '../shared/scoring.js'
 import { gridFrom } from './testing.js'
 import { DEFAULT_PARAMS } from './params.js'
@@ -475,6 +476,40 @@ describe('dedupe indexing', () => {
     }
     for (const radius of [5, 25, 60]) {
       expect(dedupe(cs, radius).map((c) => c.id)).toEqual(bruteForce(cs, radius).map((c) => c.id))
+    }
+  })
+})
+
+describe('splitting the pair search', () => {
+  /**
+   * The property the worker pool rests on: every unordered pair has exactly one `i`, so ranges of
+   * `i` partition the pairs. Splitting has to lose none, invent none, and -- because dedup breaks
+   * ties on list order -- put them in the order an unsplit run would.
+   */
+  it('produces exactly the pairs an unsplit search would, in the same order', () => {
+    const g = canyon(0)
+    const anchors = [
+      anchor(40, 180, g), anchor(40, 200, g), anchor(40, 220, g),
+      anchor(260, 180, g), anchor(260, 200, g), anchor(260, 220, g),
+    ]
+    const whole = terrainPairs(anchors, g, p)
+    expect(whole.count).toBeGreaterThan(0)
+
+    for (const parts of [2, 3, 6]) {
+      const ranges = chunks(anchors.length, parts)
+      const split = ranges.map(([from, to]) => terrainPairs(anchors, g, p, {}, from, to))
+      expect([...split.flatMap((s) => [...s.pairs])]).toEqual([...whole.pairs])
+      expect(split.reduce((s, x) => s + x.pairsInRange, 0)).toBe(whole.pairsInRange)
+    }
+  })
+})
+
+describe('chunks', () => {
+  it('covers everything once, contiguously and in order', () => {
+    for (const [total, parts] of [[10, 3], [10, 1], [3, 10], [0, 4]] as const) {
+      const ranges = chunks(total, parts)
+      expect(ranges.flatMap(([from, to]) => Array.from({ length: to - from }, (_, i) => from + i)))
+        .toEqual(Array.from({ length: total }, (_, i) => i))
     }
   })
 })

@@ -7,11 +7,13 @@ import { WaterMask } from '../shared/water.js'
 import { readRegion, regionId, writeRegion } from './regionCache.js'
 import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
 import { packSectors, scanAnchors } from './openness.js'
-import { dedupe, evaluatePairs, locate, refine, terrainPairs } from './lines.js'
+import { dedupe, locate, pairsOf } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
 import { record, renderReport, stage } from './report.js'
+import { Pool, poolSize, shareAnchors } from './pool.js'
+import { pairInParallel, refineInParallel, scoreInParallel } from './parallel.js'
 import { enablePhases } from '../shared/phases.js'
 import { LINE_KINDS } from '../shared/types.js'
 import type {
@@ -260,148 +262,169 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       `${roads.water.islands.length.toLocaleString()} islands, ` +
       `${(water.cells / 1e6).toFixed(1)}M cells of the grid under water`,
   )
-  const scene = { roofs, roads: roads.index, water }
-
-  const found = await stage(
-    'pairing and terrain gate',
-    () => terrainPairs(anchors, ground, p, scene),
-    (r) => ({
-      from: [anchors.length, 'anchors'],
-      to: [r.pairs.length, 'pairs'],
-      steps: [
-        ['within length range', r.pairsInRange],
-        ['both ends open that way', r.pairsSectorPassed],
-        ['level enough to rig', r.pairsLevelEnough],
-        ['clears the terrain', r.pairs.length],
-      ],
-    }),
-  )
-
   /**
-   * The surface model is fetched here rather than alongside the terrain, and only for the tiles the
-   * surviving corridors cross. It is 33 MB per square kilometre against the terrain model's 1.4 MB,
-   * and canopy is never a hard constraint -- so paying for it over the whole area of interest buys
-   * canopy figures for ground no line ever crosses.
+   * The pool, opened once the rasters exist and closed when the region is done.
+   *
+   * Started here rather than at the top of the run because a worker needs the terrain grid to
+   * adopt, and it outlives all three parallel stages so the grids and the road index are paid for
+   * once rather than per stage. The surface model is sent later, since which of its tiles are worth
+   * fetching is decided by the pair search these workers are about to run.
    */
-  const wanted = corridorTiles(found.pairs, p.refineRadius + p.profileStep)
-  const used = allTiles.filter((t) => wanted.has(t))
-  record('surface tile choice', {
-    from: [allTiles.length, 'tiles'],
-    to: [used.length, 'carry a line'],
+  const pool = new Pool({
+    ground: ground.share(),
+    roofs: roofs.share(),
+    water: water.share(),
+    bbox,
+    params: p,
   })
-  console.log(
-    `  ${used.length} of ${allTiles.length} tiles carry a line ` +
-      `(~${used.length * 33} MB instead of ~${allTiles.length * 33} MB)`,
-  )
-  const surface = await stage(
-    'surface rasters',
-    () => loadProduct('bdom', bbox, 1, wanted),
-    (g) => ({ from: [used.length, 'tiles'], to: [g.extent().valid, 'cells'] }),
-  )
-  console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
+  console.log(`  ${poolSize()} worker threads on the pair search, profiles and refinement`)
+  const table = shareAnchors(anchors, p.sectorCount)
 
-  const r = await stage(
-    'profiles and score',
-    () => evaluatePairs(found, ground, surface, p, scene),
-    (out) => ({
-      from: [found.pairs.length, 'pairs'],
-      to: [out.candidatesAfterDedup, 'distinct'],
-      steps: [['feasible after profile', out.pairsFeasible]],
-    }),
-  )
-  const rejected = Object.entries(r.rejects).sort((x, y) => y[1] - x[1])
-  if (rejected.length) {
-    console.log(`  rejected by  ${rejected.map(([why, n]) => `${n} ${why}`).join(', ')}`)
-  }
+  try {
+    const found = await stage(
+      'pairing and terrain gate',
+      () => pairInParallel(pool, table, p),
+      (r) => ({
+        from: [anchors.length, 'anchors'],
+        to: [r.count, 'pairs'],
+        steps: [
+          ['within length range', r.pairsInRange],
+          ['both ends open that way', r.pairsSectorPassed],
+          ['level enough to rig', r.pairsLevelEnough],
+          ['clears the terrain', r.count],
+        ],
+      }),
+    )
 
-  const ref = await stage(
-    'local refinement',
-    () => refine(r.candidates, ground, surface, p, scene),
-    (out) => ({
-      from: [r.candidates.length, 'distinct'],
-      to: [out.improved, 'improved'],
-      steps: [['line evaluations spent', out.evaluations]],
-    }),
-  )
-  const gain = ref.improved ? ref.totalGain / ref.improved : 0
-  console.log(
-    `  ${ref.improved}/${r.candidates.length} improved from ${ref.evaluations} evaluations, ` +
-      `mean +${gain.toFixed(2)} score`,
-  )
+    /**
+     * The surface model is fetched here rather than alongside the terrain, and only for the tiles the
+     * surviving corridors cross. It is 33 MB per square kilometre against the terrain model's 1.4 MB,
+     * and canopy is never a hard constraint -- so paying for it over the whole area of interest buys
+     * canopy figures for ground no line ever crosses.
+     */
+    const wanted = corridorTiles(pairsOf(anchors, found.pairs), p.refineRadius + p.profileStep)
+    const used = allTiles.filter((t) => wanted.has(t))
+    record('surface tile choice', {
+      from: [allTiles.length, 'tiles'],
+      to: [used.length, 'carry a line'],
+    })
+    console.log(
+      `  ${used.length} of ${allTiles.length} tiles carry a line ` +
+        `(~${used.length * 33} MB instead of ~${allTiles.length * 33} MB)`,
+    )
+    const surface = await stage(
+      'surface rasters',
+      () => loadProduct('bdom', bbox, 1, wanted),
+      (g) => ({ from: [used.length, 'tiles'], to: [g.extent().valid, 'cells'] }),
+    )
+    console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
+    await pool.broadcast({ kind: 'surface', grid: surface.share() })
 
-  const anchorsPerTile = new Map<string, number>()
-  for (const a of anchors) {
-    const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
-    anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
-  }
-  const killsPerTile = new Map<string, number>()
-  for (const at of r.roadKills) {
-    const key = `${Math.floor(at.e / 1000)}_${Math.floor(at.n / 1000)}`
-    killsPerTile.set(key, (killsPerTile.get(key) ?? 0) + 1)
-  }
-  const tiles: TileUsage = {
-    size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [], roofCells: [], roadKills: [],
-  }
-  for (const id of allTiles) {
-    const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
-    const { lat, lon } = toWgs84(e * 1000 + 500, n * 1000 + 500)
-    tiles.lat.push(Math.round(lat * 1e6) / 1e6)
-    tiles.lon.push(Math.round(lon * 1e6) / 1e6)
-    tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
-    tiles.surface.push(wanted.has(id))
-    tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
-    tiles.roofCells.push(buildings.cellsPerTile.get(id) ?? 0)
-    tiles.roadKills.push(killsPerTile.get(`${e}_${n}`) ?? 0)
-  }
+    const r = await stage(
+      'profiles and score',
+      () => scoreInParallel(pool, table, found, p),
+      (out) => ({
+        from: [found.count, 'pairs'],
+        to: [out.candidatesAfterDedup, 'distinct'],
+        steps: [['feasible after profile', out.pairsFeasible]],
+      }),
+    )
+    const rejected = Object.entries(r.rejects).sort((x, y) => y[1] - x[1])
+    if (rejected.length) {
+      console.log(`  rejected by  ${rejected.map(([why, n]) => `${n} ${why}`).join(', ')}`)
+    }
 
-  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
-  const dump = { lat: [], lon: [], ground: [], drop: [], open: [] } as AreaResult['anchors']
-  for (const a of anchors) {
-    const { lat, lon } = toWgs84(a.e, a.n)
-    dump.lat.push(r6(lat))
-    dump.lon.push(r6(lon))
-    dump.ground.push(Math.round(a.ground * 10) / 10)
-    dump.drop.push(Math.round(a.dropDepth * 10) / 10)
-    dump.open.push(packSectors(a.open))
-  }
-  const packed = { e: [], n: [], kind: [], score: [], blocked: [] } as AreaResult['endpoints']
-  for (const e of r.endpoints) {
-    packed.e.push(e.e)
-    packed.n.push(e.n)
-    packed.kind.push(LINE_KINDS.indexOf(e.kind))
-    packed.score.push(e.score)
-    packed.blocked.push(e.blocked)
-  }
+    const ref = await stage(
+      'local refinement',
+      () => refineInParallel(pool, r.candidates),
+      (out) => ({
+        from: [r.candidates.length, 'distinct'],
+        to: [out.improved, 'improved'],
+        steps: [['line evaluations spent', out.evaluations]],
+      }),
+    )
+    const gain = ref.improved ? ref.totalGain / ref.improved : 0
+    console.log(
+      `  ${ref.improved}/${r.candidates.length} improved from ${ref.evaluations} evaluations, ` +
+        `mean +${gain.toFixed(2)} score`,
+    )
 
-  return {
-    region: {
-      aois: area.aois,
-      bbox25833: bbox,
-      width: Math.round(bbox.maxE - bbox.minE),
-      height: Math.round(bbox.maxN - bbox.minN),
-      groundMin: Math.round(ext.min * 100) / 100,
-      groundMax: Math.round(ext.max * 100) / 100,
-      anchorsScanned: scan.scanned,
-      anchorsKept: anchors.length,
-      // Overwritten by the caller, which is the only place that knows whether this came from a
-      // cache and when that cache was written.
-      generatedAt: '',
-      current: true,
-    },
-    mask: exportMask(drop, p),
-    tiles,
-    anchors: dump,
-    endpoints: packed,
-    candidates: ref.candidates,
-    improved: ref.improved,
-    totalGain: ref.totalGain,
-    find: {
-      pairsInRange: r.pairsInRange,
-      pairsSectorPassed: r.pairsSectorPassed,
-      pairsLevelEnough: r.pairsLevelEnough,
-      pairsFeasible: r.pairsFeasible,
-      candidatesAfterDedup: r.candidatesAfterDedup,
-    },
+    const anchorsPerTile = new Map<string, number>()
+    for (const a of anchors) {
+      const key = `${Math.floor(a.e / 1000)}_${Math.floor(a.n / 1000)}`
+      anchorsPerTile.set(key, (anchorsPerTile.get(key) ?? 0) + 1)
+    }
+    const killsPerTile = new Map<string, number>()
+    for (const at of r.roadKills) {
+      const key = `${Math.floor(at.e / 1000)}_${Math.floor(at.n / 1000)}`
+      killsPerTile.set(key, (killsPerTile.get(key) ?? 0) + 1)
+    }
+    const tiles: TileUsage = {
+      size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [], roofCells: [], roadKills: [],
+    }
+    for (const id of allTiles) {
+      const [e, n] = id.slice(2).split('-').map(Number) as [number, number]
+      const { lat, lon } = toWgs84(e * 1000 + 500, n * 1000 + 500)
+      tiles.lat.push(Math.round(lat * 1e6) / 1e6)
+      tiles.lon.push(Math.round(lon * 1e6) / 1e6)
+      tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
+      tiles.surface.push(wanted.has(id))
+      tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
+      tiles.roofCells.push(buildings.cellsPerTile.get(id) ?? 0)
+      tiles.roadKills.push(killsPerTile.get(`${e}_${n}`) ?? 0)
+    }
+
+    const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+    const dump = { lat: [], lon: [], ground: [], drop: [], open: [] } as AreaResult['anchors']
+    for (const a of anchors) {
+      const { lat, lon } = toWgs84(a.e, a.n)
+      dump.lat.push(r6(lat))
+      dump.lon.push(r6(lon))
+      dump.ground.push(Math.round(a.ground * 10) / 10)
+      dump.drop.push(Math.round(a.dropDepth * 10) / 10)
+      dump.open.push(packSectors(a.open))
+    }
+    const packed = { e: [], n: [], kind: [], score: [], blocked: [] } as AreaResult['endpoints']
+    for (const e of r.endpoints) {
+      packed.e.push(e.e)
+      packed.n.push(e.n)
+      packed.kind.push(LINE_KINDS.indexOf(e.kind))
+      packed.score.push(e.score)
+      packed.blocked.push(e.blocked)
+    }
+
+    return {
+      region: {
+        aois: area.aois,
+        bbox25833: bbox,
+        width: Math.round(bbox.maxE - bbox.minE),
+        height: Math.round(bbox.maxN - bbox.minN),
+        groundMin: Math.round(ext.min * 100) / 100,
+        groundMax: Math.round(ext.max * 100) / 100,
+        anchorsScanned: scan.scanned,
+        anchorsKept: anchors.length,
+        // Overwritten by the caller, which is the only place that knows whether this came from a
+        // cache and when that cache was written.
+        generatedAt: '',
+        current: true,
+      },
+      mask: exportMask(drop, p),
+      tiles,
+      anchors: dump,
+      endpoints: packed,
+      candidates: ref.candidates,
+      improved: ref.improved,
+      totalGain: ref.totalGain,
+      find: {
+        pairsInRange: r.pairsInRange,
+        pairsSectorPassed: r.pairsSectorPassed,
+        pairsLevelEnough: r.pairsLevelEnough,
+        pairsFeasible: r.pairsFeasible,
+        candidatesAfterDedup: r.candidatesAfterDedup,
+      },
+    }
+  } finally {
+    await pool.close()
   }
 }
 

@@ -1,4 +1,4 @@
-import type { Grid } from './grid.js'
+import type { CellGeometry, Grid } from './grid.js'
 import type { LineKind, Params } from './types.js'
 
 /**
@@ -53,6 +53,15 @@ export function lineKind(aOnRoof: boolean, bOnRoof: boolean): LineKind {
  * this has to answer afterwards is whether that height is a roof or a hill. At 1 m over the 200 km2
  * Eberswalde region a float copy would be 800 MB and this is 25.
  */
+/** One bit per cell, on shared memory so the worker threads read the same bits. */
+export interface MaskShare extends CellGeometry {
+  buffer: SharedArrayBuffer
+}
+
+export function sharedBits(w: number, h: number): Uint8Array {
+  return new Uint8Array(new SharedArrayBuffer(Math.ceil((w * h) / 8)))
+}
+
 export class RoofMask implements Roofs {
   private constructor(
     private readonly bits: Uint8Array,
@@ -64,7 +73,15 @@ export class RoofMask implements Roofs {
   ) {}
 
   static forGrid(g: Grid): RoofMask {
-    return new RoofMask(new Uint8Array(Math.ceil((g.w * g.h) / 8)), g.w, g.h, g.e0, g.n1, g.res)
+    return new RoofMask(sharedBits(g.w, g.h), g.w, g.h, g.e0, g.n1, g.res)
+  }
+
+  share(): MaskShare {
+    return { buffer: this.bits.buffer as SharedArrayBuffer, w: this.w, h: this.h, e0: this.e0, n1: this.n1, res: this.res }
+  }
+
+  static adopt(v: MaskShare): RoofMask {
+    return new RoofMask(new Uint8Array(v.buffer), v.w, v.h, v.e0, v.n1, v.res)
   }
 
   private indexAt(e: number, n: number): number {

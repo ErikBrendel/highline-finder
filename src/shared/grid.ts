@@ -91,6 +91,10 @@ export interface Pos {
  * model: ModelTiepoint gives the top-left *corner*, so cell (col,row) is centred half a cell in.
  * nodata becomes NaN on read so it propagates instead of poisoning arithmetic with -9999.
  */
+export interface GridShare extends CellGeometry {
+  buffer: SharedArrayBuffer
+}
+
 export class Grid {
   constructor(
     readonly data: Float32Array,
@@ -103,8 +107,28 @@ export class Grid {
     readonly res: number,
   ) {}
 
+  /**
+   * A grid the worker threads can read without a copy.
+   *
+   * Backed by a SharedArrayBuffer rather than the usual one, because the terrain and surface
+   * rasters are 700 MB each on the biggest region and handing every worker its own would run the
+   * machine out of memory long before it ran out of cores. Nothing writes to a grid after it is
+   * assembled, so sharing needs no synchronisation beyond the message that says it is ready.
+   */
   static filled(w: number, h: number, e0: number, n1: number, res: number): Grid {
-    return new Grid(new Float32Array(w * h).fill(NaN), w, h, e0, n1, res)
+    // Floored, because a typed-array length is, and a fixture built from metres over a cell size
+    // does not always divide.
+    const data = new Float32Array(new SharedArrayBuffer(Math.floor(w * h) * 4))
+    return new Grid(data.fill(NaN), w, h, e0, n1, res)
+  }
+
+  /** Everything a worker needs to read this grid, and nothing that would have to be copied. */
+  share(): GridShare {
+    return { buffer: this.data.buffer as SharedArrayBuffer, w: this.w, h: this.h, e0: this.e0, n1: this.n1, res: this.res }
+  }
+
+  static adopt(v: GridShare): Grid {
+    return new Grid(new Float32Array(v.buffer), v.w, v.h, v.e0, v.n1, v.res)
   }
 
   at(col: number, row: number): number {
@@ -154,6 +178,46 @@ export class Grid {
 }
 
 /**
+ * Sliding-window minimum along one axis, in one pass, using a monotonic deque.
+ *
+ * The deque holds the indices of the only values that can still win: anything with a smaller value
+ * to its right is already beaten for every remaining window, so it is dropped on the way in. Each
+ * index is pushed once and popped once, which makes the cost per cell a constant independent of the
+ * window -- against the naive scan's one comparison per cell of the window.
+ *
+ * Written once and used for both axes: `step` walks the axis being filtered and `lineStep` walks
+ * between lines, so a horizontal pass is (1, w) and a vertical pass is (w, 1).
+ */
+function slidingMin(
+  read: Float32Array,
+  write: Float32Array,
+  lines: number,
+  len: number,
+  lineStep: number,
+  step: number,
+  r: number,
+  dq: Int32Array,
+): void {
+  for (let line = 0; line < lines; line++) {
+    const base = line * lineStep
+    let head = 0
+    let tail = 0
+    const push = (i: number) => {
+      const v = read[base + i * step]!
+      while (tail > head && read[base + dq[tail - 1]! * step]! >= v) tail--
+      dq[tail++] = i
+    }
+    // Everything the first output can see; from then on one index enters and one leaves per cell.
+    for (let i = 0, last = Math.min(r, len - 1); i <= last; i++) push(i)
+    for (let i = 0; i < len; i++) {
+      write[base + i * step] = read[base + dq[head]! * step]!
+      if (dq[head] === i - r) head++
+      if (i + r + 1 < len) push(i + r + 1)
+    }
+  }
+}
+
+/**
  * Lowest terrain within `radius` of every cell, as a new grid.
  *
  * Precomputing this turns "is there anything deep enough near this point" from a scan of a few
@@ -161,37 +225,29 @@ export class Grid {
  * enough to run before the directional scan rather than after it.
  *
  * Separable: a horizontal pass then a vertical one, which is exact for a square window and close
- * enough to a disc for a prefilter. The window scan is naive rather than a monotonic deque -- at
- * radius 25 that is ~90M comparisons for a square kilometre, well under a second, and the deque
- * version only starts to matter if the radius grows a lot.
+ * enough to a disc for a prefilter. Both passes are monotonic deques, because this is sized by the
+ * *area* rather than by the anchor lattice -- so it is the one part of the anchor scan that does not
+ * get cheaper when the lattice is coarsened, and on a 198 km2 region the naive scan was 51 seconds,
+ * 14% of the entire run, for 51 comparisons per cell per axis.
+ *
+ * No-data is carried as +Infinity through both passes and turned back at the end. That reproduces
+ * what the naive version did with its `v < m || isNaN(m)` test -- a hole is ignored while any real
+ * value is in the window, and only an entirely empty window comes back empty -- without a NaN,
+ * which no comparison the deque makes would order correctly.
  */
 export function minFilter(src: Grid, radius: number): Grid {
   const r = Math.max(0, Math.round(radius / src.res))
   const { w, h } = src
   const mid = new Float32Array(w * h)
   const out = new Float32Array(w * h)
-
-  for (let y = 0; y < h; y++) {
-    const row = y * w
-    for (let x = 0; x < w; x++) {
-      let m = NaN
-      for (let k = Math.max(0, x - r), end = Math.min(w - 1, x + r); k <= end; k++) {
-        const v = src.data[row + k]!
-        if (v < m || Number.isNaN(m)) m = v
-      }
-      mid[row + x] = m
-    }
+  for (let i = 0; i < out.length; i++) {
+    const v = src.data[i]!
+    out[i] = Number.isNaN(v) ? Infinity : v
   }
-  for (let x = 0; x < w; x++) {
-    for (let y = 0; y < h; y++) {
-      let m = NaN
-      for (let k = Math.max(0, y - r), end = Math.min(h - 1, y + r); k <= end; k++) {
-        const v = mid[k * w + x]!
-        if (v < m || Number.isNaN(m)) m = v
-      }
-      out[y * w + x] = m
-    }
-  }
+  const dq = new Int32Array(Math.max(w, h))
+  slidingMin(out, mid, h, w, w, 1, r, dq)
+  slidingMin(mid, out, w, h, 1, w, r, dq)
+  for (let i = 0; i < out.length; i++) if (out[i] === Infinity) out[i] = NaN
   return new Grid(out, w, h, src.e0, src.n1, src.res)
 }
 

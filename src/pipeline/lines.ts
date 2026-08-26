@@ -359,11 +359,29 @@ export function evaluateLine(
 }
 
 export interface TerrainPairs {
-  /** Anchor pairs whose line clears the terrain. A superset of the feasible set. */
-  pairs: [Pos, Pos][]
+  /**
+   * Anchor pairs whose line clears the terrain, as flat index pairs into the anchor array. A
+   * superset of the feasible set.
+   *
+   * Indices rather than objects because this is the one result big enough for its representation to
+   * matter -- 2.3 million pairs on the biggest region -- and because it has to cross a worker
+   * boundary, where an Int32Array is a buffer and an array of anchor pairs is a deep copy.
+   */
+  pairs: Int32Array
+  count: number
   pairsInRange: number
   pairsSectorPassed: number
   pairsLevelEnough: number
+}
+
+/** The pairs as coordinates, without materialising four million objects to hold them. */
+export function* pairsOf(
+  anchors: Anchor[],
+  pairs: Int32Array,
+  from = 0,
+  to = pairs.length / 2,
+): Generator<[Pos, Pos]> {
+  for (let k = from; k < to; k++) yield [anchors[pairs[2 * k]!]!, anchors[pairs[2 * k + 1]!]!]
 }
 
 /**
@@ -380,34 +398,41 @@ export function terrainPairs(
   p: Params,
   /** For the water layer, which decides how much air each sample of the gate is held to. */
   scene: Scene = {},
+  /**
+   * Which anchors this call is responsible for, as the `i` of each pair. Every anchor is still
+   * bucketed, since a partner can be any of them; only the outer loop is split. Each unordered pair
+   * has exactly one `i`, so ranges partition the pairs without overlap or omission.
+   */
+  from = 0,
+  to = anchors.length,
+  /**
+   * The bucket index, when the caller holds one. Every chunk of a split search needs the whole
+   * index -- a partner can be any anchor -- so building it per chunk means building it once per
+   * chunk instead of once per region, which on the biggest region was most of the extra processor
+   * time the pool cost.
+   */
+  index?: AnchorIndex,
 ): TerrainPairs {
   let pairsInRange = 0
   let pairsSectorPassed = 0
   let pairsLevelEnough = 0
-  const pairs: [Pos, Pos][] = []
-
-  /**
-   * Anchors bucketed on a lattice of `maxLength`, so only the nine buckets around one anchor can
-   * hold a partner in range.
-   *
-   * The plain double loop was fine at a square kilometre and is not at a hundred: pairs *in range*
-   * grow linearly with area while the loop grows quadratically, so almost all of its work became
-   * rejecting anchors kilometres apart. Bucketing makes the enumeration output-sensitive, and it is
-   * exact rather than approximate -- two points within maxLength cannot land more than one bucket
-   * apart on a lattice of that size.
-   */
-  const buckets = new Map<string, number[]>()
-  const cell = p.maxLength
-  const keyOf = (e: number, n: number) => `${Math.floor(e / cell)}_${Math.floor(n / cell)}`
-  for (let i = 0; i < anchors.length; i++) {
-    const a = anchors[i]!
-    const key = keyOf(a.e, a.n)
-    const bucket = buckets.get(key)
-    if (bucket) bucket.push(i)
-    else buckets.set(key, [i])
+  let pairs = new Int32Array(1024)
+  let count = 0
+  const keep = (i: number, j: number) => {
+    if (2 * count + 2 > pairs.length) {
+      const grown = new Int32Array(pairs.length * 2)
+      grown.set(pairs)
+      pairs = grown
+    }
+    pairs[2 * count] = i
+    pairs[2 * count + 1] = j
+    count++
   }
 
-  for (let i = 0; i < anchors.length; i++) {
+  const cell = p.maxLength
+  const buckets = index ?? bucketAnchors(anchors, cell)
+
+  for (let i = from; i < to; i++) {
     const a = anchors[i]!
     const cx = Math.floor(a.e / cell)
     const cy = Math.floor(a.n / cell)
@@ -443,36 +468,45 @@ export function terrainPairs(
           const tGate = phaseAt()
           const clears = clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)
           phaseDone('terrain gate (raster walk)', tGate)
-          if (clears) pairs.push([a, b])
+          if (clears) keep(i, j)
         }
       }
     }
   }
-  return { pairs, pairsInRange, pairsSectorPassed, pairsLevelEnough }
-}
-
-/** Fills in the WGS84 coordinates a candidate carries for display. */
-export function locate(c: Candidate): Candidate {
   return {
-    ...c,
-    a: { ...c.a, ...toWgs84(c.a.e, c.a.n) },
-    b: { ...c.b, ...toWgs84(c.b.e, c.b.n) },
+    pairs: pairs.subarray(0, 2 * count),
+    count,
+    pairsInRange,
+    pairsSectorPassed,
+    pairsLevelEnough,
   }
 }
 
-/** Scores terrain-passing pairs against the surface model, and collapses near-duplicates. */
-export function evaluatePairs(
-  found: TerrainPairs,
+/** Everything one chunk of the profile pass produced, before dedup pools them. */
+export interface Scored {
+  feasible: Candidate[]
+  endpoints: Endpoint[]
+  rejects: Record<string, number>
+  roadKills: Pos[]
+}
+
+/**
+ * Scores a run of terrain-passing pairs. Split out from `evaluatePairs` because it is the part a
+ * worker thread runs: independent per pair, read-only against the rasters, and with no dedup in it
+ * -- dedup has to see every candidate at once and stays with the caller.
+ */
+export function scorePairs(
+  pairs: Iterable<[Pos, Pos]>,
   ground: Grid,
   surface: Grid,
   p: Params,
   scene: Scene = {},
-): FindResult {
+): Scored {
   const feasible: Candidate[] = []
   const endpoints: Endpoint[] = []
   const rejects: Record<string, number> = {}
   const roadKills: Pos[] = []
-  for (const [a, b] of found.pairs) {
+  for (const [a, b] of pairs) {
     const { line: c, reject, at } = evaluateLine(a, b, ground, surface, p, scene, true)
     if (!c) {
       if (reject) rejects[reject] = (rejects[reject] ?? 0) + 1
@@ -486,6 +520,73 @@ export function evaluatePairs(
       { e: c.a.e, n: c.a.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
       { e: c.b.e, n: c.b.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
     )
+  }
+  return { feasible, endpoints, rejects, roadKills }
+}
+
+/**
+ * Anchors bucketed on a lattice of `cell`, so only the nine buckets around one anchor can hold a
+ * partner in range.
+ *
+ * The plain double loop was fine at a square kilometre and is not at a hundred: pairs *in range*
+ * grow linearly with area while the loop grows quadratically, so almost all of its work became
+ * rejecting anchors kilometres apart. Bucketing makes the enumeration output-sensitive, and it is
+ * exact rather than approximate -- two points within `cell` cannot land more than one bucket apart
+ * on a lattice of that size.
+ */
+export type AnchorIndex = Map<string, number[]>
+
+export function bucketAnchors(anchors: Anchor[], cell: number): AnchorIndex {
+  const buckets: AnchorIndex = new Map()
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i]!
+    const key = `${Math.floor(a.e / cell)}_${Math.floor(a.n / cell)}`
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(i)
+    else buckets.set(key, [i])
+  }
+  return buckets
+}
+
+/** Fills in the WGS84 coordinates a candidate carries for display. */
+export function locate(c: Candidate): Candidate {
+  return {
+    ...c,
+    a: { ...c.a, ...toWgs84(c.a.e, c.a.n) },
+    b: { ...c.b, ...toWgs84(c.b.e, c.b.n) },
+  }
+}
+
+/** Scores terrain-passing pairs against the surface model, and collapses near-duplicates. */
+export function evaluatePairs(
+  anchors: Anchor[],
+  found: TerrainPairs,
+  ground: Grid,
+  surface: Grid,
+  p: Params,
+  scene: Scene = {},
+): FindResult {
+  return poolScored([scorePairs(pairsOf(anchors, found.pairs), ground, surface, p, scene)], found, p)
+}
+
+/**
+ * Turns however many scored chunks into one result: concatenated in the order given, then deduped.
+ *
+ * The order is the whole reason this is a function rather than a spread. Dedup keeps the best line
+ * in each neighbourhood by a stable sort, so which of two equal-scoring lines survives depends on
+ * where they sit in the list -- and a parallel run has to produce the same dataset as a serial one.
+ * Concatenating contiguous chunks in chunk order reproduces the serial order exactly.
+ */
+export function poolScored(parts: Scored[], found: TerrainPairs, p: Params): FindResult {
+  const feasible: Candidate[] = []
+  const endpoints: Endpoint[] = []
+  const rejects: Record<string, number> = {}
+  const roadKills: Pos[] = []
+  for (const part of parts) {
+    for (const c of part.feasible) feasible.push(c)
+    for (const e of part.endpoints) endpoints.push(e)
+    for (const at of part.roadKills) roadKills.push(at)
+    for (const [why, n] of Object.entries(part.rejects)) rejects[why] = (rejects[why] ?? 0) + n
   }
 
   const tDedup = phaseAt()
@@ -512,7 +613,8 @@ export function findLines(
   p: Params,
   scene: Scene = {},
 ): FindResult {
-  return evaluatePairs(terrainPairs(anchors, ground, p, scene), ground, surface, p, scene)
+  const found = terrainPairs(anchors, ground, p, scene)
+  return evaluatePairs(anchors, found, ground, surface, p, scene)
 }
 
 /** Offsets within `radius`, on a `step` lattice, ordered outward. Excludes the origin. */

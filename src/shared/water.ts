@@ -1,4 +1,5 @@
 import { fillPolygon, type CellGeometry } from './grid.js'
+import { sharedBits, type MaskShare } from './anchoring.js'
 import type { Water } from './osmBlocks.js'
 import type { Params } from './types.js'
 
@@ -46,8 +47,17 @@ export const clearanceNeeded = (overWater: boolean, p: Params): number =>
 export class WaterMask implements WaterCover {
   private readonly bits: Uint8Array
 
-  constructor(private readonly geom: CellGeometry) {
-    this.bits = new Uint8Array(Math.ceil((geom.w * geom.h) / 8))
+  constructor(private readonly geom: CellGeometry, bits?: Uint8Array) {
+    this.bits = bits ?? sharedBits(geom.w, geom.h)
+  }
+
+  share(): MaskShare {
+    const { w, h, e0, n1, res } = this.geom
+    return { buffer: this.bits.buffer as SharedArrayBuffer, w, h, e0, n1, res }
+  }
+
+  static adopt(v: MaskShare): WaterMask {
+    return new WaterMask(v, new Uint8Array(v.buffer))
   }
 
   add(water: Water): void {
