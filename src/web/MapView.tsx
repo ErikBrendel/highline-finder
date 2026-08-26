@@ -119,10 +119,9 @@ export const DEBUG_COLORS = {
   /** Lines killed by a road crossing, palest where one died and hottest where hundreds did. */
   killsFew: '#3f2d1a',
   killsMany: '#f97316',
-  /** Region vintage: computed by this code just now, computed by it a while ago, or not by it. */
+  /** Region vintage, from just computed to long kept. */
   fresh: '#22c55e',
   aged: '#f59e0b',
-  outdated: '#f43f5e',
 } as const
 
 /** How old a region has to be before its box is drawn fully aged. */
@@ -433,7 +432,7 @@ function regionsGeoJson(regions: Region[] | null, now: number): GeoJSON.FeatureC
       })
       return {
         type: 'Feature',
-        properties: { days: ageInDays(r.generatedAt, now), current: r.current ? 1 : 0 },
+        properties: { days: ageInDays(r.generatedAt, now) },
         geometry: { type: 'Polygon', coordinates: [corners] },
       }
     }),
@@ -728,15 +727,12 @@ export function MapView({
         type: 'fill',
         source: 'regions',
         paint: {
-          // Green when this code produced it, fading to amber as the results age, red when it was
-          // kept on purpose from a run under different rules.
+          // Green when freshly computed, fading to amber as the results age. Age is the whole
+          // signal: nothing else about a kept region is knowable. See regionCache.ts.
           'fill-color': [
-            'case',
-            ['==', ['get', 'current'], 0], DEBUG_COLORS.outdated,
-            ['interpolate', ['linear'], ['get', 'days'],
-              0, DEBUG_COLORS.fresh,
-              VINTAGE_DAYS, DEBUG_COLORS.aged,
-            ],
+            'interpolate', ['linear'], ['get', 'days'],
+            0, DEBUG_COLORS.fresh,
+            VINTAGE_DAYS, DEBUG_COLORS.aged,
           ],
           'fill-opacity': 0,
         },
@@ -746,7 +742,7 @@ export function MapView({
         type: 'line',
         source: 'regions',
         paint: {
-          'line-color': ['case', ['==', ['get', 'current'], 0], DEBUG_COLORS.outdated, '#e2e8f0'],
+          'line-color': '#e2e8f0',
           'line-width': 1.5,
           'line-opacity': 0,
         },
@@ -1084,7 +1080,6 @@ export function MapView({
     regionMarkers.current = (regions ?? []).map((r) => {
       const node = document.createElement('div')
       node.className = 'chunkstamp'
-      node.dataset.outdated = String(!r.current)
       node.textContent = `${r.generatedAt.slice(0, 10)} · ${ageText(r.generatedAt, Date.now())}`
       const { minE, minN, maxE, maxN } = r.bbox25833
       const { lat, lon } = toWgs84((minE + maxE) / 2, (minN + maxN) / 2)

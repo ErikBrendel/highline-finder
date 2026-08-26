@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boxOf, contains, workAreas } from './regions.js'
+import { boxOf, contains, recomputes, workAreas, type WorkArea } from './regions.js'
 import type { Aoi } from '../shared/types.js'
 
 const at = (south: number, west: number, size = 0.005): Aoi => ({
@@ -53,5 +53,25 @@ describe('workAreas', () => {
       (w) => (w.bbox.maxE - w.bbox.minE) * (w.bbox.maxN - w.bbox.minN),
     )
     expect(sizes).toEqual([...sizes].sort((a, b) => a - b))
+  })
+})
+
+describe('recomputes', () => {
+  const area = (...aois: Aoi[]): WorkArea => ({ aois, boxes: [], bbox: boxOf(aois[0]!) })
+  const tropical: Aoi = { south: 52.19, west: 13.65, north: 52.21, east: 13.67 }
+  const linthe: Aoi = { south: 52.13, west: 12.77, north: 52.15, east: 12.81 }
+
+  it('recomputes nothing by default, which is what keeping results means', () => {
+    expect(recomputes(area(tropical), null)).toBe(false)
+  })
+
+  it('recomputes everything when told to', () => {
+    expect(recomputes(area(tropical), 'all')).toBe(true)
+  })
+
+  it('picks a whole merged area when a rectangle touches any part of it', () => {
+    // A region is searched as one grid, so naming half of one selects all of it.
+    expect(recomputes(area(tropical, linthe), [{ ...linthe, north: 52.14 }])).toBe(true)
+    expect(recomputes(area(tropical), [linthe])).toBe(false)
   })
 })

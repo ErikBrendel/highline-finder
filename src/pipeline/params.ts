@@ -166,8 +166,8 @@ export const DEFAULT_PARAMS: Params = {
  * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the dedup
  * pass rather than reported twice.
  *
- * This list is data, not code: regionCache.ts leaves params.ts out of its source fingerprint on
- * purpose, so adding an area here re-runs that area alone.
+ * Adding an area here searches that area alone: every other is already cached under the ground it
+ * covers, and a cached region is kept until a run is told to rebuild it.
  */
 export const DEFAULT_AOIS: Aoi[] = [
   // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.

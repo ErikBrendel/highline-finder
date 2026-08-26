@@ -88,7 +88,6 @@ function DebugLegend({
   }
 
   if (layer === 'regions') {
-    const outdated = regions.filter((r) => !r.current)
     const oldest = regions.reduce(
       (worst, r) => (Date.parse(r.generatedAt) < Date.parse(worst.generatedAt) ? r : worst),
       regions[0]!,
@@ -96,20 +95,19 @@ function DebugLegend({
     return (
       <div className="legendbox">
         <h3>Region vintage</h3>
-        {key(DEBUG_COLORS.fresh, 0.5, 'computed by this code, recently')}
-        {key(DEBUG_COLORS.aged, 0.5, `computed by this code, ${VINTAGE_DAYS} days ago or more`)}
-        {key(DEBUG_COLORS.outdated, 0.5, 'kept from an older run — scored under rules that have moved on')}
+        {key(DEBUG_COLORS.fresh, 0.5, 'computed recently')}
+        {key(DEBUG_COLORS.aged, 0.5, `computed ${VINTAGE_DAYS} days ago or more`)}
         <div className="stat">
           {regions.length} region{regions.length === 1 ? '' : 's'}, oldest{' '}
           {oldest.generatedAt.slice(0, 10)}
-          {outdated.length ? `, ${outdated.length} not rebuilt with this code` : ''}
         </div>
         <div className="about">
-          A run recomputes whatever is stale, or only the areas named on the command line &mdash; so
-          a dataset is not necessarily of one vintage, and a red box holds lines that are not
-          strictly comparable with the ones beside them. The boxes are areas of interest today.
-          Once the search is cut into fixed chunks instead, this becomes the map of what has been
-          covered and when.
+          A region is computed once and kept until a run is told to rebuild it, so a dataset is not
+          necessarily of one vintage and its lines are not necessarily comparable with each other.
+          Age is all there is to go on: neither a change to the parameters nor one to the search
+          itself leaves any other mark, which is the price of not throwing away every region
+          whenever the code moves. The boxes are areas of interest today; once the search is cut
+          into fixed chunks instead, this becomes the map of what has been covered and when.
         </div>
       </div>
     )

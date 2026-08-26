@@ -49,21 +49,25 @@ npm run build         # static bundle in dist/, deployable as-is
 
 ### Recomputing one area without rebuilding the rest
 
-Every region is cached whole when it finishes, keyed on the ground it covers, with a fingerprint of
-the pipeline source and the parameters recorded inside it. A plain `npm run pipeline` rebuilds
-whatever that fingerprint says is out of date and serves the rest from cache.
+Every region is cached whole when it finishes, keyed on the ground it covers. **A region that has
+been computed stays computed** — a plain `npm run pipeline` recomputes nothing and only searches
+areas with no cache at all.
 
 Naming rectangles on the command line *selects* what to recompute rather than replacing the list:
 
 ```
-npm run pipeline -- 52.134358 13.367475 52.141191 13.392128
+npm run pipeline -- 52.134358 13.367475 52.141191 13.392128   # just Sperenberg
+npm run pipeline -- --all                                     # rebuild everything
 ```
 
-Every area still reaches the output; only the ones the rectangles touch are searched again, and the
-others are served from cache **even when the code has moved on since**. That is a different promise
-from the usual one, so the run says which regions it served stale and each region in the dataset
-records when it was generated and whether it is current — a line from a stale region was scored
-under rules the rest of the file no longer follows, and that should never be silent.
+Every area still reaches the output; only the ones the rectangles touch are searched again.
+
+Reach for `--all` after changing the search or the parameters, because **nothing else will notice**.
+The cache used to fingerprint the pipeline source and rebuild on any change, and that was too eager
+to live with: it could not tell a changed constant from a reworded comment, so renaming a variable
+cost twenty minutes of compute across seven regions. What is left in its place is the vintage
+recorded on every region — reported per region in the run log, drawn in the map's region view, and
+worth reading before comparing two lines from different parts of the dataset.
 
 Do not try to get the same effect by running two pipelines at once. `tileTiff` checks that a tile
 exists and then writes it non-atomically, so a concurrent run hands the other one a truncated

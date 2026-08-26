@@ -26,7 +26,7 @@ import {
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Anchor } from './openness.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
-import { contains, workAreas, type WorkArea } from './regions.js'
+import { contains, recomputes, workAreas, type Recompute, type WorkArea } from './regions.js'
 import { record, renderReport, stage } from './report.js'
 import { Pool, poolSize } from './pool.js'
 import { pairInParallel, refineInParallel, scoreInParallel } from './parallel.js'
@@ -65,6 +65,10 @@ const TILES_OUT = new URL('../web/public/tiles.json', import.meta.url).pathname
 
 /**
  * Everything one region contributes, in a form that survives a round trip through JSON.
+ *
+ * Changing this shape means bumping `FORMAT` in regionCache.ts. Nothing checks the code any more,
+ * so a field added here without that is a field the next run reads as undefined out of a cache
+ * written before it existed.
  *
  * Serialisable on purpose: regions are independent, so a region whose inputs have not changed is
  * read back from disk instead of recomputed. Endpoints are parallel arrays rather than objects
@@ -490,7 +494,6 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
         // Overwritten by the caller, which is the only place that knows whether this came from a
         // cache and when that cache was written.
         generatedAt: '',
-        current: true,
       },
       mask: exportMask(drop, p),
       tiles,
@@ -515,14 +518,20 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
 }
 
 /**
- * Rectangles named on the command line, which *select* what to recompute rather than replacing the
- * list of areas.
+ * What the command line asked to be recomputed.
  *
- * It used to replace it, which made the obvious move -- "just rebuild Sperenberg" -- quietly
- * destructive: the run wrote a dataset containing Sperenberg and nothing else. Every area is always
- * searched or served from cache; naming one only says which are worth the compute.
+ * Rectangles *select* rather than replace the list of areas. Replacing it made the obvious move --
+ * "just rebuild Sperenberg" -- quietly destructive: the run wrote a dataset containing Sperenberg
+ * and nothing else. Every area is always searched or served from cache; naming one only says which
+ * are worth the compute.
+ *
+ * Nothing named means nothing recomputed, because a region that has been computed stays computed.
+ * `--all` rebuilds the lot, which is what to reach for after a change to the search itself -- the
+ * cache no longer notices those on its own. See regionCache.ts.
  */
-function aoisFromArgv(argv: number[]): Aoi[] | null {
+function askedFor(args: string[]): Recompute {
+  if (args.includes('--all')) return 'all'
+  const argv = args.map(Number)
   if (!argv.length || argv.length % 4 !== 0 || !argv.every((v) => Number.isFinite(v))) return null
   const out: Aoi[] = []
   for (let i = 0; i < argv.length; i += 4) {
@@ -531,27 +540,13 @@ function aoisFromArgv(argv: number[]): Aoi[] | null {
   return out
 }
 
-/** Whether two rectangles touch at all, which is how a named rectangle picks the areas it means. */
-const overlaps = (a: Aoi, b: Aoi) =>
-  a.west <= b.east && b.west <= a.east && a.south <= b.north && b.south <= a.north
-
 async function main() {
   const started = Date.now()
   enablePhases()
   const p = DEFAULT_PARAMS
   const aois = DEFAULT_AOIS
   const areas = workAreas(aois, p.maxLength)
-  /**
-   * Which areas are worth recomputing. Null means the usual thing: recompute whatever is stale.
-   *
-   * With rectangles on the command line, only the areas they touch are recomputed and every other
-   * is served from its cache even when the code has moved on since. That is deliberately a
-   * different promise from the usual one, so the run says which areas it served stale and the
-   * dataset records it per region.
-   */
-  const selection = aoisFromArgv(process.argv.slice(2).map(Number))
-  const wantsFresh = (area: WorkArea) =>
-    !selection || area.aois.some((a) => selection.some((s) => overlaps(a, s)))
+  const selection = askedFor(process.argv.slice(2))
 
   console.log(`${aois.length} AOI(s) in ${areas.length} region(s):`)
   for (const area of areas) {
@@ -586,24 +581,19 @@ async function main() {
   }
 
   let reused = 0
-  const stale: string[] = []
   for (const [index, area] of areas.entries()) {
     const label = `region ${index + 1}/${areas.length}`
-    const where = area.aois.map((a) => `${a.south},${a.west}`).join(' + ')
-    const hit = await readRegion<AreaResult>(area.aois, p)
-    // A cache is served when it is current, and also when it is not but this area was not selected
-    // for recompute -- keeping what we have beats emitting a dataset with a hole in it.
-    const serve = hit && (hit.current || !wantsFresh(area))
+    const hit = await readRegion<AreaResult>(area.aois)
+    // Kept unless this run was told to rebuild it. A region with no cache is searched whatever the
+    // selection says, since a dataset with a hole in it is worse than one that took longer.
+    const serve = hit && !recomputes(area, selection)
     let found: AreaResult
     let vintage = new Date().toISOString()
-    let current = true
     if (serve) {
       reused++
-      current = hit.current
       vintage = hit.generatedAt
-      if (!hit.current) stale.push(`${where} (${hit.generatedAt.slice(0, 10)})`)
       console.log(
-        `\n=== ${label} (${hit.current ? 'unchanged, reused' : 'STALE, kept on purpose'}) ===\n` +
+        `\n=== ${label} (kept from ${hit.generatedAt.slice(0, 10)}) ===\n` +
           `  ${hit.value.region.anchorsKept} anchors, ${hit.value.find.pairsFeasible} feasible, ` +
           `${hit.value.candidates.length} distinct`,
       )
@@ -615,7 +605,6 @@ async function main() {
       console.log(`  cached as region_${regionId(area.aois)}.json (${(bytes / 1e6).toFixed(1)} MB)`)
     }
     found.region.generatedAt = vintage
-    found.region.current = current
 
     const { region } = found
     regions.push(region)
@@ -644,14 +633,13 @@ async function main() {
     totals.refinedCount += found.improved
     totals.refineGain += found.totalGain
   }
-  if (reused) console.log(`\n${reused} of ${areas.length} region(s) served from cache`)
-  if (stale.length) {
-    // Loud, because it is the one thing about this dataset a reader cannot see in it: the lines
-    // from these regions were scored under rules the rest of the file no longer follows.
+  if (reused) {
+    // Said plainly every time, because nothing else will say it: results are kept until asked to
+    // go, so a run that changed the search and forgot `--all` gets yesterday's answer in silence.
+    const oldest = regions.reduce((a, r) => (r.generatedAt < a ? r.generatedAt : a), 'z')
     console.log(
-      `\n!! ${stale.length} region(s) served STALE on purpose, not rebuilt with this code:\n` +
-        stale.map((where) => `     ${where}`).join('\n') +
-        `\n   Re-run without arguments to bring them up to date.`,
+      `\n${reused} of ${areas.length} region(s) kept as they were, oldest ${oldest.slice(0, 10)}. ` +
+        `Re-run with --all to rebuild them.`,
     )
   }
 

@@ -227,11 +227,6 @@ header .spacer { flex: 1; }
   pointer-events: none;
 }
 
-.chunkstamp[data-outdated='true'] {
-  color: #fecdd3;
-  border-color: #f43f5e;
-}
-
 .cachebadge {
   display: flex;
   align-items: center;

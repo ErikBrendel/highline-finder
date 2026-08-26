@@ -43,6 +43,26 @@ export interface WorkArea {
   owns?: Box
 }
 
+/**
+ * Which areas a run was told to recompute.
+ *
+ * Null is the ordinary case and means none: a region that has been computed stays computed, and
+ * only one with no cache at all is searched. Rectangles select by touching -- naming any part of an
+ * area's ground picks the whole area, since a region is searched as one grid and cannot be rebuilt
+ * in halves. `'all'` is the sledgehammer, for when the code has moved and the dataset should follow.
+ */
+export type Recompute = Aoi[] | 'all' | null
+
+/** Whether two rectangles touch at all, which is how a named rectangle picks the areas it means. */
+const overlaps = (a: Aoi, b: Aoi) =>
+  a.west <= b.east && b.west <= a.east && a.south <= b.north && b.south <= a.north
+
+export function recomputes(area: WorkArea, selection: Recompute): boolean {
+  if (selection === 'all') return true
+  if (!selection) return false
+  return area.aois.some((a) => selection.some((s) => overlaps(a, s)))
+}
+
 export function boxOf(aoi: Aoi): Box {
   const corners = [
     toUtm33(aoi.south, aoi.west),
