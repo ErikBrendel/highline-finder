@@ -259,9 +259,16 @@ is only true at the very top -- across the dataset the split is 47/6/47 natural/
 urban is 63 % of the top thousand, giving way to natural only in the top hundred (75 %) and top
 twenty (80 %). Lower this when urban coverage matters more than statewide reach.
 
-Left, in order: the remaining three chunks, which give the first seam between two searched chunks;
-then work-stealing tile handout; then dirty-set selection (a recompute area implies every chunk
-within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
+**All four chunks are searched, and the seams hold.** 4,502 distinct lines across the 2x2 block,
+**zero duplicated between chunks**, 356 crossing a seam into a neighbour and 15 reaching out of the
+block entirely -- all of which exist only because each chunk scans a kilometre beyond itself. Four
+lines have a first anchor 0.50 m outside their own square, which is refinement nudging a lattice
+anchor at 423997.5 by its full `refineRadius` of 3 m after ownership was already decided. Bounded,
+and harmless: both neighbours decide on the same pre-refinement lattice anchor, so neither can claim
+the other's line.
+
+Left, in order: work-stealing tile handout; then dirty-set selection (a recompute area implies every
+chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
 
 One refinement for later: halo anchors are re-scanned by each neighbouring chunk (~23 % redundant at
 8 km). Persisting the per-chunk anchor table and letting neighbours read it removes that; the tables
