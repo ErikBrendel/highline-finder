@@ -484,9 +484,12 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
 
     return {
       region: {
-        id: area.id,
+        // Identity, filled in by the caller for the same reason `generatedAt` is: it belongs to the
+        // work area rather than to anything the search found, so a record written before these
+        // fields existed still gets them.
+        id: '',
         aois: area.aois,
-        owns25833: area.owns ?? null,
+        owns25833: null,
         bbox25833: bbox,
         width: Math.round(bbox.maxE - bbox.minE),
         height: Math.round(bbox.maxN - bbox.minN),
@@ -669,6 +672,8 @@ async function main() {
       console.log(`  cached as ${area.id}.json (${(bytes / 1e6).toFixed(1)} MB)`)
     }
     found.region.generatedAt = vintage
+    found.region.id = area.id
+    found.region.owns25833 = area.owns ?? null
 
     const { region } = found
     regions.push(region)
