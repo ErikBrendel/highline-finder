@@ -214,10 +214,11 @@ export const DEFAULT_AOIS: Aoi[] = [
  * a time rather than in one cut. See chunks.ts.
  *
  * The first four are the 2x2 block south of Eberswalde, around E 424000 / N 5832000, which between
- * them found 4,502 lines with none duplicated across a seam. The last two extend it a column west,
- * to E 408000.
+ * them found 4,502 lines with none duplicated across a seam. The rest extend it westward a column
+ * at a time, to E 400000.
  */
 export const DEFAULT_CHUNKS: string[] = [
   '52_728', '53_728', '52_729', '53_729',
   '51_728', '51_729',
+  '50_728', '50_729',
 ]

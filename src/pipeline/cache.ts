@@ -46,14 +46,26 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
+ * How long to keep trying one tile, and how patiently.
+ *
+ * Eight attempts backing off to a minute is a little over four minutes of tolerance. It was five
+ * attempts over thirty seconds, which is not proportionate to the job: a run fetches hundreds of
+ * tiles over an hour or more, and it lost forty minutes of successful downloading because one tile
+ * failed for half a minute. The survey's server is reachable and slow rather than reliable, and a
+ * blip shorter than a coffee break should not be able to discard the work either side of it.
+ */
+export const ATTEMPTS = 8
+export const backoffMs = (attempt: number) => Math.min(60_000, 5_000 * 2 ** attempt)
+
+/**
  * Returns the local path of the GeoTIFF for one product/tile, downloading and unzipping it
  * on first use. Neither the .zip nor the .tif is retained: the caller reduces the tile to the
  * working resolution and deletes the source, so what survives on disk is the reduced grid alone.
  *
- * Retried, because a run now fetches hundreds of tiles of tens of megabytes each and a single
- * dropped connection two hundred tiles in should not cost the whole run. Failures are transport
- * ones -- a reset socket, a truncated body -- so a short backoff clears them; an HTTP error is a
- * missing tile and is not worth retrying, but it is also not worth distinguishing here.
+ * Only transport failures are retried -- a reset socket, a truncated body, a refused connection.
+ * A status code is the server answering the question, and it will answer the same way in a minute:
+ * a tile outside the survey's coverage is not there, and eight minutes of backoff spent confirming
+ * that is eight minutes not spent on the tiles that exist.
  */
 export async function tileTiff(product: Product, tile: string): Promise<string> {
   await mkdir(CACHE_DIR, { recursive: true })
@@ -63,10 +75,20 @@ export async function tileTiff(product: Product, tile: string): Promise<string> 
   const url = `${BASE}/${product}/tif/${product}_${tile}.zip`
   process.stdout.write(`  fetching ${product}_${tile} ... `)
   let last: unknown
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    if (attempt) {
+      process.stdout.write(`retry ${attempt} `)
+      await new Promise((r) => setTimeout(r, backoffMs(attempt - 1)))
+    }
+    let res: Response
     try {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
+      res = await fetch(url)
+    } catch (e) {
+      last = e
+      continue
+    }
+    if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
+    try {
       const zip = new Uint8Array(await res.arrayBuffer())
       const entries = unzipSync(zip)
       const name = Object.keys(entries).find((k) => k.endsWith('.tif'))
@@ -77,12 +99,11 @@ export async function tileTiff(product: Product, tile: string): Promise<string> 
       )
       return tifPath
     } catch (e) {
+      // A body that stopped arriving part way, or a zip that will not open because of it.
       last = e
-      process.stdout.write(`retry ${attempt + 1} `)
-      await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)))
     }
   }
-  throw new Error(`${url} failed after 5 attempts: ${last}`)
+  throw new Error(`${url} failed after ${ATTEMPTS} attempts: ${last}`)
 }
 
 /** Cached derived artefacts (assembled AOI grids), keyed by caller-supplied name. */

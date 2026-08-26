@@ -4,6 +4,7 @@ import { Grid, minFilter } from '../shared/grid.js'
 import type { LevelFace } from '../shared/lod1.js'
 import type { Params } from '../shared/types.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
+import { ATTEMPTS, backoffMs } from './cache.js'
 
 /**
  * A downsampled terrain grid, for deciding where it is worth looking at full resolution.
@@ -50,17 +51,26 @@ async function chunkTiff(e0: number, n0: number, res: number): Promise<Buffer> {
     `&SUBSET=x(${e0},${e0 + CHUNK})&SUBSET=y(${n0},${n0 + CHUNK})&SCALEFACTOR=${1 / res}`
   process.stdout.write(`  coarse ${res}m ${e0}-${n0} ... `)
   let last: unknown
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, backoffMs(attempt - 1)))
+    let answer: Response
     try {
-      const res2 = await fetch(url)
-      if (!res2.ok) throw new Error(`HTTP ${res2.status}`)
-      const buf = Buffer.from(await res2.arrayBuffer())
+      answer = await fetch(url)
+    } catch (e) {
+      last = e
+      continue
+    }
+    // A status is the server's answer, not a hiccup. The row of chunks north of the survey's
+    // coverage replies 400 every time, and retrying each of them four times cost half a minute
+    // apiece on a pass where they are 3% of the work.
+    if (!answer.ok) throw new Error(`coarse ${res}m ${e0}-${n0}: HTTP ${answer.status}`)
+    try {
+      const buf = Buffer.from(await answer.arrayBuffer())
       await writeFile(path, buf)
       console.log(`${(buf.byteLength / 1024).toFixed(0)} KB`)
       return buf
     } catch (e) {
       last = e
-      await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)))
     }
   }
   throw new Error(`coarse ${res}m ${e0}-${n0}: ${last}`)
