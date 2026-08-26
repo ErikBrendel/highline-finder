@@ -19,10 +19,10 @@ import { DEFAULT_PARAMS } from '../pipeline/params.js'
  * divide each other -- 8192 is not a multiple of 1000 -- and a window boundary through the middle
  * of a tile would count that tile's cells twice and qualify it on half its ground.
  *
- * Each window carries a 2 km halo and counts only its core. One kilometre of that is because a
- * passing cell dilates `maxLength` outwards, so a cell just outside the core can pull a core tile
- * in; the second kilometre is so the halo tiles' own drop values are computed on complete ground
- * rather than clamped at the window edge.
+ * Each window carries a halo and counts only its core. Most of the halo is because a passing cell
+ * dilates the reach outwards, so a cell that far outside the core can still pull a core tile in; the
+ * extra kilometre is so the halo tiles' own drop values are computed on complete ground rather than
+ * clamped at the window edge.
  *
  * Usage: npx tsx src/tools/tileCensus.ts [seconds]
  */
@@ -33,12 +33,15 @@ const NO_COVERAGE_ABOVE = 5939200
 
 /** Window core, in 1 km tiles a side, and the halo around it. */
 const CORE = 32
-const HALO = 2
+/** One kilometre for the drop field's own edge, plus whatever the dilation reaches. */
+const halo = () => 1 + Math.ceil(reach / 1000)
 
 /** Tiles to a superchunk side: the 8x8 block of source tiles a recompute would own. */
 const CHUNK_TILES = 8
 
 const seconds = Number(process.argv[2] ?? 120)
+/** Overrides `maxLength`, to price a longer line before committing to one. */
+const reach = Number(process.argv[3] ?? DEFAULT_PARAMS.maxLength)
 
 function stateBounds() {
   const corners = [
@@ -65,7 +68,7 @@ async function main() {
   const ny = Math.ceil((b.maxN - b.minN) / (CORE * 1000))
   console.log(
     `${nx} x ${ny} = ${nx * ny} windows of ${CORE} km over ` +
-      `E ${b.minE}..${b.maxE} N ${b.minN}..${b.maxN}, stopping after ${seconds}s\n`,
+      `E ${b.minE}..${b.maxE} N ${b.minN}..${b.maxN}, reach ${reach} m, stopping after ${seconds}s\n`,
   )
 
   /** Tiles with any terrain under them at all, which is the state's real extent. */
@@ -81,10 +84,10 @@ async function main() {
       const n0 = b.minN + wy * CORE * 1000
       const core = { minE: e0, minN: n0, maxE: e0 + CORE * 1000, maxN: n0 + CORE * 1000 }
       const grown = {
-        minE: core.minE - HALO * 1000,
-        minN: core.minN - HALO * 1000,
-        maxE: core.maxE + HALO * 1000,
-        maxN: Math.min(NO_COVERAGE_ABOVE, core.maxN + HALO * 1000),
+        minE: core.minE - halo() * 1000,
+        minN: core.minN - halo() * 1000,
+        maxE: core.maxE + halo() * 1000,
+        maxN: Math.min(NO_COVERAGE_ABOVE, core.maxN + halo() * 1000),
       }
       let coarse
       try {
@@ -105,7 +108,7 @@ async function main() {
       }
 
       const drop = dropField(coarse, p.maskRadius)
-      for (const id of tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, p.maxLength)) {
+      for (const id of tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, reach)) {
         const [te, tn] = id.slice(2).split('-').map(Number) as [number, number]
         const inCore =
           te >= core.minE / 1000 && te < core.maxE / 1000 &&

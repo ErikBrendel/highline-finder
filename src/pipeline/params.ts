@@ -213,7 +213,11 @@ export const DEFAULT_AOIS: Aoi[] = [
  * area of interest. That is what makes it possible to move ground from one to the other a piece at
  * a time rather than in one cut. See chunks.ts.
  *
- * These four are the 2x2 block south of Eberswalde, around E 424000 / N 5832000. 95 of their 256
- * source tiles pass the coarse pre-pass, by 6 / 16 / 25 / 48.
+ * The first four are the 2x2 block south of Eberswalde, around E 424000 / N 5832000, which between
+ * them found 4,502 lines with none duplicated across a seam. The last two extend it a column west,
+ * to E 408000.
  */
-export const DEFAULT_CHUNKS: string[] = ['52_728', '53_728', '52_729', '53_729']
+export const DEFAULT_CHUNKS: string[] = [
+  '52_728', '53_728', '52_729', '53_729',
+  '51_728', '51_729',
+]
