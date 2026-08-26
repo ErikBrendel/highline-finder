@@ -160,11 +160,14 @@ the hot loop.
 - 1 tile S anyway, because the chunk's own southernmost anchors probe 40 m south
   (`nearProbeLength`) and test their drop 25 m out (`dropSearchRadius`).
 
-**Ownership: a line belongs to the chunk containing its first anchor**, "first" being the smaller
-`(n, e)` -- which is what the existing `j > i` already means. Recomputing a chunk emits every line
-whose first anchor is in it and drops every stored line whose first anchor is in it. A line crossing
-a boundary is produced exactly once, by exactly one chunk, with no containment test and no margin to
-tune. Ownership is decided on the lattice anchor, before refinement moves it up to 3 m.
+**Ownership: a line belongs to the chunk containing its first anchor** (done), "first" being the
+smaller `(n, e)` -- which is what the existing `j > i` already means. `terrainPairs` takes an `owns`
+box and keeps only the pairs whose first anchor is inside it, half-open so two chunks sharing an
+edge divide it. Recomputing a chunk emits every line whose first anchor is in it and drops every
+stored line whose first anchor is in it. A line crossing a boundary is produced exactly once, by
+exactly one chunk, with no containment test and no margin to tune. Ownership is decided on the
+lattice anchor, before refinement moves it up to 3 m. `WorkArea.owns` is the seam; nothing sets it
+until `workAreas` emits chunks.
 
 **The dirty set for a recompute area S is every chunk intersecting S ⊕ maxLength**, not just the
 chunks overlapping S: a line owned by a neighbour can pass over S, and a change to the ground there
@@ -172,20 +175,25 @@ makes its verdict stale.
 
 **What still crosses chunks.** Dedup is greedy, so a line near a seam can be suppressed by one in
 the next chunk -- run it once over the union at assembly, which is now order-independent (see
-`bestFirst`). Hotspots are the one thing that genuinely does not scale, at 151 M endpoints: change
-the per-chunk output to a 50 m grid aggregate (count, best score, best endpoint's position), which
-merges exactly by summing and maxing, and cluster that at assembly instead.
+`bestFirst`). Hotspots were the one thing that genuinely did not scale, at 151 M endpoints; done, as
+a 25 m grid aggregate (count, best score, best endpoint's position) that merges exactly by feeding
+cells back through the same reduction, clustered at assembly.
 
 **What stops fitting in one file.** `candidates.json` is 7 MB for 8,865 lines, so ~790 MB for 1.1 M
 -- per-chunk files fetched for whatever is in view, which is hand-rolled vector tiles and the same
 pattern the profile fetch already uses. `anchors.json` likewise, or dropped from the default output.
-On disk, the `.tif` and the `dn1_*.bin` are both retained; deleting the former once the latter
-exists saves ~90 % on bdom.
+On disk the source `.tif` is now deleted once its reduced grid exists, which halves the cache and
+takes ~90 % off bdom.
 
-**Sequencing.** Coarse pass first (no code, decides the rest). Deterministic dedup (done). Then
-superchunks with ownership by first anchor; then the hotspot aggregate; then per-chunk output and a
-viewer that fetches by view. A debug overlay drawing each chunk with its `generatedAt` is worth
-having early -- `Region` already carries that field, so it can be built against today's model.
+**Sequencing.** Done so far: deterministic dedup, ownership by first anchor, the hotspot grid
+aggregate, `.tif` deletion, and a debug view drawing each region's box with its vintage. Measured
+together on the seven regions: the line set is unchanged (9,660, every id shared), the region cache
+falls 68.6 -> 25.3 MB, and 1.39 M feasible endpoints reduce to 3,926 cells, which cluster to 1,293
+spots against 1,360 before -- the same total weight, a few adjacent spots merged. Left, in
+order: the statewide coarse pass (no code, decides the rest) and the `maskMinDrop: 0` experiment
+that says what it costs; then work-stealing tile handout; then the chunk grid as pure functions,
+`workAreas` emitting chunks, and dirty-set selection; then per-chunk candidate files and a viewer
+that fetches by view.
 
 One refinement for later: halo anchors are re-scanned by each neighbouring chunk (~23 % redundant at
 8 km). Persisting the per-chunk anchor table and letting neighbours read it removes that; the tables
