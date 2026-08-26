@@ -1,6 +1,8 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Grid } from '../shared/grid.js'
+import { Grid, minFilter } from '../shared/grid.js'
+import type { LevelFace } from '../shared/lod1.js'
+import type { Params } from '../shared/types.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
 
 /**
@@ -133,6 +135,47 @@ export function dropField(g: Grid, radius: number): Grid {
  * reads as absent rather than as an error, so the margin has to exist -- but growing it from the
  * cells that earned it keeps it far tighter than growing it from whole tiles.
  */
+/**
+ * Tiles carrying a roof you could anchor on, which the terrain rule cannot see.
+ *
+ * The pre-pass measures bare earth, and a LoD1 roof is not bare earth. Measured on the current
+ * dataset, *every* urban line's anchors sit on cells the terrain rule reads as flat -- median 1.1 m
+ * of drop against a 10 m threshold -- so all 3,629 of them exist only because a hill within 500 m
+ * dragged their tile in. On the flat, which is most of Brandenburg, nothing would drag them in.
+ *
+ * The test mirrors the one the anchor scan will actually apply: an anchor on a roof attaches at
+ * roof level, so the ground within `dropSearchRadius` has to lie `minDropDepth` below it. The
+ * lowest nearby terrain is read off the same coarse grid the terrain rule uses, so this costs one
+ * min-filter and no new data at all.
+ *
+ * Dilated by `reach` like the terrain set and for the same reason: a line from that roof runs up to
+ * `maxLength` away, and the ground it crosses has to be loaded.
+ */
+export function tilesWithRoofAnchors(
+  faces: Map<string, LevelFace[]>,
+  coarse: Grid,
+  p: Params,
+  reach: number,
+): Set<string> {
+  const lowest = minFilter(coarse, p.dropSearchRadius)
+  const out = new Set<string>()
+  for (const [tile, tileFaces] of faces) {
+    let anchorable = 0
+    for (const { ring, z } of tileFaces) {
+      // The ring's first corner is enough: a LoD1 footprint is small next to a 16 m coarse cell.
+      const near = lowest.nearest(ring[0]!, ring[1]!)
+      if (!Number.isNaN(near) && z - near >= p.minDropDepth) anchorable++
+    }
+    if (anchorable < p.maskMinRoofs) continue
+    const [te, tn] = tile.slice(2).split('-').map(Number) as [number, number]
+    const span = Math.ceil(reach / 1000)
+    for (let e = te - span; e <= te + span; e++) {
+      for (let n = tn - span; n <= tn + span; n++) out.add(`33${e}-${n}`)
+    }
+  }
+  return out
+}
+
 export function tilesWorthLoading(
   drop: Grid,
   minDrop: number,

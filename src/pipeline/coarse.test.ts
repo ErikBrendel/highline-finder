@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { dropField, tilesWorthLoading } from './coarse.js'
+import { dropField, tilesWithRoofAnchors, tilesWorthLoading } from './coarse.js'
+import { DEFAULT_PARAMS } from './params.js'
 import { Grid } from '../shared/grid.js'
 
 /** A 3 x 1 km strip of 16 m cells, flat except where `steep` says otherwise. */
@@ -46,5 +47,48 @@ describe('tilesWorthLoading', () => {
   it('keeps everything when the threshold is zero', () => {
     const g = strip(() => 0)
     expect(tilesWorthLoading(dropField(g, 32), 0, 0, 500).size).toBeGreaterThan(0)
+  })
+})
+
+describe('tilesWithRoofAnchors', () => {
+  /** Flat ground at 40 m over one tile and its neighbours, which the terrain rule reads as flat. */
+  const flat = (): Grid => {
+    const g = Grid.filled(64 * 3, 64 * 3, 400000, 5800000 + 3000, 16)
+    g.data.fill(40)
+    return g
+  }
+  const faceIn = (tile: string, z: number) => {
+    const [e, n] = tile.slice(2).split('-').map(Number) as [number, number]
+    const [e0, n0] = [e * 1000 + 500, n * 1000 + 500]
+    return { ring: [e0, n0, e0 + 20, n0, e0 + 20, n0 + 20, e0, n0 + 20, e0, n0], z }
+  }
+  const p = { ...DEFAULT_PARAMS, maskMinRoofs: 1 }
+
+  it('keeps a tile for a building tall enough to anchor on, where the terrain says nothing', () => {
+    const coarse = flat()
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', 40 + p.minDropDepth)]]])
+    // The terrain rule, on this ground, wants nothing at all.
+    expect(tilesWorthLoading(dropField(coarse, p.maskRadius), p.maskMinDrop, p.maskMinCoverage, 0).size)
+      .toBe(0)
+    expect(tilesWithRoofAnchors(faces, coarse, p, 0).has('33401-5801')).toBe(true)
+  })
+
+  it('ignores a building the ground does not fall far enough below', () => {
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', 40 + p.minDropDepth - 0.1)]]])
+    expect(tilesWithRoofAnchors(faces, flat(), p, 0).size).toBe(0)
+  })
+
+  it('pulls in the ground a line off that roof would cross', () => {
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', 60)]]])
+    const near = tilesWithRoofAnchors(faces, flat(), p, 500)
+    // The eight neighbours as well, since a line runs up to maxLength from the roof.
+    expect(near.size).toBe(9)
+    expect(near.has('33400-5800')).toBe(true)
+    expect(near.has('33402-5802')).toBe(true)
+  })
+
+  it('respects the roof count a tile has to reach', () => {
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', 60)]]])
+    expect(tilesWithRoofAnchors(faces, flat(), { ...p, maskMinRoofs: 2 }, 0).size).toBe(0)
   })
 })

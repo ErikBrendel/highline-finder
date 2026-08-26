@@ -131,12 +131,25 @@ export const DEFAULT_PARAMS: Params = {
   //
   // The threshold matches the exact gate rather than guessing at slack for downsampling. Measured
   // at 239,392 real anchors, the coarse drop reads 14.9 m at the median and 5.8 m at the first
-  // percentile, so averaging to 16 m costs far less than the 4 m this used to allow. At 10 m with
-  // the coverage rule, 78% of tiles are fetched and 99.99% of anchors stay reachable.
+  // percentile, so averaging to 16 m costs far less than the 4 m this used to allow.
+  //
+  // Both this and the coverage rule sit on a cliff. Simulated over every tile at every setting and
+  // scored against 321k real anchors: 10 -> 12 m loses 7.6% of them and 0.02 -> 0.05 loses 9.6%,
+  // while loosening either changes nothing. There is no free tightening here.
+  //
+  // That measurement can only speak about tightening, though. The anchors it scores against were
+  // themselves produced by a run using these values, so an anchor this rule skipped is not in the
+  // file to be missed -- "nothing lost at 10 m" is true by construction. What the rule actually
+  // misses is measurable only by fetching ground it rejected and looking; see ROADMAP.
   maskRes: 16,
   maskRadius: 32,
   maskMinDrop: 10,
   maskMinCoverage: 0.02,
+  // Anchorable roofs a tile needs before it is fetched for its buildings alone. The mirror of
+  // maskMinCoverage, and 1 because a single tall building really is an anchor -- whether that is
+  // too generous over a whole state, where every village would qualify, is a measurement waiting
+  // to be made rather than a guess to bake in here.
+  maskMinRoofs: 1,
   maskExportRes: 128,
   // The web app re-derives clearances from this profile rather than the raster, so its resolution
   // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m

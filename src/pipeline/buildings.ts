@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { unzipSync } from 'fflate'
 import { blitGrid, type Grid } from '../shared/grid.js'
 import { RoofMask } from '../shared/anchoring.js'
-import { levelFaces, rasteriseFaces } from '../shared/lod1.js'
+import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
 import { gridForTile } from './downsample.js'
 
 /**
@@ -66,6 +66,33 @@ async function tileGml(tile: string): Promise<string> {
   throw new Error(`${url} failed after 5 attempts: ${last}`)
 }
 
+/**
+ * Every tile's buildings, fetched and parsed once.
+ *
+ * Split out from raising because the pre-pass now needs them *before* it decides which terrain to
+ * load. That decision used to be taken on bare earth alone, which is blind to a thirty-metre
+ * building on flat ground -- and measured on the current dataset, every single urban line's anchors
+ * sit on ground the terrain rule reads as flat. They survive only when a hill within 500 m drags
+ * their tile in.
+ *
+ * No extra traffic: this is the same request per tile that raising already made, moved earlier.
+ * Eight at a time, since they are small requests against one server and a region is hundreds of
+ * tiles.
+ */
+export async function tileBuildings(tiles: string[]): Promise<Map<string, LevelFace[]>> {
+  const queue = [...tiles]
+  const out = new Map<string, LevelFace[]>()
+  await Promise.all(
+    Array.from({ length: Math.min(8, queue.length) }, async () => {
+      for (let tile = queue.pop(); tile; tile = queue.pop()) {
+        const faces = levelFaces(await tileGml(tile))
+        if (faces.length) out.set(tile, faces)
+      }
+    }),
+  )
+  return out
+}
+
 export interface BuildingsApplied {
   /** Tiles that carry at least one building. */
   tiles: string[]
@@ -97,31 +124,19 @@ export interface BuildingsApplied {
  */
 export async function raiseOntoBuildings(
   ground: Grid,
-  /** Every tile of the region. All are probed, so a skipped one still reports its buildings. */
-  tiles: string[],
+  /** Every tile's buildings, from `tileBuildings`. Tiles with none are simply absent. */
+  faces: Map<string, LevelFace[]>,
   /** The subset whose terrain was loaded. Only these are raised: a roof over unloaded terrain
    * would be a building standing on nothing. */
   raiseOn: Set<string>,
 ): Promise<BuildingsApplied> {
-  // Eight at a time: these are small requests against one server, and a region can be hundreds of
-  // tiles, so serial would spend minutes on the first run doing nothing but waiting.
-  const queue = [...tiles]
-  const roofs: { tile: string; grid: Grid }[] = []
-  await Promise.all(
-    Array.from({ length: Math.min(8, queue.length) }, async () => {
-      for (let tile = queue.pop(); tile; tile = queue.pop()) {
-        const faces = levelFaces(await tileGml(tile))
-        if (!faces.length) continue
-        const grid = gridForTile(tile, 1)
-        rasteriseFaces(faces, grid)
-        roofs.push({ tile, grid })
-      }
-    }),
-  )
-
   const mask = RoofMask.sharedFor(ground)
   const cellsPerTile = new Map<string, number>()
-  for (const { tile, grid } of roofs) {
+  // One tile's raster at a time. Collecting them all first cost 4 MB a tile -- a gigabyte over a
+  // region this size -- to hold rasters that are used once and thrown away.
+  for (const [tile, tileFaces] of faces) {
+    const grid = gridForTile(tile, 1)
+    rasteriseFaces(tileFaces, grid)
     let cells = 0
     for (const v of grid.data) if (!Number.isNaN(v)) cells++
     cellsPerTile.set(tile, cells)
@@ -129,5 +144,5 @@ export async function raiseOntoBuildings(
     mask.add(grid)
     blitGrid(grid, ground)
   }
-  return { tiles: roofs.map((r) => r.tile).sort(), mask, cellsPerTile }
+  return { tiles: [...faces.keys()].sort(), mask, cellsPerTile }
 }

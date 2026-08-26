@@ -132,6 +132,13 @@ pairs in range, 1.1 M distinct lines and 151 M hotspot endpoints; the raw surfac
 rejects flat ground before a single 1 m tile is fetched, and most of Brandenburg is flat. At the
 67 % keep rate region 7 saw, the surface download is ~287 GB; at 10 % it is ~43 GB.
 
+**What the pre-pass still misses is unmeasured.** Simulating it at every threshold and scoring
+against the real anchors says both knobs sit on a cliff -- 10 -> 12 m loses 7.6%, coverage
+0.02 -> 0.05 loses 9.6% -- but it cannot speak about loosening, because the anchors it scores
+against were produced by a run using those values. An anchor the rule skipped is not in the file to
+be missed. The honest experiment is to run one region with `maskMinDrop: 0`, fetching everything,
+and diff the line set; Mueggelberge is the right size at 22.8 km2 and mixed urban and natural.
+
 **Measure that first.** `loadCoarse` fetches 8192 m chunks at 16 m, so the whole state is ~456
 chunks, ~460 MB, minutes, and needs no new code. That one number decides everything below.
 

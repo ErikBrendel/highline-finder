@@ -166,6 +166,8 @@ export interface Params {
    * `maskRes` changes.
    */
   maskMinCoverage: number
+  /** Anchorable roofs a tile needs to be fetched on the strength of its buildings alone. */
+  maskMinRoofs: number
   /** Cell size the mask is aggregated to for the debug overlay, in metres. */
   maskExportRes: number
   /** Samples kept in the serialised profile, to bound output size. */

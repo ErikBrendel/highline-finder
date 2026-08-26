@@ -1,11 +1,17 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
-import { raiseOntoBuildings } from './buildings.js'
+import { raiseOntoBuildings, tileBuildings } from './buildings.js'
 import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
 import { readRegion, regionId, writeRegion } from './regionCache.js'
-import { aggregateDrops, dropField, loadCoarse, tilesWorthLoading } from './coarse.js'
+import {
+  aggregateDrops,
+  dropField,
+  loadCoarse,
+  tilesWithRoofAnchors,
+  tilesWorthLoading,
+} from './coarse.js'
 import { packAnchors, packSectors, scanAnchors } from './openness.js'
 import { dedupe, locate, pairsOf } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
@@ -208,6 +214,18 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   const allTiles = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
   const valid = countValid(coarse)
+  /**
+   * Every tile's buildings, before anything decides which terrain to load.
+   *
+   * The same requests raising used to make, moved ahead of the decision they turn out to belong in:
+   * the terrain rule reads bare earth and is blind to a building on flat ground, which is where
+   * every urban line in this dataset lives.
+   */
+  const faces = await stage(
+    `city model, every tile (${label})`,
+    () => tileBuildings(allTiles),
+    (f) => ({ from: [allTiles.length, 'tiles'], to: [f.size, 'carry a building'] }),
+  )
   const drop = await stage(
     'drop field',
     () => dropField(coarse, p.maskRadius),
@@ -216,18 +234,25 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       to: [countValid(g, p.maskMinDrop), `cells >=${p.maskMinDrop}m`],
     }),
   )
-  const wantedTiles =
+  const byTerrain =
     p.maskMinDrop > 0
       ? tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, p.maxLength)
       : null
+  const byRoof = byTerrain && tilesWithRoofAnchors(faces, coarse, p, p.maxLength)
+  const wantedTiles = byTerrain && byRoof ? new Set([...byTerrain, ...byRoof]) : null
   const groundTiles = wantedTiles ? allTiles.filter((t) => wantedTiles.has(t)) : allTiles
+  const roofOnly = byTerrain && byRoof
+    ? allTiles.filter((t) => byRoof.has(t) && !byTerrain.has(t)).length
+    : 0
   record('terrain tile choice', {
     from: [allTiles.length, 'tiles'],
     to: [groundTiles.length, 'worth loading'],
+    steps: [['for their buildings alone', roofOnly]],
   })
   console.log(
     `  ${drop.w}x${drop.h} @${p.maskRes}m, ${groundTiles.length} of ${allTiles.length} terrain ` +
-      `tiles hold a cell falling >=${p.maskMinDrop}m within ${p.maskRadius}m`,
+      `tiles worth loading: ${byTerrain ? allTiles.filter((t) => byTerrain.has(t)).length : allTiles.length} ` +
+      `for a fall of >=${p.maskMinDrop}m within ${p.maskRadius}m, ${roofOnly} more for a roof alone`,
   )
 
   const ground = await stage(
@@ -252,7 +277,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
    */
   const buildings = await stage(
     'buildings raised onto the terrain',
-    () => raiseOntoBuildings(ground, allTiles, new Set(groundTiles)),
+    () => raiseOntoBuildings(ground, faces, new Set(groundTiles)),
     (b) => ({ from: [b.tiles.length, 'built-up tiles'], to: [b.mask.count(), 'roof cells'] }),
   )
   const roofs = buildings.mask
