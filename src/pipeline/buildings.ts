@@ -119,7 +119,7 @@ export async function raiseOntoBuildings(
     }),
   )
 
-  const mask = RoofMask.forGrid(ground)
+  const mask = RoofMask.sharedFor(ground)
   const cellsPerTile = new Map<string, number>()
   for (const { tile, grid } of roofs) {
     let cells = 0

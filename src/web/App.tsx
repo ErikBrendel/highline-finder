@@ -22,6 +22,7 @@ import { ensureTerrain, groundSampler, onBuilding, roofs, surfaceSampler } from 
 import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
 
 import { Details } from './Details.js'
+import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
@@ -266,11 +267,14 @@ export function App() {
   // The same idea for land cover: bumped when an Overpass request delivers a corridor that was
   // missing, which is what makes the planned line re-measure against the roads it just learned of.
   const [coverVersion, setCoverVersion] = useState(0)
-  const [terrainFailed, setTerrainFailed] = useState(false)
+  /** Why the elevation for the planned line could not be had, or null while it can. */
+  const [terrainFailed, setTerrainFailed] = useState<string | null>(null)
   const [fetchedProfile, setFetchedProfile] = useState<{ id: string; profile: StoredProfile } | null>(
     null,
   )
   const [layerError, setLayerError] = useState<string | null>(null)
+  /** Why the selected candidate has no chart, or null while it might still get one. */
+  const [profileFailed, setProfileFailed] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`${import.meta.env.BASE_URL}candidates.json`)
@@ -296,7 +300,10 @@ export function App() {
           setSelectedId(PLANNED_ID)
         }
       })
-      .catch((e) => setError(String(e)))
+      .catch((e: unknown) => {
+        report('loading candidates.json, which is the whole dataset', e)
+        setError(failureText(e))
+      })
   }, [])
 
   /**
@@ -357,7 +364,10 @@ export function App() {
     fetch(`${import.meta.env.BASE_URL}${file}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => (next === 'coarse' ? setMask(d) : setTiles(d)))
-      .catch(() => setLayerError(`${file} missing — run \`npm run pipeline\``))
+      .catch((e: unknown) => {
+        report(`loading ${file} for the ${next} debug layer`, e)
+        setLayerError(`${file}: ${failureText(e)} — run \`npm run pipeline\` if it is missing`)
+      })
   }
 
   const DEBUG_LABELS: Record<DebugLayer, string> = {
@@ -373,7 +383,10 @@ export function App() {
     fetch(`${import.meta.env.BASE_URL}hotspots.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setHotspots)
-      .catch(() => setLayerError('hotspots.json missing — run `npm run pipeline`'))
+      .catch((e: unknown) => {
+        report('loading hotspots.json', e)
+        setLayerError(`hotspots.json: ${failureText(e)} — run \`npm run pipeline\` if it is missing`)
+      })
   }, [])
 
   /**
@@ -413,11 +426,12 @@ export function App() {
     ensureTerrain(customUtm.a, customUtm.b)
       .then((arrived) => {
         if (stale) return
-        setTerrainFailed(false)
+        setTerrainFailed(null)
         if (arrived) setTerrainVersion((v) => v + 1)
       })
-      .catch(() => {
-        if (!stale) setTerrainFailed(true)
+      .catch((e: unknown) => {
+        report('fetching elevation for the planned line', e)
+        if (!stale) setTerrainFailed(failureText(e))
       })
     return () => {
       stale = true
@@ -535,7 +549,10 @@ export function App() {
     fetch(`${import.meta.env.BASE_URL}anchors.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setAnchorDump)
-      .catch(() => setLayerError('anchors.json missing — run `npm run pipeline`'))
+      .catch((e: unknown) => {
+        report('loading anchors.json', e)
+        setLayerError(`anchors.json: ${failureText(e)} — run \`npm run pipeline\` if it is missing`)
+      })
   }
 
   const visible = useMemo(() => {
@@ -649,6 +666,7 @@ export function App() {
     const a = { e: selected.a.e, n: selected.a.n }
     const b = { e: selected.b.e, n: selected.b.n }
     let stale = false
+    setProfileFailed(null)
     Promise.all([ensureTerrain(a, b), ensureCover(a, b)])
       .then(() => {
         if (stale) return
@@ -656,10 +674,22 @@ export function App() {
           a, b, selected.a.anchor, selected.b.anchor, selected.length,
           groundSampler, surfaceSampler, data.meta.params, { water },
         )
-        if (built.some((s) => Number.isNaN(s.ground))) return
+        // A hole in the terrain means the chart would be drawn with gaps, so it is not drawn -- but
+        // returning silently here is what left a spinner running forever with no request in flight
+        // to explain it, which is a bug report nobody can act on.
+        const holes = built.filter((sample) => Number.isNaN(sample.ground)).length
+        if (holes) {
+          const why = `elevation is missing at ${holes} of ${built.length} points along this line`
+          report('building a profile for the selected line', new Error(why))
+          setProfileFailed(why)
+          return
+        }
         setFetchedProfile({ id: selected.id, profile: packProfile(built, data.meta.params) })
       })
-      .catch(() => undefined)
+      .catch((e: unknown) => {
+        report('building a profile for the selected line', e)
+        if (!stale) setProfileFailed(failureText(e))
+      })
     return () => {
       stale = true
     }
@@ -710,9 +740,11 @@ export function App() {
     if (!shownEnds) return
     let stale = false
     const timer = setTimeout(() => {
-      ensureCover(shownEnds.a, shownEnds.b).then((arrived) => {
-        if (!stale && arrived) setCoverVersion((v) => v + 1)
-      })
+      ensureCover(shownEnds.a, shownEnds.b)
+        .then((arrived) => {
+          if (!stale && arrived) setCoverVersion((v) => v + 1)
+        })
+        .catch((e: unknown) => report('loading roads and water along the shown line', e))
     }, 300)
     return () => {
       stale = true
@@ -1007,7 +1039,7 @@ export function App() {
               }}
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
-              failed={terrainFailed}
+              failed={selectedId === PLANNED_ID ? terrainFailed : profileFailed}
               rig={rig}
               onRig={setRig}
               onClose={() => setSelectedId(null)}

@@ -1,4 +1,5 @@
 import maplibregl from 'maplibre-gl'
+import { report } from './report.js'
 
 /**
  * Persistent basemap tile cache.
@@ -43,6 +44,12 @@ const memIndex = new Map<string, Entry>()
 let memBytes = 0
 let dbPromise: Promise<IDBDatabase | null> | null = null
 
+/** A cache read that failed is a cache miss, and the fetch behind it still has to happen. */
+function cacheMiss(e: unknown): null {
+  report('reading a tile from the cache', e)
+  return null
+}
+
 function request<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     r.onsuccess = () => resolve(r.result)
@@ -74,7 +81,12 @@ async function openDb(): Promise<IDBDatabase | null> {
 }
 
 function db(): Promise<IDBDatabase | null> {
-  dbPromise ??= openDb().catch(() => null)
+  dbPromise ??= openDb().catch((e: unknown) => {
+    // Private browsing, a denied quota, a blocked database: the map still works, it just refetches
+    // everything. Worth one line in the console, since it is also why the map feels slow.
+    report('opening the tile cache (IndexedDB) -- tiles will not be cached this session', e)
+    return null
+  })
   return dbPromise
 }
 
@@ -129,13 +141,13 @@ export function installTileCache(): void {
   maplibregl.addProtocol(SCHEME, async (params, abortController) => {
     const url = `https://${params.url.slice(SCHEME.length + 3)}`
 
-    const hit = await read(url).catch(() => null)
+    const hit = await read(url).catch(cacheMiss)
     if (hit) return { data: hit }
 
     const res = await fetch(url, { signal: abortController.signal })
     if (!res.ok) throw new Error(`tile ${res.status} for ${url}`)
     const bytes = await res.arrayBuffer()
-    void write(url, bytes).catch(() => {})
+    void write(url, bytes).catch((e: unknown) => report('writing a tile to the cache', e))
     return { data: bytes }
   })
 }
@@ -147,12 +159,12 @@ export function installTileCache(): void {
  * immutable, and expensive to re-request while dragging an anchor around.
  */
 export async function fetchCached(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-  const hit = await read(url).catch(() => null)
+  const hit = await read(url).catch(cacheMiss)
   if (hit) return hit
   const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`${res.status} for ${url}`)
   const bytes = await res.arrayBuffer()
-  void write(url, bytes).catch(() => {})
+  void write(url, bytes).catch((e: unknown) => report('writing a tile to the cache', e))
   return bytes
 }
 

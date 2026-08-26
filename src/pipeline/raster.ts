@@ -44,7 +44,7 @@ export async function loadProduct(
   const n1 = Math.ceil(bounds.maxN)
   const w = Math.ceil(bounds.maxE) - e0
   const h = n1 - Math.floor(bounds.minN)
-  const grid = Grid.filled(Math.ceil(w / res), Math.ceil(h / res), e0, n1, res)
+  const grid = Grid.shared(Math.ceil(w / res), Math.ceil(h / res), e0, n1, res)
 
   const tiles = tilesForBounds(bounds.minE, bounds.minN, bounds.maxE, bounds.maxN).filter(
     (t) => !only || only.has(t),

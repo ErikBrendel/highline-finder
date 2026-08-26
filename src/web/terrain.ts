@@ -5,6 +5,7 @@ import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
 import type { Roofs } from '../shared/anchoring.js'
 import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
+import { report } from './report.js'
 
 /**
  * Elevation on demand, for measuring user-placed lines.
@@ -117,7 +118,12 @@ function facesFor(tile: string): Promise<LevelFace[]> {
     const entries = unzipSync(new Uint8Array(zip))
     const name = Object.keys(entries).find((k) => k.endsWith('.gml'))
     return name ? levelFaces(new TextDecoder().decode(entries[name]!)) : []
-  })().catch(() => [])
+  })().catch((e: unknown) => {
+    // A 404 is the answer for a tile with no buildings in it, and saying so for every empty field
+    // in Brandenburg would drown out the failures worth seeing. Anything else is one of those.
+    if (!/\b404\b/.test(String(e))) report(`loading the city model for tile ${tile}`, e)
+    return []
+  })
   roofFaces.set(tile, job)
   return job
 }
@@ -143,12 +149,15 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
       }),
     )
   } catch (e) {
+    report(`fetching the elevation window at ${e0},${n0} (${WINDOW} m)`, e)
     emit({ tx, ty, state: 'failed' })
     throw e
   }
-  // Separately, and after: an outage on the city model must cost the buildings, never the
+  // Separately, after, and caught: an outage on the city model must cost the buildings, never the
   // elevation. The roof grid starts all NaN, which is the same answer as open ground.
-  await loadRoofs(e0, n0, roof)
+  await loadRoofs(e0, n0, roof).catch((e: unknown) =>
+    report(`rasterising buildings into the window at ${e0},${n0}`, e),
+  )
   loaded.set(keyOf(tx, ty), { ground, surface, roof })
   emit({ tx, ty, state: 'loaded' })
 }

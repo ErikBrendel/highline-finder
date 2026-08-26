@@ -322,7 +322,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   const water = await stage(
     'water rasterised',
     () => {
-      const mask = new WaterMask(ground)
+      const mask = WaterMask.shared(ground)
       mask.add(roads.water)
       return mask
     },

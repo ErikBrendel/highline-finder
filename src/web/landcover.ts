@@ -5,6 +5,7 @@ import type { Roads } from '../shared/scene.js'
 import { WaterMask, type WaterCover } from '../shared/water.js'
 import { WINDOW, bareGround, onBuilding } from './terrain.js'
 import { fetchCached } from './tileCache.js'
+import { report } from './report.js'
 
 /**
  * What a profile sample is standing on: for the chart to draw, and for the planner to measure.
@@ -62,8 +63,12 @@ function blockIndex(): Promise<Set<string>> {
       return new Set(parsed.blocks)
     })
     // An unreadable index is itself a broken deployment, and reporting every block as missing is
-    // how that surfaces rather than as silently unchecked lines.
-    .catch(() => new Set<string>())
+    // how that surfaces rather than as silently unchecked lines -- but it is said out loud, since
+    // "no roads anywhere" and "the road data did not load" look identical on the map.
+    .catch((e: unknown) => {
+      report('loading the OSM block index (public/osm/index.json)', e)
+      return new Set<string>()
+    })
   return index
 }
 
@@ -114,7 +119,8 @@ function load(key: string): Promise<void> {
       for (const road of split.roads) roads.add(road)
       held.set(key, { roads, water: split.water })
     })
-    .catch(() => {
+    .catch((e: unknown) => {
+      report(`loading the OSM block ${key}`, e)
       failed.add(key)
     })
   loading.set(key, job)

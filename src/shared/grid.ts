@@ -107,17 +107,25 @@ export class Grid {
     readonly res: number,
   ) {}
 
+  // Floored, because a typed-array length is, and a fixture built from metres over a cell size does
+  // not always divide.
+  static filled(w: number, h: number, e0: number, n1: number, res: number): Grid {
+    return new Grid(new Float32Array(Math.floor(w * h)).fill(NaN), w, h, e0, n1, res)
+  }
+
   /**
    * A grid the worker threads can read without a copy.
    *
-   * Backed by a SharedArrayBuffer rather than the usual one, because the terrain and surface
-   * rasters are 700 MB each on the biggest region and handing every worker its own would run the
-   * machine out of memory long before it ran out of cores. Nothing writes to a grid after it is
-   * assembled, so sharing needs no synchronisation beyond the message that says it is ready.
+   * Shared memory is a pipeline concern and is asked for explicitly, never by default. The terrain
+   * and surface rasters are 700 MB each on the biggest region, so a pool that copied them would
+   * need twelve gigabytes to use eight cores -- but a browser cannot allocate a SharedArrayBuffer
+   * at all unless the page is cross-origin isolated, and this app's is not. Making `filled` share
+   * silently turned every elevation window in the planner into a ReferenceError.
+   *
+   * Nothing writes to a grid once it is assembled, so sharing needs no synchronisation beyond the
+   * message saying it is ready.
    */
-  static filled(w: number, h: number, e0: number, n1: number, res: number): Grid {
-    // Floored, because a typed-array length is, and a fixture built from metres over a cell size
-    // does not always divide.
+  static shared(w: number, h: number, e0: number, n1: number, res: number): Grid {
     const data = new Float32Array(new SharedArrayBuffer(Math.floor(w * h) * 4))
     return new Grid(data.fill(NaN), w, h, e0, n1, res)
   }

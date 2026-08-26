@@ -105,7 +105,8 @@ interface Props {
   planned: PlannedLine | null
   /** Endpoints to fall back on before there is a measurement to read them from. */
   at: { a: LatLon; b: LatLon } | null
-  failed: boolean
+  /** Why there is no chart, or null while one may still arrive. */
+  failed: string | null
   optimizing: boolean
   /** Reach the button is offering for the next run, or null for the careful default. */
   offer: number | null
@@ -239,7 +240,7 @@ export function Details({
       <div className="head">
         <strong style={{ color: isPlanned ? '#22c55e' : scoreColor(c!.score) }}>
           {isPlanned && 'Planned line · '}
-          {c ? `Score ${c.score.toFixed(1)}` : failed ? 'no elevation data here' : 'measuring…'}
+          {c ? `Score ${c.score.toFixed(1)}` : failed ? 'could not measure' : 'measuring…'}
         </strong>
         {isPlanned && c && (
           <button
@@ -274,7 +275,15 @@ export function Details({
           ) : (
             <div className="chartwait">
               {failed ? (
-                <span>no elevation coverage for this spot</span>
+                <span className="chartfail">
+                  <strong>No profile for this line</strong>
+                  {failed}
+                  <em>
+                    Elevation comes from the Brandenburg survey (isk.geobasis-bb.de), which covers
+                    Brandenburg and Berlin only. Outside that there is nothing to fetch; inside it,
+                    this is a request that failed &mdash; the browser console has the detail.
+                  </em>
+                </span>
               ) : (
                 <>
                   <i className="spinner" />

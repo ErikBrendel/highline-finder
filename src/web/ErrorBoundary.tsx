@@ -1,4 +1,5 @@
-import { Component, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react'
+import { failureText, onFailure, type Failure } from './report.js'
 
 /**
  * Catches a crash and shows it, instead of leaving a black page.
@@ -14,6 +15,12 @@ import { Component, useState, type ErrorInfo, type ReactNode } from 'react'
  * promises -- a failed tile fetch, an Overpass request, an elevation window -- none of which reach
  * it. Those do not blank the page, so they are shown as a dismissible banner rather than as a
  * replacement for the app.
+ *
+ * And a third half, which is the one that actually bit: a failure the app deliberately catches and
+ * carries on from never becomes an unhandled rejection, so neither handler above ever sees it. Those
+ * come through report.ts, and are listed quietly at the foot of the screen rather than thrown in
+ * front of the map -- the app is still working, and the point is that the reason exists somewhere a
+ * person can read it.
  */
 
 interface Caught {
@@ -84,9 +91,49 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
             onDismiss={caught.fatal ? null : () => this.setState({ caught: null })}
           />
         )}
+        <SoftFailures />
       </>
     )
   }
+}
+
+/**
+ * Failures the app survived, kept at the corner of the screen.
+ *
+ * Deliberately unobtrusive and deliberately not dismissible-forever: these are the ones that used
+ * to be invisible, and a spinner that never resolves needs its reason to still be on screen when
+ * someone finally looks for it.
+ */
+function SoftFailures() {
+  const [list, setList] = useState<Failure[]>([])
+  const [open, setOpen] = useState(false)
+  useEffect(
+    () =>
+      onFailure((f) =>
+        setList((held) => [f, ...held.filter((x) => x.what !== f.what)].slice(0, 8)),
+      ),
+    [],
+  )
+  if (!list.length) return null
+  const total = list.reduce((n, f) => n + f.count, 0)
+  return (
+    <div className="softfail" data-open={open}>
+      <button onClick={() => setOpen((v) => !v)}>
+        {total} background {total === 1 ? 'failure' : 'failures'}
+      </button>
+      {open && (
+        <ul>
+          {list.map((f) => (
+            <li key={f.what}>
+              <strong>{f.what}</strong>
+              {f.count > 1 && <span className="times">&times;{f.count}</span>}
+              <span>{failureText(f.error)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function ErrorReport({ caught, onDismiss }: { caught: Caught; onDismiss: (() => void) | null }) {

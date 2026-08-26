@@ -547,3 +547,45 @@ header .external:hover { border-color: var(--accent); }
   color: #f5d0d0;
   user-select: text;
 }
+
+/* Failures the app carried on from. Bottom-left and small, because the app still works and this is
+   a footnote -- but permanent, because the whole reason it exists is that these used to leave no
+   trace at all. */
+.softfail {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 998;
+  max-width: min(520px, calc(100vw - 24px));
+  font-size: 11px;
+  color: #fcd9b6;
+}
+.softfail > button {
+  background: rgba(26, 17, 19, 0.92);
+  border: 1px solid rgba(251, 146, 60, 0.45);
+  color: inherit;
+  border-radius: 6px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.softfail > button:hover { background: rgba(251, 146, 60, 0.16); }
+.softfail ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 40vh;
+  overflow: auto;
+  background: rgba(26, 17, 19, 0.96);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  border-radius: 6px;
+}
+.softfail li { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; }
+.softfail li + li { border-top: 1px solid rgba(251, 146, 60, 0.15); }
+.softfail li strong { color: #fdba74; font-weight: 600; }
+.softfail li span { color: #d6c3b4; word-break: break-word; }
+.softfail .times { color: #fb923c; }
+
+/* Why a chart is missing, in the space the chart would have taken. */
+.chartfail { display: flex; flex-direction: column; gap: 6px; max-width: 46ch; text-align: left; }
+.chartfail strong { color: var(--text); }
+.chartfail em { font-style: normal; opacity: 0.65; line-height: 1.45; }

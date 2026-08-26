@@ -10,6 +10,7 @@ import type {
   TileUsage,
 } from '../shared/types.js'
 import { cachedUrl } from './tileCache.js'
+import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
@@ -520,6 +521,13 @@ export function MapView({
       fitBoundsOptions: { padding: initialBbox ? 0 : 40 },
     })
     map.current = m
+    /**
+     * MapLibre swallows nothing but announces everything here: a tile that 404s, a source that
+     * fails to load, a custom protocol handler that throws. Without a listener it writes to the
+     * console and no further, so a basemap that is quietly serving nothing looks like a basemap
+     * with nothing on it.
+     */
+    m.on('error', (e) => report('drawing the map', e.error ?? e))
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left')
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
 

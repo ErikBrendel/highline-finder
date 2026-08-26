@@ -58,8 +58,13 @@ export interface MaskShare extends CellGeometry {
   buffer: SharedArrayBuffer
 }
 
+/** See Grid.shared for why this is asked for explicitly rather than being the default. */
 export function sharedBits(w: number, h: number): Uint8Array {
   return new Uint8Array(new SharedArrayBuffer(Math.ceil((w * h) / 8)))
+}
+
+export function plainBits(w: number, h: number): Uint8Array {
+  return new Uint8Array(Math.ceil((w * h) / 8))
 }
 
 export class RoofMask implements Roofs {
@@ -73,6 +78,11 @@ export class RoofMask implements Roofs {
   ) {}
 
   static forGrid(g: Grid): RoofMask {
+    return new RoofMask(plainBits(g.w, g.h), g.w, g.h, g.e0, g.n1, g.res)
+  }
+
+  /** Readable from the worker pool. See Grid.shared for why this is not the default. */
+  static sharedFor(g: Grid): RoofMask {
     return new RoofMask(sharedBits(g.w, g.h), g.w, g.h, g.e0, g.n1, g.res)
   }
 
