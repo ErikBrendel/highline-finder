@@ -46,3 +46,31 @@ export function sectorOf(bearing: number, sectorCount: number): number {
 export function oppositeBearing(bearing: number): number {
   return (bearing + Math.PI) % (2 * Math.PI)
 }
+
+/**
+ * The EPSG:25833 bounding box of a latitude/longitude rectangle.
+ *
+ * The two are not the same shape: a lat/lon rectangle maps to a quadrilateral rotated by the grid
+ * convergence, and this is the axis-aligned box around it -- slightly larger than the rectangle
+ * asked for. That box, not the rectangle, is what the search actually confines anchors to, so it is
+ * also what the map should draw when it claims to be showing an area of interest.
+ */
+export function utmBounds(a: { south: number; west: number; north: number; east: number }): {
+  minE: number
+  minN: number
+  maxE: number
+  maxN: number
+} {
+  const corners = [
+    toUtm33(a.south, a.west),
+    toUtm33(a.south, a.east),
+    toUtm33(a.north, a.west),
+    toUtm33(a.north, a.east),
+  ]
+  return {
+    minE: Math.min(...corners.map((c) => c[0])),
+    maxE: Math.max(...corners.map((c) => c[0])),
+    minN: Math.min(...corners.map((c) => c[1])),
+    maxN: Math.max(...corners.map((c) => c[1])),
+  }
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BLEND_STOPS,
   ageText,
+  squareRing,
   MIX_MAX,
   basemapOpacity,
   basemapVisible,
@@ -10,6 +11,7 @@ import {
   stopAt,
 } from './MapView.js'
 import { SHADE_BASELINE, applyShading } from './shaded.js'
+import { toUtm33, toWgs84 } from '../shared/geo.js'
 
 const n = BLEND_STOPS.length
 
@@ -158,5 +160,40 @@ describe('ageText', () => {
 
   it('never reads as in the future, for a region written moments ago', () => {
     expect(ago(-5000)).toBe('1m ago')
+  })
+})
+
+describe('squareRing', () => {
+  /** Distance between two drawn corners, back in the projection the square was defined in. */
+  const apart = (a: [number, number], b: [number, number]) => {
+    const [ae, an] = toUtm33(a[1], a[0])
+    const [be, bn] = toUtm33(b[1], b[0])
+    return Math.hypot(ae - be, an - bn)
+  }
+  // Western Brandenburg, where UTM convergence is worst and the old flat-earth box was 35 m out.
+  const centre = (e: number, n: number) => toWgs84(e, n)
+
+  it('makes neighbouring squares share an edge, so they tile', () => {
+    const w = centre(400500, 5820500)
+    const e = centre(401500, 5820500)
+    const [a, b] = [squareRing(w.lat, w.lon, 1000), squareRing(e.lat, e.lon, 1000)]
+    // Ring order is SW, SE, NE, NW: the west square's east edge is the east square's west edge.
+    expect(apart(a[1]!, b[0]!)).toBeLessThan(0.5)
+    expect(apart(a[2]!, b[3]!)).toBeLessThan(0.5)
+  })
+
+  it('is not axis-aligned in latitude and longitude', () => {
+    // Exactly the assumption the old code made. A projected square is rotated by the convergence
+    // angle, so its southern edge does not sit at one latitude.
+    const c = centre(400500, 5820500)
+    const ring = squareRing(c.lat, c.lon, 1000)
+    expect(Math.abs(ring[0]![1] - ring[1]![1])).toBeGreaterThan(1e-4)
+  })
+
+  it('keeps the size it was asked for', () => {
+    const c = centre(400500, 5820500)
+    const ring = squareRing(c.lat, c.lon, 1000)
+    expect(apart(ring[0]!, ring[1]!)).toBeCloseTo(1000, 0)
+    expect(apart(ring[1]!, ring[2]!)).toBeCloseTo(1000, 0)
   })
 })

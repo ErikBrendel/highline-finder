@@ -1,4 +1,4 @@
-import { toUtm33 } from '../shared/geo.js'
+import { utmBounds } from '../shared/geo.js'
 import { regionId } from './regionCache.js'
 import type { Aoi } from '../shared/types.js'
 
@@ -74,20 +74,7 @@ export function recomputes(area: WorkArea, selection: Recompute): boolean {
   return area.aois.some((a) => selection.some((s) => overlaps(a, s)))
 }
 
-export function boxOf(aoi: Aoi): Box {
-  const corners = [
-    toUtm33(aoi.south, aoi.west),
-    toUtm33(aoi.south, aoi.east),
-    toUtm33(aoi.north, aoi.west),
-    toUtm33(aoi.north, aoi.east),
-  ]
-  return {
-    minE: Math.min(...corners.map((c) => c[0])),
-    maxE: Math.max(...corners.map((c) => c[0])),
-    minN: Math.min(...corners.map((c) => c[1])),
-    maxN: Math.max(...corners.map((c) => c[1])),
-  }
-}
+export const boxOf = (aoi: Aoi): Box => utmBounds(aoi)
 
 export function contains(box: Box, e: number, n: number): boolean {
   return e >= box.minE && e <= box.maxE && n >= box.minN && n <= box.maxN

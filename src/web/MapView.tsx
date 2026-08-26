@@ -10,6 +10,7 @@ import type {
   Region,
   TileUsage,
 } from '../shared/types.js'
+import { utmBounds } from '../shared/geo.js'
 import { cachedUrl } from './tileCache.js'
 import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
@@ -342,29 +343,63 @@ function hotspotsGeoJson(h: HotspotArrays | null): GeoJSON.FeatureCollection {
  * Cells carry a centre and the run's cell size rather than corners; the square is built here because
  * one number per cell is a great deal less to ship than four coordinate pairs.
  */
+/**
+ * A square of `size` metres centred on a point, as a ring of its four true corners.
+ *
+ * Every square this file draws -- coarse mask cells, source tiles -- is a square in EPSG:25833, and
+ * a square in EPSG:25833 is not a rectangle in latitude and longitude. UTM grid convergence rotates
+ * it away from north by up to 2.9 degrees at Brandenburg's western edge, so building the shape from
+ * a centre and a half-width in degrees puts the corners 20 m out on a 1 km tile at 13 E and 35 m out
+ * at 11.5 E. That is what made neighbouring squares overlap on one side and leave a gap on the
+ * other: each was drawn as its own axis-aligned box, so their edges never met.
+ *
+ * Converting the corners instead makes adjacent squares share their corner coordinates exactly, so
+ * they tile. The centre is round-tripped through the projection to recover it, which costs the 0.1 m
+ * the exported coordinates were rounded to -- three orders below what was wrong before.
+ */
+export function squareRing(lat: number, lon: number, size: number): [number, number][] {
+  const [e, n] = toUtm33(lat, lon)
+  const h = size / 2
+  return boxRing({ minE: e - h, minN: n - h, maxE: e + h, maxN: n + h })
+}
+
+/** A projected box as a ring of its four true corners. The only correct way to draw one. */
+function boxRing(b: Box25833): [number, number][] {
+  return (
+    [
+      [b.minE, b.minN], [b.maxE, b.minN], [b.maxE, b.maxN], [b.minE, b.maxN], [b.minE, b.minN],
+    ] as const
+  ).map(([e, n]) => {
+    const corner = toWgs84(e, n)
+    return [corner.lon, corner.lat] as [number, number]
+  })
+}
+
+type Box25833 = { minE: number; minN: number; maxE: number; maxN: number }
+
+/**
+ * What each region actually searched, as outlines.
+ *
+ * Not the areas of interest as written down. An area of interest is a latitude/longitude rectangle,
+ * but the search confines anchors to its EPSG:25833 bounding box, which is a slightly larger and
+ * differently shaped patch of ground -- so drawing the rectangle drew something nobody looked at.
+ * A chunk is answerable for its own square, which it already carries.
+ */
+function searchedRings(regions: Region[]): [number, number][][] {
+  return regions.flatMap((r) =>
+    r.owns25833 ? [boxRing(r.owns25833)] : r.aois.map((a) => boxRing(utmBounds(a))),
+  )
+}
+
 function maskGeoJson(m: MaskCells | null): GeoJSON.FeatureCollection {
   if (!m) return { type: 'FeatureCollection', features: [] }
   return {
     type: 'FeatureCollection',
-    features: m.lat.map((lat, i) => {
-      const dLat = m.res / 111320 / 2
-      const dLon = m.res / (111320 * Math.cos((lat * Math.PI) / 180)) / 2
-      const lon = m.lon[i]!
-      return {
-        type: 'Feature',
-        properties: { drop: m.drop[i]! },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [[
-            [lon - dLon, lat - dLat],
-            [lon + dLon, lat - dLat],
-            [lon + dLon, lat + dLat],
-            [lon - dLon, lat + dLat],
-            [lon - dLon, lat - dLat],
-          ]],
-        },
-      }
-    }),
+    features: m.lat.map((lat, i) => ({
+      type: 'Feature',
+      properties: { drop: m.drop[i]! },
+      geometry: { type: 'Polygon', coordinates: [squareRing(lat, m.lon[i]!, m.res)] },
+    })),
   }
 }
 
@@ -381,31 +416,17 @@ function tilesGeoJson(t: TileUsage | null, layer: TileLayer): GeoJSON.FeatureCol
   if (!t) return { type: 'FeatureCollection', features: [] }
   return {
     type: 'FeatureCollection',
-    features: t.lat.map((lat, i) => {
-      const dLat = t.size / 111320 / 2
-      const dLon = t.size / (111320 * Math.cos((lat * Math.PI) / 180)) / 2
-      const lon = t.lon[i]!
-      return {
-        type: 'Feature',
-        properties: {
-          fetched: (layer === 'surface' ? t.surface[i] : t.terrain[i]) ? 1 : 0,
-          anchors: t.anchors[i]!,
-          roofCells: t.roofCells?.[i] ?? 0,
-          roadKills: t.roadKills?.[i] ?? 0,
-          layer,
-        },
-        geometry: {
-          type: 'Polygon',
-          coordinates: [[
-            [lon - dLon, lat - dLat],
-            [lon + dLon, lat - dLat],
-            [lon + dLon, lat + dLat],
-            [lon - dLon, lat + dLat],
-            [lon - dLon, lat - dLat],
-          ]],
-        },
-      }
-    }),
+    features: t.lat.map((lat, i) => ({
+      type: 'Feature',
+      properties: {
+        fetched: (layer === 'surface' ? t.surface[i] : t.terrain[i]) ? 1 : 0,
+        anchors: t.anchors[i]!,
+        roofCells: t.roofCells?.[i] ?? 0,
+        roadKills: t.roadKills?.[i] ?? 0,
+        layer,
+      },
+      geometry: { type: 'Polygon', coordinates: [squareRing(lat, t.lon[i]!, t.size)] },
+    })),
   }
 }
 
@@ -425,17 +446,10 @@ function regionsGeoJson(regions: Region[] | null, now: number): GeoJSON.FeatureC
     features: regions.map((r) => {
       // What it owns, not what it loaded: neighbouring chunks overlap by a kilometre in the second
       // and tile exactly in the first, so drawing the load would show a coverage map that lies.
-      const { minE, minN, maxE, maxN } = r.owns25833 ?? r.bbox25833
-      const corners = [
-        [minE, minN], [maxE, minN], [maxE, maxN], [minE, maxN], [minE, minN],
-      ].map(([e, n]) => {
-        const { lat, lon } = toWgs84(e!, n!)
-        return [lon, lat]
-      })
       return {
         type: 'Feature',
         properties: { days: ageInDays(r.generatedAt, now) },
-        geometry: { type: 'Polygon', coordinates: [corners] },
+        geometry: { type: 'Polygon', coordinates: [boxRing(r.owns25833 ?? r.bbox25833)] },
       }
     }),
   }
@@ -785,16 +799,10 @@ export function MapView({
         type: 'geojson',
         data: {
           type: 'FeatureCollection',
-          features: aois.map((a) => ({
+          features: searchedRings(data.meta.regions).map((ring) => ({
             type: 'Feature',
             properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: [
-                [a.west, a.south], [a.east, a.south],
-                [a.east, a.north], [a.west, a.north], [a.west, a.south],
-              ],
-            },
+            geometry: { type: 'LineString', coordinates: ring },
           })),
         },
       })
