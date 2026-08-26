@@ -1,4 +1,4 @@
-import { takePhases } from './phases.js'
+import { takeCounts, takePhases } from '../shared/phases.js'
 
 /**
  * The run report: what each stage cost and how much data it passed on.
@@ -17,6 +17,10 @@ import { takePhases } from './phases.js'
  * stage, measured from inside a hot loop by phases.ts. A *step* is a counted part of a stage, with
  * no time of its own -- the prefilters inside the pair search are steps, since they are branches in
  * one loop and there is nothing separable to time.
+ *
+ * Steps come from two places and are treated identically: the flow callback here, and `phaseCount`
+ * from inside a hot loop. The ones declared here land first, so a stage's own funnel reads before
+ * the detail of how one part of it spent its iterations.
  */
 
 export interface Flow {
@@ -78,6 +82,7 @@ export async function stage<T>(
   flow?: (out: T) => Flow,
 ): Promise<T> {
   takePhases()
+  takeCounts()
   const started = Date.now()
   const cpuBefore = process.cpuUsage()
   const out = await run()
@@ -92,6 +97,7 @@ export async function stage<T>(
     row.phases.set(name, (row.phases.get(name) ?? 0) + ms / 1000)
   }
   apply(row, flow?.(out))
+  for (const [name, n] of takeCounts()) row.steps.set(name, (row.steps.get(name) ?? 0) + n)
 
   // Only worth two numbers live when they differ enough to change what you would conclude.
   const split = seconds > cpuSeconds * 1.2 + 1 ? `, ${cpuSeconds.toFixed(1)}s cpu` : ''

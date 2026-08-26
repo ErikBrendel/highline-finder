@@ -2,6 +2,7 @@ import type { Pos, Sampler } from './grid.js'
 import { sideHalfWidthAt } from './profile.js'
 import type { Roads } from './scene.js'
 import type { Crossing, Params, RoadTier } from './types.js'
+import { phaseCount } from './phases.js'
 
 /**
  * A crossing from an older dataset, given the stretch every consumer now expects.
@@ -201,6 +202,7 @@ function nearestOnSegment(
   return { e: x0 + ex * u, n: y0 + ey * u }
 }
 
+/** Allocation-free, because it runs tens of billions of times a pipeline run. */
 function distToSegment2(
   px: number,
   py: number,
@@ -209,8 +211,47 @@ function distToSegment2(
   x1: number,
   y1: number,
 ): number {
-  const foot = nearestOnSegment(px, py, x0, y0, x1, y1)
-  return (px - foot.e) ** 2 + (py - foot.n) ** 2
+  const ex = x1 - x0
+  const ey = y1 - y0
+  const len2 = ex * ex + ey * ey
+  const u = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((px - x0) * ex + (py - y0) * ey) / len2))
+  const dx = px - (x0 + ex * u)
+  const dy = py - (y0 + ey * u)
+  return dx * dx + dy * dy
+}
+
+const side = (ax: number, ay: number, bx: number, by: number, px: number, py: number) =>
+  (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+
+/**
+ * The closest the two segments ever come, squared.
+ *
+ * Exact, and about twenty times cheaper than finding the same thing by ternary search -- four
+ * point-to-segment distances against eighty. That difference is the whole point: it is a lower
+ * bound on `shortfall`, so a segment it puts out of reach cannot produce a crossing and never has
+ * to be searched.
+ */
+export function segmentsApart2(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+  dx: number,
+  dy: number,
+): number {
+  const d1 = side(cx, cy, dx, dy, ax, ay)
+  const d2 = side(cx, cy, dx, dy, bx, by)
+  const d3 = side(ax, ay, bx, by, cx, cy)
+  const d4 = side(ax, ay, bx, by, dx, dy)
+  if (d1 * d2 < 0 && d3 * d4 < 0) return 0
+  return Math.min(
+    distToSegment2(ax, ay, cx, cy, dx, dy),
+    distToSegment2(bx, by, cx, cy, dx, dy),
+    distToSegment2(cx, cy, ax, ay, bx, by),
+    distToSegment2(dx, dy, ax, ay, bx, by),
+  )
 }
 
 /**
@@ -258,13 +299,43 @@ export function crossingsAlong(
   if (length === 0) return out
   const r1 = (v: number) => Math.round(v * 10) / 10
 
+  /**
+   * The widest the band gets anywhere on this span, which is what makes a cheap rejection exact.
+   *
+   * `shortfall(t)` is the distance from the centreline at `t` to the segment, less the carriageway
+   * and less the band's half-width there. Both subtractions are bounded, and the distance is at
+   * least the segment-to-segment distance -- so a segment further off than `way.half + widest`
+   * cannot make `shortfall` negative anywhere, and skipping it loses nothing.
+   */
+  const widest = sideHalfWidthAt(0.5, length, p)
+  const spanMinE = Math.min(a.e, b.e)
+  const spanMaxE = Math.max(a.e, b.e)
+  const spanMinN = Math.min(a.n, b.n)
+  const spanMaxN = Math.max(a.n, b.n)
+  let searched = 0
+
   for (const way of ways) {
     const { pts } = way
+    // Everything that could carry the requirement toward this segment: the band at its widest and
+    // the carriageway at its full half-width.
+    const reach = way.half + widest
     for (let i = 0; i + 3 < pts.length; i += 2) {
       const x0 = pts[i]!
       const y0 = pts[i + 1]!
       const x1 = pts[i + 2]!
       const y1 = pts[i + 3]!
+      // Boxes first, then the exact distance: six comparisons throw out most of what `near` hands
+      // over, since it returns whole ways for touching one bucket and a way is mostly elsewhere.
+      if (
+        Math.min(x0, x1) - reach > spanMaxE ||
+        Math.max(x0, x1) + reach < spanMinE ||
+        Math.min(y0, y1) - reach > spanMaxN ||
+        Math.max(y0, y1) + reach < spanMinN
+      ) {
+        continue
+      }
+      if (segmentsApart2(a.e, a.n, b.e, b.n, x0, y0, x1, y1) > reach * reach) continue
+      searched++
       /** How far the near kerb is from the centreline at `t`, negative once the band reaches it. */
       const shortfall = (t: number) =>
         Math.sqrt(distToSegment2(a.e + se * t, a.n + sn * t, x0, y0, x1, y1)) -
@@ -314,6 +385,8 @@ export function crossingsAlong(
       })
     }
   }
+  phaseCount('close enough to search', searched)
+  phaseCount('actually under the band', out.length)
   return mergeOverlapping(out)
 }
 
@@ -512,6 +585,10 @@ export class RoadIndex implements Roads {
     // bucket could reach the line however the two are angled.
     const margin = sideHalfWidthAt(0.5, Math.hypot(b.e - a.e, b.n - a.n), p) + this.widest
     const ways = this.near(a, b, margin)
+    phaseCount('spans asked about roads')
+    // Pieces, not ways: the index splits every way into single segments, so this is the number of
+    // ternary searches the old code ran and the number the box test now has to throw out.
+    phaseCount('road pieces the index returns', ways.length)
     return ways.length ? crossingsAlong(a, b, ways, p, elevation) : []
   }
 

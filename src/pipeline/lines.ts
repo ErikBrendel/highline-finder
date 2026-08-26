@@ -16,7 +16,7 @@ import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
 import { clearanceNeeded, type WaterCover } from '../shared/water.js'
 import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
-import { phaseAt, phaseDone } from './phases.js'
+import { phaseAt, phaseDone } from '../shared/phases.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -235,10 +235,6 @@ export function evaluateLine(
   phaseDone('terrain gate', tGate)
   if (!clears) return failed('terrain')
 
-  const tRoads = phaseAt()
-  const crossings = scene.roads?.crossings(a, b, p, { ground, surface })
-  phaseDone('road crossings', tRoads)
-
   // Round the scalars before anything is measured from them. The web app re-derives every
   // clearance from these serialised values, so measuring from the full-precision ones would let
   // the dataset contain candidates the UI immediately rejects -- a line whose clearance is exactly
@@ -269,7 +265,7 @@ export function evaluateLine(
     score: 0,
     scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
     maxSagRatio: 0,
-    crossings,
+    crossings: undefined,
   }
 
   /**
@@ -287,15 +283,30 @@ export function evaluateLine(
 
   const tEarly = phaseAt()
   const probe = { ...terrain, surface: terrain.ground }
-  const early = rawMetricsAt(probe, roundedLength, hA, hB, p.sagRatio, p, crossings)
+  const early = rawMetricsAt(probe, roundedLength, hA, hB, p.sagRatio, p, undefined)
   const earlyReject = early ? rejectionOf(early, p) : null
   phaseDone('terrain metrics', tEarly)
   if (!early) return failed('geometry')
-  if (earlyReject) {
-    const worst = earlyReject === 'crossing' ? crossings?.[early.worstCrossing] : undefined
-    const t = worst ? worst.d / roundedLength : 0
-    return failed(earlyReject, worst ? { e: a.e + dE * t, n: a.n + dN * t } : null)
-  }
+  if (earlyReject) return failed(earlyReject)
+
+  /**
+   * Roads last among the terrain tests, because they are the most expensive and the least selective.
+   *
+   * Measured on the big region: this is called once per pair that clears the terrain gate and again
+   * on every refinement step, and it was 58% of the whole run -- while rejecting about one line in
+   * two hundred. Every other hard constraint is a walk over a raster already in hand; this one
+   * queries a spatial index and runs a search per segment it finds. Asking it only about lines that
+   * have already survived the cheap tests cuts the call count by about three quarters and cannot
+   * change the verdict, since a rejection is a disjunction and the order the terms are tested in is
+   * free.
+   *
+   * The visible cost is in the reject histogram: a line failing both clearance and a crossing is
+   * now counted under clearance. That is the more fundamental of the two anyway.
+   */
+  const tRoads = phaseAt()
+  const crossings = scene.roads?.crossings(a, b, p, { ground, surface })
+  phaseDone('road crossings', tRoads)
+  provisional.crossings = crossings
 
   // The canopy band is drawn rather than scored, so the search never pays for it. A profile that is
   // going to be stored, or one the browser builds for a line being looked at, gets the full thing.
@@ -320,6 +331,12 @@ export function evaluateLine(
     scored = rescoreAtSag(provisional, p.sagRatio, p)
   }
   phaseDone('canopy metrics and score', tScore)
+  if (reject === 'crossing' && m) {
+    // Where on the span the road is, which is what puts a dot on the map for it.
+    const worst = crossings?.[m.worstCrossing]
+    const t = worst ? worst.d / roundedLength : 0
+    return failed(reject, worst ? { e: a.e + dE * t, n: a.n + dN * t } : null)
+  }
   if (reject) return failed(reject)
 
   /**

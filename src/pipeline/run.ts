@@ -12,7 +12,7 @@ import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
 import { record, renderReport, stage } from './report.js'
-import { enablePhases } from './phases.js'
+import { enablePhases } from '../shared/phases.js'
 import { LINE_KINDS } from '../shared/types.js'
 import type {
   Aoi,

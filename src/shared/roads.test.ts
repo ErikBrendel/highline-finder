@@ -4,6 +4,7 @@ import {
   classifyWay,
   crossingsAlong,
   requiredOver,
+  segmentsApart2,
   withSpan,
   type RoadWay,
 } from './roads.js'
@@ -128,6 +129,16 @@ describe('crossingsAlong', () => {
     expect(crossingsAlong(a, b, [short], p)).toEqual([])
   })
 
+  it('still finds a road sitting just inside the band, where the cheap rejection nearly fires', () => {
+    // The band reaches 16 m at midspan and the carriageway is 3 m wide, so 18 m off the centreline
+    // is inside by a metre and 20 m is outside by one. Both sides of that edge, since a rejection
+    // that fired a metre early would delete the crossing without a trace.
+    const inside: RoadWay = { ...northSouth(0), pts: [150, 518, 250, 518] }
+    const outside: RoadWay = { ...northSouth(0), pts: [150, 520, 250, 520] }
+    expect(crossingsAlong(a, b, [inside], p)).toHaveLength(1)
+    expect(crossingsAlong(a, b, [outside], p)).toEqual([])
+  })
+
   it('reports a way running alongside the span, which never crosses it at all', () => {
     // The case a segment-intersection test cannot see, and the reason for the band: this road is
     // under the line for most of its length once the wind gets up.
@@ -238,3 +249,48 @@ describe('RoadIndex', () => {
     expect(build(northSouth(900)).crossings({ e: 0, n: 0 }, { e: 400, n: 0 }, p)).toEqual([])
   })
 })
+
+describe('segmentsApart2', () => {
+  /**
+   * The bound the whole crossing search rests on: a segment further from the span than the
+   * carriageway plus the widest the band gets is skipped without being searched, so if this ever
+   * over-estimated a distance a road would silently stop being reported.
+   */
+  it('matches a dense sampling of the two segments, crossing or not', () => {
+    let seed = 7
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648)
+    for (let trial = 0; trial < 200; trial++) {
+      const q = Array.from({ length: 8 }, () => rnd() * 200)
+      const [ax, ay, bx, by, cx, cy, dx, dy] = q as [
+        number, number, number, number, number, number, number, number,
+      ]
+      const samples = 2000
+      let brute = Infinity
+      for (let i = 0; i <= samples; i++) {
+        const t = i / samples
+        brute = Math.min(
+          brute,
+          distToSegment2ForTest(ax + (bx - ax) * t, ay + (by - ay) * t, cx, cy, dx, dy),
+        )
+      }
+      const exact = segmentsApart2(ax, ay, bx, by, cx, cy, dx, dy)
+      // Never over-estimates, which is what makes skipping a far segment safe -- and never
+      // under-estimates by more than the sampling can resolve, which is what makes it worth using
+      // instead of the search it replaces.
+      const step = Math.hypot(bx - ax, by - ay) / samples
+      expect(exact).toBeLessThanOrEqual(brute + 1e-6)
+      expect(Math.sqrt(exact)).toBeGreaterThanOrEqual(Math.sqrt(brute) - step - 1e-6)
+    }
+  })
+})
+
+/** What the sampling above compares against: point-to-segment distance, squared. */
+function distToSegment2ForTest(
+  px: number, py: number, x0: number, y0: number, x1: number, y1: number,
+): number {
+  const ex = x1 - x0
+  const ey = y1 - y0
+  const len2 = ex * ex + ey * ey
+  const u = len2 === 0 ? 0 : Math.min(1, Math.max(0, ((px - x0) * ex + (py - y0) * ey) / len2))
+  return (px - (x0 + ex * u)) ** 2 + (py - (y0 + ey * u)) ** 2
+}
