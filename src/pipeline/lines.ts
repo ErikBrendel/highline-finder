@@ -16,6 +16,7 @@ import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
 import { clearanceNeeded, type WaterCover } from '../shared/water.js'
 import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
+import { phaseAt, phaseDone } from './phases.js'
 
 /**
  * Stages 3-5: pair anchors, choose attachment heights, test the span, score and deduplicate.
@@ -202,6 +203,9 @@ export function evaluateLine(
    */
   terrainAlreadyChecked = false,
 ): Evaluated {
+  // The two exits above the first `phaseDone` are unmeasured on purpose: they are a NaN test and a
+  // comparison, and paying for a clock read to attribute them would cost more than they do.
+  const tGeometry = phaseAt()
   const gA = ground.nearest(a.e, a.n)
   const gB = ground.nearest(b.e, b.n)
   if (Number.isNaN(gA) || Number.isNaN(gB)) return failed('geometry')
@@ -222,17 +226,23 @@ export function evaluateLine(
     gB + rangeB.max,
     p.maxOffLevelRatio * length,
   )
+  phaseDone('anchor geometry', tGeometry)
   if (!h) return failed('offlevel')
 
-  if (!terrainAlreadyChecked && !clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)) {
-    return failed('terrain')
-  }
+  const tGate = phaseAt()
+  const clears =
+    terrainAlreadyChecked || clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)
+  phaseDone('terrain gate', tGate)
+  if (!clears) return failed('terrain')
+
+  const tRoads = phaseAt()
+  const crossings = scene.roads?.crossings(a, b, p, { ground, surface })
+  phaseDone('road crossings', tRoads)
 
   // Round the scalars before anything is measured from them. The web app re-derives every
   // clearance from these serialised values, so measuring from the full-precision ones would let
   // the dataset contain candidates the UI immediately rejects -- a line whose clearance is exactly
   // at minClearance flips either side of the boundary on the last decimal.
-  const crossings = scene.roads?.crossings(a, b, p, { ground, surface })
   const r2 = (v: number) => Math.round(v * 100) / 100
   const roundedLength = Math.round(length * 10) / 10
   const hA = r2(h.hA)
@@ -271,11 +281,16 @@ export function evaluateLine(
    * terrain itself is what lets one call to `rejectionOf` serve both passes: with nothing above the
    * ground, the canopy gate cannot trip, so this asks exactly the questions terrain can answer.
    */
+  const tTerrain = phaseAt()
   const terrain = groundProfile(a, b, roundedLength, ground, p, scene)
+  phaseDone('terrain profile (band)', tTerrain)
+
+  const tEarly = phaseAt()
   const probe = { ...terrain, surface: terrain.ground }
   const early = rawMetricsAt(probe, roundedLength, hA, hB, p.sagRatio, p, crossings)
+  const earlyReject = early ? rejectionOf(early, p) : null
+  phaseDone('terrain metrics', tEarly)
   if (!early) return failed('geometry')
-  const earlyReject = rejectionOf(early, p)
   if (earlyReject) {
     const worst = earlyReject === 'crossing' ? crossings?.[early.worstCrossing] : undefined
     const t = worst ? worst.d / roundedLength : 0
@@ -284,21 +299,28 @@ export function evaluateLine(
 
   // The canopy band is drawn rather than scored, so the search never pays for it. A profile that is
   // going to be stored, or one the browser builds for a line being looked at, gets the full thing.
+  const tCanopy = phaseAt()
   const canopy = canopyProfile(a, b, roundedLength, surface, terrain, p, p.storeProfiles)
   provisional.profile = { ...terrain, ...canopy }
+  phaseDone('canopy profile', tCanopy)
 
+  // One phase covering both the measurement and the scoring, with the rejection folded in rather
+  // than returned early: a line that fails here has still paid for the metrics pass, and charging
+  // that to the phase is what makes the reported figure the real cost of measuring.
+  const tScore = phaseAt()
   const m = rawMetricsAt(provisional.profile, roundedLength, hA, hB, p.sagRatio, p, crossings)
-  if (!m) return failed('geometry')
-  const reject = rejectionOf(m, p)
+  const reject = m ? rejectionOf(m, p) : 'geometry'
+  let scored: Candidate | null = null
+  if (!reject) {
+    provisional.maxSagRatio = maxFeasibleSag(
+      provisional.profile!, roundedLength, hA, hB, p, provisional.crossings,
+    )
+    // Every measured field is filled in by the same function the web app uses, so the two cannot
+    // disagree. It re-measures, which is one pass over the profile for a line already known to keep.
+    scored = rescoreAtSag(provisional, p.sagRatio, p)
+  }
+  phaseDone('canopy metrics and score', tScore)
   if (reject) return failed(reject)
-
-  provisional.maxSagRatio = maxFeasibleSag(
-    provisional.profile!, roundedLength, hA, hB, p, provisional.crossings,
-  )
-
-  // Every measured field is filled in by the same function the web app uses, so the two cannot
-  // disagree. It re-measures, which is one pass over the profile for a line already known to keep.
-  const scored = rescoreAtSag(provisional, p.sagRatio, p)
 
   /**
    * The profile is dropped here unless it is going to be written out.
@@ -401,7 +423,10 @@ export function terrainPairs(
           if (!h) continue
           pairsLevelEnough++
 
-          if (clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)) pairs.push([a, b])
+          const tGate = phaseAt()
+          const clears = clearsTerrain(a, b, h.hA, h.hB, length, ground, p, scene.water)
+          phaseDone('terrain gate (raster walk)', tGate)
+          if (clears) pairs.push([a, b])
         }
       }
     }
@@ -446,7 +471,9 @@ export function evaluatePairs(
     )
   }
 
+  const tDedup = phaseAt()
   const candidates = dedupe(feasible, p.dedupRadius)
+  phaseDone('dedup', tDedup)
   return {
     candidates,
     endpoints,

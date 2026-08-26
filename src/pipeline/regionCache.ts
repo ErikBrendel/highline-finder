@@ -19,13 +19,16 @@ import type { Aoi, Params } from '../shared/types.js'
  * Eberswalde while recomputing the small area it actually edited -- see `current` on a hit, which is
  * the caller's cue to say so rather than to pretend the dataset is uniform.
  *
- * Two files are excluded from the fingerprint. Tests cannot affect output. And params.ts holds only
- * data -- the parameters and the list of areas -- both of which are compared by value, so hashing
- * it as source would mean adding one area invalidated every other, which is exactly what this
- * exists to avoid.
+ * Some files are excluded from the fingerprint, on one rule: they cannot change what a region
+ * contains. Tests are the obvious case. params.ts holds only data -- the parameters and the list of
+ * areas -- both of which are compared by value, so hashing it as source would mean adding one area
+ * invalidated every other, which is exactly what this exists to avoid. And report.ts and phases.ts
+ * are instrumentation: a stopwatch and a table. Leaving them in meant that improving the run report
+ * -- which is a thing one does repeatedly, in small steps -- threw away every cached region and
+ * twenty minutes of compute to print the same numbers in a different column.
  */
 
-const DATA_ONLY = new Set(['params.ts'])
+const NO_EFFECT_ON_OUTPUT = new Set(['params.ts', 'report.ts', 'phases.ts'])
 
 const CACHE_DIR = new URL('../../data/cache/', import.meta.url).pathname
 const SOURCE_DIRS = ['../pipeline/', '../shared/']
@@ -38,7 +41,7 @@ async function sourceFingerprint(): Promise<string> {
   for (const dir of SOURCE_DIRS) {
     const path = new URL(dir, import.meta.url).pathname
     for (const name of (await readdir(path)).sort()) {
-      if (!name.endsWith('.ts') || name.endsWith('.test.ts') || DATA_ONLY.has(name)) continue
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts') || NO_EFFECT_ON_OUTPUT.has(name)) continue
       hash.update(name)
       hash.update(await readFile(join(path, name)))
     }

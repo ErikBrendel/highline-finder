@@ -133,6 +133,15 @@ anchors only, one AOI, static viewer.
 - **WCS instead of tile downloads.** `bb_dgm` serves arbitrary bounding boxes, which avoids
   fetching whole tiles for a small AOI.
 - **Vector tiles for candidates.** One JSON stops working somewhere around 10⁴ candidates.
+- **Road crossings are the most expensive thing per line.** The stage report splits `evaluateLine`
+  by phase, and on Tropical `RoadIndex.crossings` is 32% of the whole run -- more than the banded
+  terrain profile it gates, and more than scoring. It is called once per surviving pair and again
+  on every refinement step, and it re-walks the bucket grid from scratch each time. Two obvious
+  moves: cache the near-set per anchor pair across a refinement's steps, since the line barely
+  moves; and skip it entirely where the corridor's buckets are empty, which is most of Brandenburg.
+- **Worker threads for scoring and refinement.** Together they are roughly two thirds of the run
+  and are embarrassingly parallel over pairs. The grids are `Float32Array`, so they move into a
+  `SharedArrayBuffer` without copying.
 
 ## Viewer
 

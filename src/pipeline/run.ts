@@ -11,6 +11,8 @@ import { dedupe, evaluatePairs, locate, refine, terrainPairs } from './lines.js'
 import { clusterEndpoints, isWalkable, type Endpoint } from './hotspots.js'
 import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
 import { contains, workAreas, type WorkArea } from './regions.js'
+import { record, renderReport, stage } from './report.js'
+import { enablePhases } from './phases.js'
 import { LINE_KINDS } from '../shared/types.js'
 import type {
   Aoi,
@@ -108,88 +110,83 @@ function exportMask(drop: import('../shared/grid.js').Grid, p: Params): MaskCell
   return out
 }
 
-/**
- * Times a stage and prints how long it took.
- *
- * Every stage of this pipeline has been the bottleneck at some point -- dedup once took most of an
- * hour while looking like a footnote in the log -- so where the time goes is worth stating rather
- * than guessing at.
- */
-/**
- * Times a stage on the clock *and* on the processor, reporting the processor figure when the two
- * disagree.
- *
- * Wall clock alone is a trap on a laptop. A run left overnight reported a stage at 1926s that had
- * taken 597s of CPU -- the machine had slept -- and that number was taken at face value and
- * diagnosed as a performance regression that did not exist. A stage that spends its time waiting on
- * the network legitimately shows a gap too, which is worth seeing for its own sake.
- */
-async function stage<T>(label: string, run: () => T | Promise<T>): Promise<T> {
-  const started = Date.now()
-  const cpuBefore = process.cpuUsage()
-  const out = await run()
-  const seconds = (Date.now() - started) / 1000
-  const cpu = process.cpuUsage(cpuBefore)
-  const cpuSeconds = (cpu.user + cpu.system) / 1e6
-  // Summed across regions: which stage is expensive matters more than which region was. Summed on
-  // CPU time, so the report cannot be skewed by a sleep or a slow download.
-  const key = label.replace(/ \(region[^)]*\)/, '')
-  timings.set(key, (timings.get(key) ?? 0) + cpuSeconds)
-  // Only worth two numbers when they differ enough to change what you would conclude.
-  const split = seconds > cpuSeconds * 1.2 + 1 ? `, ${cpuSeconds.toFixed(1)}s cpu` : ''
-  console.log(`${label}  [${seconds.toFixed(1)}s${split}]`)
-  return out
-}
-
-const timings = new Map<string, number>()
-
 const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
-const pct2 = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(2)}%` : 'n/a')
 
+/**
+ * Stage numbers are deliberately absent from the labels.
+ *
+ * They were `[4/6]` and there were nine of them, because every split of a stage meant renumbering
+ * every label after it and that is the edit nobody makes. The report prints them in order anyway,
+ * which is the only thing the numbers were for.
+ */
 async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
   const { bbox, boxes } = area
 
-  const drop = await stage(`[1/6] coarse pre-pass (${label})`, async () =>
-    dropField(await loadCoarse(bbox, p.maskRes), p.maskRadius),
+  const countValid = (g: import('../shared/grid.js').Grid, atLeast = -Infinity) => {
+    let n = 0
+    for (const v of g.data) if (!Number.isNaN(v) && v >= atLeast) n++
+    return n
+  }
+
+  const coarse = await stage(
+    `coarse terrain, 10 m (${label})`,
+    () => loadCoarse(bbox, p.maskRes),
+    (g) => ({ to: [countValid(g), 'cells'] }),
   )
   const allTiles = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
+  const valid = countValid(coarse)
+  const drop = await stage(
+    'drop field',
+    () => dropField(coarse, p.maskRadius),
+    (g) => ({
+      from: [valid, 'cells'],
+      to: [countValid(g, p.maskMinDrop), `cells >=${p.maskMinDrop}m`],
+    }),
+  )
   const wantedTiles =
     p.maskMinDrop > 0
       ? tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, p.maxLength)
       : null
   const groundTiles = wantedTiles ? allTiles.filter((t) => wantedTiles.has(t)) : allTiles
-  const passing = [...drop.data].filter((v) => !Number.isNaN(v) && v >= p.maskMinDrop).length
-  const valid = [...drop.data].filter((v) => !Number.isNaN(v)).length
-  console.log(
-    `  ${drop.w}x${drop.h} @${p.maskRes}m, ${((100 * passing) / Math.max(1, valid)).toFixed(1)}% of ` +
-      `cells fall >=${p.maskMinDrop}m within ${p.maskRadius}m`,
-  )
-  console.log(`  ${groundTiles.length} of ${allTiles.length} terrain tiles worth loading`)
-
-  /**
-   * Ground here means what an anchor could stand on, which includes roofs -- so the city model is
-   * folded in as part of building the grid rather than as a later correction. It costs 5-50 KB a
-   * tile and nothing at all where there are no buildings; see buildings.ts for why it is not
-   * derived from the surface model.
-   */
-  const built = await stage(`[2/6] terrain and buildings (${label})`, async () => {
-    const ground = await loadProduct('dgm', bbox, 1, wantedTiles ?? undefined)
-    // Every tile is probed for buildings, not just the ones the pre-pass kept: what a skipped tile
-    // holds is the only way to see what judging tiles on bare earth costs. Only the kept ones are
-    // raised.
-    return { ground, buildings: await raiseOntoBuildings(ground, allTiles, new Set(groundTiles)) }
+  record('terrain tile choice', {
+    from: [allTiles.length, 'tiles'],
+    to: [groundTiles.length, 'worth loading'],
   })
-  const ground = built.ground
-  const roofs = built.buildings.mask
+  console.log(
+    `  ${drop.w}x${drop.h} @${p.maskRes}m, ${groundTiles.length} of ${allTiles.length} terrain ` +
+      `tiles hold a cell falling >=${p.maskMinDrop}m within ${p.maskRadius}m`,
+  )
+
+  const ground = await stage(
+    `terrain rasters (${label})`,
+    () => loadProduct('dgm', bbox, 1, wantedTiles ?? undefined),
+    (g) => ({ from: [groundTiles.length, 'tiles'], to: [g.extent().valid, 'cells'] }),
+  )
   const ext = ground.extent()
   console.log(
     `  ground grid ${ground.w}x${ground.h} @1m, ${ext.valid} valid cells, ` +
       `${ext.min.toFixed(2)}..${ext.max.toFixed(2)} m (relief ${(ext.max - ext.min).toFixed(1)} m)`,
   )
-  const skippedWithRoofs = [...built.buildings.cellsPerTile]
+
+  /**
+   * Ground here means what an anchor could stand on, which includes roofs -- so the city model is
+   * folded into the grid rather than applied as a later correction. It costs 5-50 KB a tile and
+   * nothing at all where there are no buildings; see buildings.ts for why it is not derived from
+   * the surface model.
+   *
+   * Every tile is probed, not just the ones the pre-pass kept: what a skipped tile holds is the
+   * only way to see what judging tiles on bare earth costs. Only the kept ones are raised.
+   */
+  const buildings = await stage(
+    'buildings raised onto the terrain',
+    () => raiseOntoBuildings(ground, allTiles, new Set(groundTiles)),
+    (b) => ({ from: [b.tiles.length, 'built-up tiles'], to: [b.mask.count(), 'roof cells'] }),
+  )
+  const roofs = buildings.mask
+  const skippedWithRoofs = [...buildings.cellsPerTile]
     .filter(([tile, cells]) => cells > 0 && !groundTiles.includes(tile))
   console.log(
-    `  ${built.buildings.tiles.length} of ${allTiles.length} tiles carry a building, ` +
+    `  ${buildings.tiles.length} of ${allTiles.length} tiles carry a building, ` +
       `ground raised at ${roofs.count()} cells`,
   )
   if (skippedWithRoofs.length) {
@@ -201,32 +198,44 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     )
   }
 
-  const scan = await stage('[3/6] openness scan', () => scanAnchors(ground, p, roofs))
   // Ground merged in between two AOIs is read for profiles but never searched.
-  const anchors = scan.anchors.filter((a) => boxes.some((b) => contains(b, a.e, a.n)))
+  const inAoi = (a: { e: number; n: number }) => boxes.some((b) => contains(b, a.e, a.n))
+  const scan = await stage(
+    'openness scan',
+    () => {
+      const found = scanAnchors(ground, p, roofs)
+      return { ...found, inside: found.anchors.filter(inAoi) }
+    },
+    (r) => ({
+      from: [r.scanned, 'points'],
+      to: [r.inside.length, 'anchors'],
+      steps: [
+        [`falls >=${p.minDropDepth}m within ${p.dropSearchRadius}m`, r.passedDropTest],
+        ['some direction open', r.anchors.length],
+        ['inside an AOI', r.inside.length],
+      ],
+    }),
+  )
+  const anchors = scan.inside
   const meanOpen = anchors.length
     ? anchors.reduce((s, a) => s + a.openCount, 0) / anchors.length
     : 0
-  console.log(`  ${scan.scanned} points scanned @${p.anchorStep}m`)
   console.log(
-    `  drop within ${p.dropSearchRadius}m       ${scan.passedDropTest}  ` +
-      `(${pctOf(scan.passedDropTest, scan.scanned)})`,
-  )
-  console.log(
-    `  any direction falls away  ${scan.anchors.length}  ` +
-      `(${pctOf(scan.anchors.length, scan.passedDropTest)} of those), ` +
+    `  ${scan.scanned} points @${p.anchorStep}m -> ${scan.passedDropTest} with a drop ` +
+      `(${pctOf(scan.passedDropTest, scan.scanned)}) -> ${anchors.length} anchors, ` +
       `mean ${meanOpen.toFixed(1)}/${p.sectorCount} open sectors`,
   )
-  if (anchors.length !== scan.anchors.length) {
-    console.log(`  inside an AOI             ${anchors.length}`)
-  }
 
   /**
    * The road network. Read from the committed blocks rather than fetched, so this costs a few
    * hundred milliseconds and nothing at all from any third party -- see src/pipeline/roads.ts.
    * Loaded for the whole region rather than per corridor, since it is cheap enough not to bother.
    */
-  const roads = await stage('[4/6] roads and water', () => loadRoads(bbox))
+  const roads = await stage(
+    'road network',
+    () => loadRoads(bbox),
+    (r) => ({ from: [r.blocks, 'blocks'], to: [r.index.segments, 'segments'] }),
+  )
   console.log(
     `  ${roads.ways.toLocaleString()} ways in ${roads.index.segments.toLocaleString()} segments ` +
       `from ${roads.blocks}/${roads.wanted} blocks  ` +
@@ -237,8 +246,15 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
    * elevation. Islands are punched back out -- a wooded island in a lake is ground with trees on
    * it, and offering a line one metre of clearance over it would be exactly backwards.
    */
-  const water = new WaterMask(ground)
-  water.add(roads.water)
+  const water = await stage(
+    'water rasterised',
+    () => {
+      const mask = new WaterMask(ground)
+      mask.add(roads.water)
+      return mask
+    },
+    (mask) => ({ from: [roads.water.rings.length, 'outlines'], to: [mask.cells, 'water cells'] }),
+  )
   console.log(
     `  ${roads.water.rings.length.toLocaleString()} water outlines with ` +
       `${roads.water.islands.length.toLocaleString()} islands, ` +
@@ -246,8 +262,19 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   )
   const scene = { roofs, roads: roads.index, water }
 
-  const found = await stage('[4/6] pairing and terrain test', () =>
-    terrainPairs(anchors, ground, p, scene),
+  const found = await stage(
+    'pairing and terrain gate',
+    () => terrainPairs(anchors, ground, p, scene),
+    (r) => ({
+      from: [anchors.length, 'anchors'],
+      to: [r.pairs.length, 'pairs'],
+      steps: [
+        ['within length range', r.pairsInRange],
+        ['both ends open that way', r.pairsSectorPassed],
+        ['level enough to rig', r.pairsLevelEnough],
+        ['clears the terrain', r.pairs.length],
+      ],
+    }),
   )
 
   /**
@@ -257,42 +284,44 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
    * canopy figures for ground no line ever crosses.
    */
   const wanted = corridorTiles(found.pairs, p.refineRadius + p.profileStep)
-  const all = tilesForBounds(bbox.minE, bbox.minN, bbox.maxE, bbox.maxN)
-  const used = all.filter((t) => wanted.has(t))
+  const used = allTiles.filter((t) => wanted.has(t))
+  record('surface tile choice', {
+    from: [allTiles.length, 'tiles'],
+    to: [used.length, 'carry a line'],
+  })
   console.log(
-    `  ${used.length} of ${all.length} tiles carry a line ` +
-      `(~${used.length * 33} MB instead of ~${all.length * 33} MB)`,
+    `  ${used.length} of ${allTiles.length} tiles carry a line ` +
+      `(~${used.length * 33} MB instead of ~${allTiles.length * 33} MB)`,
   )
-  const surface = await stage('[5/6] surface, for the corridors that survived', () =>
-    loadProduct('bdom', bbox, 1, wanted),
+  const surface = await stage(
+    'surface rasters',
+    () => loadProduct('bdom', bbox, 1, wanted),
+    (g) => ({ from: [used.length, 'tiles'], to: [g.extent().valid, 'cells'] }),
   )
   console.log(`  surface grid ${surface.w}x${surface.h} @1m (bDOM 0.2m, max-downsampled)`)
 
-
-  const r = await stage('[6/6] profiles and score', () =>
-    evaluatePairs(found, ground, surface, p, scene),
+  const r = await stage(
+    'profiles and score',
+    () => evaluatePairs(found, ground, surface, p, scene),
+    (out) => ({
+      from: [found.pairs.length, 'pairs'],
+      to: [out.candidatesAfterDedup, 'distinct'],
+      steps: [['feasible after profile', out.pairsFeasible]],
+    }),
   )
-  console.log(`  pairs in length range      ${r.pairsInRange}`)
-  console.log(
-    `  survived sector test       ${r.pairsSectorPassed}  ` +
-      `(${pct2(r.pairsSectorPassed, r.pairsInRange)} -- work the prefilter saved)`,
-  )
-  console.log(
-    `  level enough to rig        ${r.pairsLevelEnough}  ` +
-      `(${pct2(r.pairsLevelEnough, r.pairsSectorPassed)} of those)`,
-  )
-  console.log(
-    `  feasible after profile     ${r.pairsFeasible}  ` +
-      `(${pct2(r.pairsFeasible, r.pairsLevelEnough)} of those tested)`,
-  )
-  console.log(`  distinct after dedup       ${r.candidatesAfterDedup}`)
   const rejected = Object.entries(r.rejects).sort((x, y) => y[1] - x[1])
   if (rejected.length) {
     console.log(`  rejected by  ${rejected.map(([why, n]) => `${n} ${why}`).join(', ')}`)
   }
 
-  const ref = await stage('[6/6] local refinement', () =>
-    refine(r.candidates, ground, surface, p, scene),
+  const ref = await stage(
+    'local refinement',
+    () => refine(r.candidates, ground, surface, p, scene),
+    (out) => ({
+      from: [r.candidates.length, 'distinct'],
+      to: [out.improved, 'improved'],
+      steps: [['line evaluations spent', out.evaluations]],
+    }),
   )
   const gain = ref.improved ? ref.totalGain / ref.improved : 0
   console.log(
@@ -321,7 +350,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     tiles.terrain.push(!wantedTiles || wantedTiles.has(id))
     tiles.surface.push(wanted.has(id))
     tiles.anchors.push(anchorsPerTile.get(`${e}_${n}`) ?? 0)
-    tiles.roofCells.push(built.buildings.cellsPerTile.get(id) ?? 0)
+    tiles.roofCells.push(buildings.cellsPerTile.get(id) ?? 0)
     tiles.roadKills.push(killsPerTile.get(`${e}_${n}`) ?? 0)
   }
 
@@ -399,6 +428,7 @@ const overlaps = (a: Aoi, b: Aoi) =>
 
 async function main() {
   const started = Date.now()
+  enablePhases()
   const p = DEFAULT_PARAMS
   const aois = DEFAULT_AOIS
   const areas = workAreas(aois, p.maxLength)
@@ -523,7 +553,12 @@ async function main() {
   // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
   // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
   // line found is stored.
-  const deduped = (await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius))).map(locate)
+  const deduped = (
+    await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius), (out) => ({
+      from: [refinedAll.length, 'pooled'],
+      to: [out.length, 'distinct'],
+    }))
+  ).map(locate)
   // evaluateLine already drops the profile unless it is wanted, so there is nothing left to strip.
   const finalCandidates = deduped
   const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
@@ -658,14 +693,18 @@ async function main() {
         hotspots[kind].count.push(s.count)
         hotspots[kind].score.push(Math.round(s.score * 10) / 10)
       }
-      return `${spots.length} ${kind}`
+      return spots.length
     }),
-  )
+  (out) => ({
+    from: [walkable.length, 'clear endpoints'],
+    to: [out.reduce((n, spots) => n + spots, 0), 'spots'],
+  }))
   await writeFile(HOTSPOTS_OUT, JSON.stringify(hotspots))
   const hotKb = (JSON.stringify(hotspots).length / 1024).toFixed(0)
   console.log(
     `hotspots: ${endpoints.length} feasible endpoints, ${walkable.length} clear of canopy ` +
-      `-> ${spotCounts.join(', ')} spots @${HOTSPOT_RADIUS}m (${hotKb} KB)`,
+      `-> ${LINE_KINDS.map((k, i) => `${spotCounts[i]} ${k}`).join(', ')} spots ` +
+      `@${HOTSPOT_RADIUS}m (${hotKb} KB)`,
   )
   const anchorKb = (JSON.stringify(dump).length / 1024).toFixed(0)
   const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
@@ -674,16 +713,7 @@ async function main() {
       `anchors.json (${anchorKb} KB, ${dumpAnchors.lat.length} points)`,
   )
 
-  const total = (Date.now() - started) / 1000
-  console.log('\nwhere the time went (processor time, not clock):')
-  for (const [label, seconds] of [...timings].sort((a, b) => b[1] - a[1])) {
-    const share = (100 * seconds) / total
-    if (share < 1) continue
-    console.log(
-      `  ${label.padEnd(44)} ${seconds.toFixed(1).padStart(7)}s  ` +
-        `${share.toFixed(0).padStart(3)}%`,
-    )
-  }
+  renderReport((Date.now() - started) / 1000)
 
   if (finalCandidates.length) {
     console.log('\ntop 10:')
