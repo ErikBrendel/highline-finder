@@ -57,9 +57,17 @@ function DebugLegend({
   tiles: TileUsage | null
   regions: Region[]
 }) {
-  const key = (color: string, opacity: number, text: string) => (
+  /**
+   * A swatch names a colour, so it is drawn at full strength.
+   *
+   * It used to carry the map layer's own fill-opacity, on the theory that the key should look like
+   * the map. It cannot: the map composites its fill over terrain and orthophoto, the legend over a
+   * flat dark panel, so the same alpha that reads as a pale blue wash over a hillside reads as
+   * almost nothing here -- the coarse layer's 0.16 was invisible.
+   */
+  const key = (color: string, text: string) => (
     <div className="key" key={text}>
-      <i style={{ background: color, opacity }} />
+      <i style={{ background: color }} />
       <span>{text}</span>
     </div>
   )
@@ -70,8 +78,8 @@ function DebugLegend({
     return (
       <div className="legendbox">
         <h3>Coarse pre-pass</h3>
-        {key(DEBUG_COLORS.maskBelow, 0.62, `falls under ${mask.minDrop} m — judged not worth a look`)}
-        {key(DEBUG_COLORS.maskAbove, 0.16, 'falls further — kept, fading as it gets steeper')}
+        {key(DEBUG_COLORS.maskBelow, `falls under ${mask.minDrop} m — judged not worth a look`)}
+        {key(DEBUG_COLORS.maskAbove, 'falls further — kept, fading as it gets steeper')}
         <div className="stat">
           {below.toLocaleString()} of {mask.drop.length.toLocaleString()} cells below the threshold
         </div>
@@ -95,8 +103,8 @@ function DebugLegend({
     return (
       <div className="legendbox">
         <h3>Region vintage</h3>
-        {key(DEBUG_COLORS.fresh, 0.5, 'computed recently')}
-        {key(DEBUG_COLORS.aged, 0.5, `computed ${VINTAGE_DAYS} days ago or more`)}
+        {key(DEBUG_COLORS.fresh, 'computed recently')}
+        {key(DEBUG_COLORS.aged, `computed ${VINTAGE_DAYS} days ago or more`)}
         <div className="stat">
           {regions.length} region{regions.length === 1 ? '' : 's'}, oldest{' '}
           {oldest.generatedAt.slice(0, 10)}
@@ -124,9 +132,9 @@ function DebugLegend({
     return (
       <div className="legendbox">
         <h3>Buildings</h3>
-        {key(DEBUG_COLORS.roofs, 0.5, 'roofs on ground the search loaded — anchors and obstacles')}
-        {key(DEBUG_COLORS.roofsMissed, 0.5, 'roofs the search never saw — the pre-pass skipped this tile')}
-        {key(DEBUG_COLORS.skipped, 0.35, 'no buildings')}
+        {key(DEBUG_COLORS.roofs, 'roofs on ground the search loaded — anchors and obstacles')}
+        {key(DEBUG_COLORS.roofsMissed, 'roofs the search never saw — the pre-pass skipped this tile')}
+        {key(DEBUG_COLORS.skipped, 'no buildings')}
         <div className="stat">
           {withRoofs} of {tiles.lat.length} tiles carry a building;{' '}
           {missed.length} of those were skipped ({missedCells.toLocaleString()} roof cells unseen)
@@ -147,9 +155,9 @@ function DebugLegend({
     return (
       <div className="legendbox">
         <h3>Lines killed by a road</h3>
-        {key(DEBUG_COLORS.killsMany, 0.65, 'many died here')}
-        {key(DEBUG_COLORS.killsFew, 0.65, 'a few died here')}
-        {key(DEBUG_COLORS.skipped, 0.35, 'none')}
+        {key(DEBUG_COLORS.killsMany, 'many died here')}
+        {key(DEBUG_COLORS.killsFew, 'a few died here')}
+        {key(DEBUG_COLORS.skipped, 'none')}
         <div className="stat">
           {killed.toLocaleString()} lines rejected for passing too low over traffic, worst tile{' '}
           {worst.toLocaleString()}
@@ -168,9 +176,9 @@ function DebugLegend({
     return (
       <div className="legendbox">
         <h3>Terrain tiles fetched</h3>
-        {key(DEBUG_COLORS.productive, 0.22, 'fetched, and the 1 m scan found anchors in it')}
-        {key(DEBUG_COLORS.barren, 0.22, 'fetched and yielded nothing — the filter being too loose')}
-        {key(DEBUG_COLORS.skipped, 0.55, 'skipped — dark beside green means too tight')}
+        {key(DEBUG_COLORS.productive, 'fetched, and the 1 m scan found anchors in it')}
+        {key(DEBUG_COLORS.barren, 'fetched and yielded nothing — the filter being too loose')}
+        {key(DEBUG_COLORS.skipped, 'skipped — dark beside green means too tight')}
         <div className="stat">
           {fetched} of {tiles.lat.length} fetched, {barren} of those barren (~
           {Math.round(barren * 1.4)} MB for nothing)
@@ -187,8 +195,8 @@ function DebugLegend({
   return (
     <div className="legendbox">
       <h3>Surface tiles fetched</h3>
-      {key(DEBUG_COLORS.productive, 0.22, 'a line crosses it, so canopy had to be measured')}
-      {key(DEBUG_COLORS.skipped, 0.55, 'no line crosses it — skipped')}
+      {key(DEBUG_COLORS.productive, 'a line crosses it, so canopy had to be measured')}
+      {key(DEBUG_COLORS.skipped, 'no line crosses it — skipped')}
       <div className="stat">
         {fetched} of {tiles.lat.length} fetched, {tiles.lat.length - fetched} skipped (~
         {Math.round((tiles.lat.length - fetched) * 32)} MB saved)
