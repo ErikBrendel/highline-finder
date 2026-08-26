@@ -9,6 +9,7 @@ import {
   type TerrainPairs,
 } from './lines.js'
 import type { Candidate, Params } from '../shared/types.js'
+import type { Box } from './regions.js'
 
 /**
  * The three expensive stages, run across the pool.
@@ -38,11 +39,12 @@ function fold(results: Done[]): void {
 export async function pairInParallel(
   pool: Pool,
   table: AnchorTable,
-  p: Params,
+  /** Which ground's pairs to keep, or null for all of them. See PairSearchRange. */
+  owns: Box | null,
 ): Promise<TerrainPairs> {
   const ranges = chunks(table.count, pool.size * SPLIT)
   const results = await pool.run(
-    ranges.map(([from, to]) => ({ kind: 'pairs' as const, anchors: table, from, to })),
+    ranges.map(([from, to]) => ({ kind: 'pairs' as const, anchors: table, from, to, owns })),
   )
   fold(results)
 

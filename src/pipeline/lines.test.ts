@@ -511,6 +511,55 @@ describe('splitting the pair search', () => {
   })
 })
 
+describe('dividing the pair search by ground', () => {
+  /**
+   * The property statewide coverage rests on. A run that owns a box of ground keeps anchors well
+   * outside it, so a partner across the seam still exists to be found, and claims only the pairs
+   * whose first anchor is its own. Boxes that tile the plane therefore tile the pairs: none lost at
+   * a seam, none reported twice, whatever the boxes are.
+   */
+  const g = canyon(0)
+  // In the order the scan emits them -- north ascending, east ascending within a row -- because
+  // ownership reads the first anchor off the index rather than comparing coordinates.
+  const anchors = [180, 200, 220].flatMap((n) => [anchor(40, n, g), anchor(260, n, g)])
+  const table = packAnchors(anchors, p.sectorCount)
+  const keysOf = (found: ReturnType<typeof terrainPairs>) =>
+    Array.from({ length: found.count }, (_, k) => `${found.pairs[2 * k]}-${found.pairs[2 * k + 1]}`)
+
+  // Seams laid exactly through the anchors, at e=260 and n=200, since a seam nobody stands on
+  // cannot show whether the boxes share their edges or divide them.
+  const QUARTERS = {
+    sw: { minE: 0, maxE: 260, minN: 0, maxN: 200 },
+    se: { minE: 260, maxE: 400, minN: 0, maxN: 200 },
+    nw: { minE: 0, maxE: 260, minN: 200, maxN: 400 },
+    ne: { minE: 260, maxE: 400, minN: 200, maxN: 400 },
+  }
+  const owned = (owns: (typeof QUARTERS)[keyof typeof QUARTERS]) =>
+    keysOf(terrainPairs(table, g, p, {}, { owns }))
+
+  it('claims every pair exactly once across boxes that tile the ground', () => {
+    const whole = keysOf(terrainPairs(table, g, p))
+    expect(whole.length).toBeGreaterThan(0)
+    const claimed = Object.values(QUARTERS).flatMap(owned)
+    expect(new Set(claimed).size).toBe(claimed.length)
+    expect([...claimed].sort()).toEqual([...whole].sort())
+  })
+
+  it('gives a pair to the box holding its southern end, not its northern one', () => {
+    // Anchors 2 and 3 are the two rims at n=200, either side of the e=260 seam.
+    expect(owned(QUARTERS.nw)).toContain('2-3')
+    expect(owned(QUARTERS.ne)).not.toContain('2-3')
+  })
+
+  it('still pairs with anchors outside the owned box', () => {
+    // Every anchor the north-west quarter owns sits at e=40, so each of its pairs reaches 220 m
+    // east into ground it does not own. Confining the search to the box would find nothing.
+    const reaching = owned(QUARTERS.nw)
+    expect(reaching.length).toBeGreaterThan(0)
+    for (const k of reaching) expect(anchors[Number(k.split('-')[1])]!.e).toBe(260)
+  })
+})
+
 describe('chunks', () => {
   it('covers everything once, contiguously and in order', () => {
     for (const [total, parts] of [[10, 3], [10, 1], [3, 10], [0, 4]] as const) {

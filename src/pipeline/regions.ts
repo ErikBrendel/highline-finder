@@ -31,6 +31,16 @@ export interface WorkArea {
   boxes: Box[]
   /** The union, plus nothing: what gets rasterised. */
   bbox: Box
+  /**
+   * The ground whose *pairs* this area is responsible for, when that is narrower than the ground it
+   * may anchor in.
+   *
+   * Absent here, and set once the run is cut into fixed chunks rather than into areas of interest:
+   * a chunk keeps anchors for a kilometre beyond its own edges so a partner across the seam exists
+   * to be found, and then claims only the pairs whose first anchor is its own. See PairSearchRange
+   * for why that divides every pair exactly once.
+   */
+  owns?: Box
 }
 
 export function boxOf(aoi: Aoi): Box {
@@ -50,6 +60,18 @@ export function boxOf(aoi: Aoi): Box {
 
 export function contains(box: Box, e: number, n: number): boolean {
   return e >= box.minE && e <= box.maxE && n >= box.minN && n <= box.maxN
+}
+
+/**
+ * The same test with the upper edges excluded, which is what dividing ground between boxes needs.
+ *
+ * `contains` is closed on all four sides, so two boxes that share an edge both claim it. That is
+ * right for "is this anchor inside the area of interest" and wrong for "whose pair is this": a
+ * point on the seam would be owned twice, and the line through it reported twice. Adjacent
+ * half-open boxes tile the plane exactly once.
+ */
+export function owns(box: Box, e: number, n: number): boolean {
+  return e >= box.minE && e < box.maxE && n >= box.minN && n < box.maxN
 }
 
 const union = (a: Box, b: Box): Box => ({

@@ -23,6 +23,7 @@ import {
 } from '../shared/scoring.js'
 import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
+import { owns, type Box } from './regions.js'
 import { clearanceNeeded, type WaterCover } from '../shared/water.js'
 import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
 import { phaseAt, phaseDone } from '../shared/phases.js'
@@ -427,6 +428,26 @@ export interface PairSearchRange {
    * time the pool cost.
    */
   index?: AnchorIndex
+  /**
+   * The ground whose pairs this run is responsible for. Absent means all of them.
+   *
+   * This is what lets a huge area be searched a piece at a time without the pieces disagreeing
+   * about their seams. A pair is owned by whichever box holds its *first* anchor, where first is
+   * the geometrically southernmost, or the westernmost of two on the same row -- a property of the
+   * pair alone, so two neighbouring runs reach the same verdict about a line that crosses between
+   * them without either knowing the other exists. Every pair is claimed exactly once, and no pair
+   * is claimed twice, so the union of the pieces is the whole search rather than an approximation
+   * of it.
+   *
+   * A run therefore keeps anchors well outside its own box -- a partner can be `maxLength` away in
+   * any direction -- and simply declines the pairs it does not own.
+   *
+   * The first anchor is `i`, without a comparison: anchors are emitted north-ascending and
+   * east-ascending within a row (see scanAnchors), and `j > i` below already means the partner is
+   * the later of the two. So ownership is decided once per outer iteration rather than per pair,
+   * and an unowned anchor costs nothing at all.
+   */
+  owns?: Box | null
 }
 
 export function terrainPairs(
@@ -435,7 +456,7 @@ export function terrainPairs(
   p: Params,
   /** For the water layer, which decides how much air each sample of the gate is held to. */
   scene: Scene = {},
-  { from = 0, to = table.count, index }: PairSearchRange = {},
+  { from = 0, to = table.count, index, owns: ownedGround }: PairSearchRange = {},
 ): TerrainPairs {
   let pairsInRange = 0
   let pairsSectorPassed = 0
@@ -468,6 +489,7 @@ export function terrainPairs(
     const ai = i * ANCHOR_FIELDS
     const ae = fields[ai + AT_E]!
     const an = fields[ai + AT_N]!
+    if (ownedGround && !owns(ownedGround, ae, an)) continue
     const cx = Math.floor(ae / cell)
     const cy = Math.floor(an / cell)
     for (let dx = -1; dx <= 1; dx++) {

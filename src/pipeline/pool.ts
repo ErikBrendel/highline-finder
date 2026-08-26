@@ -4,6 +4,7 @@ import type { AnchorTable } from './openness.js'
 import type { GridShare } from '../shared/grid.js'
 import type { MaskShare } from '../shared/anchoring.js'
 import type { Candidate, Params } from '../shared/types.js'
+import type { Box } from './regions.js'
 
 /**
  * A fixed set of worker threads sharing one region's rasters.
@@ -37,7 +38,14 @@ export interface SharedRegion {
 }
 
 export type Job =
-  | { kind: 'pairs'; anchors: AnchorTable; from: number; to: number }
+  | {
+      kind: 'pairs'
+      anchors: AnchorTable
+      from: number
+      to: number
+      /** The ground whose pairs this run owns, or null for all of it. See PairSearchRange. */
+      owns: Box | null
+    }
   | {
       kind: 'score'
       /** An Int32Array of index pairs, and how many of them the buffer holds. */

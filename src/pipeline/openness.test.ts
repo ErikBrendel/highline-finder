@@ -149,3 +149,19 @@ describe('the anchor lattice', () => {
     expect(fromWide.every((e) => (e - p.anchorStep / 2) % p.anchorStep === 0)).toBe(true)
   })
 })
+
+describe('anchor order', () => {
+  /**
+   * Load-bearing for the pair search, which decides who owns a pair from the index alone: `i < j`
+   * has to mean "i is the southern anchor, or the western of two on the same row". Break this and
+   * a chunked run silently drops the pairs whose first anchor lies outside the chunk.
+   */
+  it('emits anchors north-ascending, and east-ascending within a row', () => {
+    const { anchors } = scanAnchors(cliff(20), p)
+    expect(anchors.length).toBeGreaterThan(100)
+    for (let i = 1; i < anchors.length; i++) {
+      const [before, at] = [anchors[i - 1]!, anchors[i]!]
+      expect(at.n > before.n || (at.n === before.n && at.e > before.e)).toBe(true)
+    }
+  })
+})

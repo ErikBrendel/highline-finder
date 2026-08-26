@@ -74,6 +74,7 @@ function handle(job: Job): unknown {
       from: job.from,
       to: job.to,
       index: indexOf(job.anchors),
+      owns: job.owns,
     })
     // Copied out of the growable buffer so the message carries the pairs and nothing else.
     return { ...found, pairs: Int32Array.from(found.pairs) }
