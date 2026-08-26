@@ -132,15 +132,29 @@ pairs in range, 1.1 M distinct lines and 151 M hotspot endpoints; the raw surfac
 rejects flat ground before a single 1 m tile is fetched, and most of Brandenburg is flat. At the
 67 % keep rate region 7 saw, the surface download is ~287 GB; at 10 % it is ~43 GB.
 
-**What the pre-pass still misses is unmeasured.** Simulating it at every threshold and scoring
-against the real anchors says both knobs sit on a cliff -- 10 -> 12 m loses 7.6%, coverage
-0.02 -> 0.05 loses 9.6% -- but it cannot speak about loosening, because the anchors it scores
-against were produced by a run using those values. An anchor the rule skipped is not in the file to
-be missed. The honest experiment is to run one region with `maskMinDrop: 0`, fetching everything,
-and diff the line set; Mueggelberge is the right size at 22.8 km2 and mixed urban and natural.
+**What the pre-pass misses, measured on Mueggelberge: nothing.** Simulating thresholds and scoring
+against the real anchors could only speak about tightening -- the anchors it scored against were
+produced by a run using those values, so an anchor the rule skipped was not in the file to be
+missed. So the region was rerun with `maskMinDrop: 0`, fetching every tile: 35 of 35 instead of 21,
+911,937 points scanned instead of 645,600 (+41 %), and **byte-identical output** -- 7,698 anchors,
+5,884,718 pairs in range, 11,951 feasible, the same 148 candidates with the same ids and scores. The
+21 tiles it skipped held no anchor at all. Surface tiles were unchanged at 4 of 35, so the whole
+experiment cost 17 s and 14 small terrain tiles.
 
-**Measure that first.** `loadCoarse` fetches 8192 m chunks at 16 m, so the whole state is ~456
-chunks, ~460 MB, minutes, and needs no new code. That one number decides everything below.
+Two things that does *not* establish. The coarse rule is deliberately a low-resolution copy of the
+anchor scan's own gate -- `maskMinDrop` mirrors `minDropDepth`, `maskRadius` mirrors
+`dropSearchRadius` -- so this says the 16 m approximation agrees with the 1 m test, not that a 10 m
+drop is the right thing to require. And Mueggelberge is in Berlin, which has no LoD1 coverage, so
+its city model is empty and the roof rule is untested by this. The remaining region that skips
+tiles *and* has buildings is Eberswalde, at 277 of 288.
+
+**The statewide coarse pass is done.** 961 chunks of 8192 m at 16 m, 987 MB, 7.2 minutes at 4 lanes
+-- 992 over the bbox, of which the northernmost row of 31 is permanently outside the WCS's coverage
+and answers HTTP 400 rather than NaN, which `chunkTiff` currently treats as retryable. 543 of the
+961 carry any data at all: a rectangle around Brandenburg is about twice the state. See
+`src/tools/coarseProbe.ts`. What is still to do is run `dropField` and `tilesWorthLoading` over that
+cache -- chunk by chunk with a halo, since the state at 16 m is a 1 GB grid -- for the number all
+the sizing below rests on: how many of the 30,545 tiles the pre-pass actually keeps.
 
 **The unit of work becomes a superchunk, not a merged AOI.** An 8×8 block of the existing 1 km
 terrain tiles, pinned to EPSG:25833 the way the anchor lattice now is. Tile edges are already the
