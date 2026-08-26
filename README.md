@@ -53,14 +53,31 @@ Every region is cached whole when it finishes, keyed on the ground it covers. **
 been computed stays computed** — a plain `npm run pipeline` recomputes nothing and only searches
 areas with no cache at all.
 
-Naming rectangles on the command line *selects* what to recompute rather than replacing the list:
+Naming ground on the command line *selects* what to recompute rather than replacing the list:
 
 ```
 npm run pipeline -- 52.134358 13.367475 52.141191 13.392128   # just Sperenberg
+npm run pipeline -- --chunk 53_729 --chunk 52_729             # just those superchunks
 npm run pipeline -- --all                                     # rebuild everything
 ```
 
-Every area still reaches the output; only the ones the rectangles touch are searched again.
+Every area still reaches the output; only the ones named are searched again.
+
+### Areas of interest and superchunks
+
+Two mechanisms produce lines, side by side. An **area of interest** (`DEFAULT_AOIS`) is a rectangle
+somebody drew; anything within `maxLength` of another is rasterised and searched as one region. A
+**superchunk** (`DEFAULT_CHUNKS`) is one square of a fixed 8 km grid pinned to EPSG:25833, loading a
+kilometre beyond its own edges and reporting only the lines whose first anchor it owns.
+
+They are selected, cached and recomputed independently: a rectangle never touches a chunk, and
+`--chunk` never touches an area of interest. That is what lets ground move from one to the other a
+piece at a time. Chunks never merge with anything, which is the whole reason they are not spelled as
+chunk-shaped rectangles — `workAreas` would union a swathe of those into one enormous region.
+
+Do not let a chunk and an area of interest cover the same ground. The lines dedup, because the
+anchor lattice is fixed to the projection and both find the same ones, but the hotspot layer counts
+endpoints and would count them twice. The run says so if it happens.
 
 Reach for `--all` after changing the search or the parameters, because **nothing else will notice**.
 The cache used to fingerprint the pipeline source and rebuild on any change, and that was too eager

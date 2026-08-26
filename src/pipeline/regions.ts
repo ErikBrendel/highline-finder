@@ -1,4 +1,5 @@
 import { toUtm33 } from '../shared/geo.js'
+import { regionId } from './regionCache.js'
 import type { Aoi } from '../shared/types.js'
 
 /**
@@ -26,6 +27,16 @@ export interface Box {
 }
 
 export interface WorkArea {
+  /**
+   * What this area is called, in the cache and in the run log.
+   *
+   * An area of interest is identified by the ground it covers, since that is all there is to it and
+   * two runs listing the same rectangles mean the same area. A chunk is identified by its place on
+   * the lattice, which does not move when the halo does.
+   */
+  id: string
+  /** Which mechanism produced this area, which is also what a run's selection can name. */
+  kind: 'aoi' | 'chunk'
   aois: Aoi[]
   /** One box per AOI: where anchors may sit. */
   boxes: Box[]
@@ -110,7 +121,7 @@ const within = (a: Box, b: Box, reach: number): boolean =>
 export function workAreas(aois: Aoi[], reach: number): WorkArea[] {
   const areas: WorkArea[] = aois.map((aoi) => {
     const box = boxOf(aoi)
-    return { aois: [aoi], boxes: [box], bbox: box }
+    return { id: regionId([aoi]), kind: 'aoi', aois: [aoi], boxes: [box], bbox: box }
   })
 
   // Merge until nothing more can merge: one merge can bring two previously distant areas together.
@@ -121,8 +132,11 @@ export function workAreas(aois: Aoi[], reach: number): WorkArea[] {
         if (!within(areas[i]!.bbox, areas[j]!.bbox, reach)) continue
         const [a, b] = [areas[i]!, areas[j]!]
         areas.splice(j, 1)
+        const joined = [...a.aois, ...b.aois]
         areas[i] = {
-          aois: [...a.aois, ...b.aois],
+          id: regionId(joined),
+          kind: 'aoi',
+          aois: joined,
           boxes: [...a.boxes, ...b.boxes],
           bbox: union(a.bbox, b.bbox),
         }

@@ -388,7 +388,19 @@ export interface Candidate {
  * of AOIs rather than one.
  */
 export interface Region {
+  /** Its cache identity: `region_<hash>` for an area of interest, `chunk_<e>_<n>` for a chunk. */
+  id: string
   aois: Aoi[]
+  /**
+   * The ground this region is answerable for, when that is narrower than what it rasterised.
+   *
+   * Set for a chunk, which loads a kilometre beyond its own edges so a partner across the seam
+   * exists to be found, and then reports only the lines whose first anchor is its own. Null for an
+   * area of interest, which reports whatever its rectangles hold. This, not `bbox25833`, is what a
+   * coverage map should draw: two neighbouring chunks overlap in what they load and tile exactly in
+   * what they own.
+   */
+  owns25833: { minE: number; minN: number; maxE: number; maxN: number } | null
   /**
    * When this region's results were computed.
    *

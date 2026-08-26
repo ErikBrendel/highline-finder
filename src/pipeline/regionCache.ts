@@ -43,9 +43,9 @@ import type { Aoi, Params } from '../shared/types.js'
  */
 const FORMAT = 2
 
-/** Which region this is, by the ground it covers. Stable across every change to code or tuning. */
+/** An area of interest's identity, by the ground it covers. Stable across every change to code. */
 export function regionId(aois: Aoi[]): string {
-  return createHash('sha1').update(JSON.stringify(aois)).digest('hex').slice(0, 16)
+  return `region_${createHash('sha1').update(JSON.stringify(aois)).digest('hex').slice(0, 16)}`
 }
 
 interface Envelope<T> {
@@ -62,12 +62,12 @@ export interface CacheHit<T> {
 }
 
 const CACHE_DIR = new URL('../../data/cache/', import.meta.url).pathname
-const pathFor = (id: string) => join(CACHE_DIR, `region_${id}.json`)
+export const pathFor = (id: string) => join(CACHE_DIR, `${id}.json`)
 
-export async function readRegion<T>(aois: Aoi[]): Promise<CacheHit<T> | null> {
+export async function readRegion<T>(id: string): Promise<CacheHit<T> | null> {
   let held: Envelope<T>
   try {
-    held = JSON.parse(await readFile(pathFor(regionId(aois)), 'utf8')) as Envelope<T>
+    held = JSON.parse(await readFile(pathFor(id), 'utf8')) as Envelope<T>
   } catch {
     return null
   }
@@ -78,7 +78,7 @@ export async function readRegion<T>(aois: Aoi[]): Promise<CacheHit<T> | null> {
 }
 
 export async function writeRegion<T>(
-  aois: Aoi[],
+  id: string,
   p: Params,
   value: T,
   /** Overridden only to backdate a placeholder; a real search is always written as of now. */
@@ -87,6 +87,6 @@ export async function writeRegion<T>(
   await mkdir(CACHE_DIR, { recursive: true })
   const held: Envelope<T> = { format: FORMAT, params: JSON.stringify(p), generatedAt, value }
   const text = JSON.stringify(held)
-  await writeFile(pathFor(regionId(aois)), text)
+  await writeFile(pathFor(id), text)
   return text.length
 }

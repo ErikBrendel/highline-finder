@@ -57,7 +57,8 @@ describe('workAreas', () => {
 })
 
 describe('recomputes', () => {
-  const area = (...aois: Aoi[]): WorkArea => ({ aois, boxes: [], bbox: boxOf(aois[0]!) })
+  const area = (...aois: Aoi[]): WorkArea =>
+    ({ id: 'x', kind: 'aoi', aois, boxes: [], bbox: boxOf(aois[0]!) })
   const tropical: Aoi = { south: 52.19, west: 13.65, north: 52.21, east: 13.67 }
   const linthe: Aoi = { south: 52.13, west: 12.77, north: 52.15, east: 12.81 }
 

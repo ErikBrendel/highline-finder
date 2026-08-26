@@ -185,25 +185,19 @@ export const DEFAULT_AOIS: Aoi[] = [
   { south: 52.134358, west: 13.367475, north: 52.141191, east: 13.392128 },
   // Otto Lilienthal: 3.4 km2 west of Berlin, around the Gollenberg he flew from.
   { south: 52.403294, west: 12.814322, north: 52.415410, east: 12.851882 },
-  /**
-   * Four superchunks south of Eberswalde: the 2x2 block of the 8 km EPSG:25833 lattice around
-   * E 424000 / N 5832000, which is where a statewide run would cut this ground anyway.
-   *
-   * Shaped and placed to the lattice rather than to anything on the map, so that when `workAreas`
-   * eventually emits chunks instead of areas of interest, these four become chunk ids and not one
-   * metre of ground moves. Each rectangle is solved so its EPSG:25833 bounding box is the chunk to
-   * within 0.1 m, and rounded outward, so the four tile the block with no gap -- an anchor landing
-   * in two boxes is still one anchor.
-   *
-   * They are adjacent, so they merge into one 256 km2 region: `workAreas` unions anything within
-   * `maxLength`, which is exactly why areas of interest cannot express independent neighbouring
-   * chunks and why the superchunk grid has to replace them rather than be spelled with them. One
-   * row further north would have merged with Eberswalde as well, for 616 km2.
-   *
-   * 95 of the 256 tiles pass the coarse pre-pass, by 6 / 16 / 25 / 48 across the four.
-   */
-  { south: 52.632640, west: 13.758813, north: 52.703403, east: 13.875211 },
-  { south: 52.633705, west: 13.876999, north: 52.704581, east: 13.993586 },
-  { south: 52.560734, west: 13.760844, north: 52.631500, east: 13.877056 },
-  { south: 52.561796, west: 13.878836, north: 52.632676, east: 13.995237 },
 ]
+
+/**
+ * Superchunks claimed for the search, by their place on the 8 km EPSG:25833 lattice.
+ *
+ * The other half of `DEFAULT_AOIS`, and eventually its replacement. A chunk is a fixed square that
+ * a run is answerable for; an area of interest is a rectangle somebody drew. They are searched by
+ * the same code and pooled into the same dataset, but they are selected, cached and recomputed
+ * independently -- naming a rectangle never touches a chunk, and naming a chunk never touches an
+ * area of interest. That is what makes it possible to move ground from one to the other a piece at
+ * a time rather than in one cut. See chunks.ts.
+ *
+ * These four are the 2x2 block south of Eberswalde, around E 424000 / N 5832000. 95 of their 256
+ * source tiles pass the coarse pre-pass, by 6 / 16 / 25 / 48.
+ */
+export const DEFAULT_CHUNKS: string[] = ['52_728', '53_728', '52_729', '53_729']

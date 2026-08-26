@@ -219,11 +219,18 @@ takes ~90 % off bdom.
 aggregate, `.tif` deletion, and a debug view drawing each region's box with its vintage. Measured
 together on the seven regions: the line set is unchanged (9,660, every id shared), the region cache
 falls 68.6 -> 25.3 MB, and 1.39 M feasible endpoints reduce to 3,926 cells, which cluster to 1,293
-spots against 1,360 before -- the same total weight, a few adjacent spots merged. Left, in
-order: the statewide coarse pass (no code, decides the rest) and the `maskMinDrop: 0` experiment
-that says what it costs; then work-stealing tile handout; then the chunk grid as pure functions,
-`workAreas` emitting chunks, and dirty-set selection; then per-chunk candidate files and a viewer
-that fetches by view.
+spots against 1,360 before -- the same total weight, a few adjacent spots merged.
+
+Also done: the statewide coarse pass, the `maskMinDrop: 0` experiment, and the chunk grid itself.
+`chunks.ts` runs *beside* areas of interest rather than replacing them -- same search code, same
+pooled dataset, but selected, cached and recomputed independently, so ground can move from one
+mechanism to the other a piece at a time. Four chunks south of Eberswalde are claimed and seeded
+empty.
+
+Left, in order: search those four for real, which is the first end-to-end test of the ownership
+rule; then work-stealing tile handout; then dirty-set selection (a recompute area implies every
+chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
+The roof rule is still unmeasured against ground it skipped -- Eberswalde is the region for that.
 
 One refinement for later: halo anchors are re-scanned by each neighbouring chunk (~23 % redundant at
 8 km). Persisting the per-chunk anchor table and letting neighbours read it removes that; the tables

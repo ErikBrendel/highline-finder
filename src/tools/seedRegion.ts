@@ -1,6 +1,7 @@
-import { readRegion, regionId, writeRegion } from '../pipeline/regionCache.js'
+import { readRegion, writeRegion } from '../pipeline/regionCache.js'
 import { workAreas } from '../pipeline/regions.js'
-import { DEFAULT_AOIS, DEFAULT_PARAMS } from '../pipeline/params.js'
+import { DEFAULT_AOIS, DEFAULT_CHUNKS, DEFAULT_PARAMS } from '../pipeline/params.js'
+import { chunkArea, parseChunk } from '../pipeline/chunks.js'
 import { LINE_KINDS } from '../shared/types.js'
 
 /**
@@ -29,16 +30,21 @@ const empty = () => ({ e: [] as number[], n: [] as number[], count: [] as number
 
 async function main() {
   const p = DEFAULT_PARAMS
-  const areas = workAreas(DEFAULT_AOIS, p.maxLength)
+  const areas = [
+    ...workAreas(DEFAULT_AOIS, p.maxLength),
+    ...DEFAULT_CHUNKS.map((name) => chunkArea(parseChunk(name))),
+  ]
   const stamp = new Date(Date.now() - hoursAgo * 3600_000).toISOString()
   let seeded = 0
 
   for (const area of areas) {
-    if (await readRegion(area.aois)) continue
+    if (await readRegion(area.id)) continue
     const { bbox } = area
     const value = {
       region: {
+        id: area.id,
         aois: area.aois,
+        owns25833: area.owns ?? null,
         bbox25833: bbox,
         width: Math.round(bbox.maxE - bbox.minE),
         height: Math.round(bbox.maxN - bbox.minN),
@@ -67,10 +73,10 @@ async function main() {
         candidatesAfterDedup: 0,
       },
     }
-    await writeRegion(area.aois, p, value, stamp)
+    await writeRegion(area.id, p, value, stamp)
     seeded++
     console.log(
-      `  seeded ${regionId(area.aois)}: ${area.aois.length} aoi(s), ` +
+      `  seeded ${area.id}: ${area.aois.length} aoi(s), ` +
         `${(((bbox.maxE - bbox.minE) * (bbox.maxN - bbox.minN)) / 1e6).toFixed(0)} km2, ` +
         `${area.aois.map((a) => `${a.south},${a.west}`).join(' + ')}`,
     )

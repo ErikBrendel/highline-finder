@@ -423,7 +423,9 @@ function regionsGeoJson(regions: Region[] | null, now: number): GeoJSON.FeatureC
   return {
     type: 'FeatureCollection',
     features: regions.map((r) => {
-      const { minE, minN, maxE, maxN } = r.bbox25833
+      // What it owns, not what it loaded: neighbouring chunks overlap by a kilometre in the second
+      // and tile exactly in the first, so drawing the load would show a coverage map that lies.
+      const { minE, minN, maxE, maxN } = r.owns25833 ?? r.bbox25833
       const corners = [
         [minE, minN], [maxE, minN], [maxE, maxN], [minE, maxN], [minE, minN],
       ].map(([e, n]) => {

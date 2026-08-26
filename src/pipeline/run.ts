@@ -4,7 +4,7 @@ import { corridorTiles, loadProduct } from './raster.js'
 import { raiseOntoBuildings, tileBuildings } from './buildings.js'
 import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
-import { readRegion, regionId, writeRegion } from './regionCache.js'
+import { readRegion, writeRegion } from './regionCache.js'
 import {
   aggregateDrops,
   dropField,
@@ -25,8 +25,9 @@ import {
 } from './hotspots.js'
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Anchor } from './openness.js'
-import { DEFAULT_AOIS, DEFAULT_PARAMS } from './params.js'
-import { contains, recomputes, workAreas, type Recompute, type WorkArea } from './regions.js'
+import { DEFAULT_AOIS, DEFAULT_CHUNKS, DEFAULT_PARAMS } from './params.js'
+import { contains, recomputes, workAreas, type WorkArea } from './regions.js'
+import { chunkArea, parseChunk } from './chunks.js'
 import { record, renderReport, stage } from './report.js'
 import { Pool, poolSize } from './pool.js'
 import { pairInParallel, refineInParallel, scoreInParallel } from './parallel.js'
@@ -483,7 +484,9 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
 
     return {
       region: {
+        id: area.id,
         aois: area.aois,
+        owns25833: area.owns ?? null,
         bbox25833: bbox,
         width: Math.round(bbox.maxE - bbox.minE),
         height: Math.round(bbox.maxN - bbox.minN),
@@ -520,24 +523,54 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
 /**
  * What the command line asked to be recomputed.
  *
- * Rectangles *select* rather than replace the list of areas. Replacing it made the obvious move --
- * "just rebuild Sperenberg" -- quietly destructive: the run wrote a dataset containing Sperenberg
- * and nothing else. Every area is always searched or served from cache; naming one only says which
- * are worth the compute.
+ * Rectangles and chunks *select* rather than replace what is searched. Replacing made the obvious
+ * move -- "just rebuild Sperenberg" -- quietly destructive: the run wrote a dataset containing
+ * Sperenberg and nothing else. Every area always reaches the output, from cache if it is not named.
+ *
+ * The two selections are separate on purpose. A rectangle names areas of interest and can never
+ * touch a chunk; `--chunk` names chunks and can never touch an area of interest. Ground can
+ * therefore be moved from one mechanism to the other a piece at a time, with each side rebuilt
+ * only when it is asked for.
  *
  * Nothing named means nothing recomputed, because a region that has been computed stays computed.
  * `--all` rebuilds the lot, which is what to reach for after a change to the search itself -- the
  * cache no longer notices those on its own. See regionCache.ts.
+ *
+ *   npm run pipeline                                    keep everything, search what has no cache
+ *   npm run pipeline -- 52.13 13.36 52.14 13.39         that area of interest
+ *   npm run pipeline -- --chunk 53_729 --chunk 52_729   those chunks
+ *   npm run pipeline -- --all                           everything
  */
-function askedFor(args: string[]): Recompute {
-  if (args.includes('--all')) return 'all'
-  const argv = args.map(Number)
-  if (!argv.length || argv.length % 4 !== 0 || !argv.every((v) => Number.isFinite(v))) return null
-  const out: Aoi[] = []
-  for (let i = 0; i < argv.length; i += 4) {
-    out.push({ south: argv[i]!, west: argv[i + 1]!, north: argv[i + 2]!, east: argv[i + 3]! })
+interface Asked {
+  all: boolean
+  rects: Aoi[]
+  /** Work-area ids, so the check against a chunk area is an identity test and not a parse. */
+  chunks: Set<string>
+}
+
+function askedFor(args: string[]): Asked {
+  const chunks = new Set<string>()
+  const rest: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--all') continue
+    if (args[i] === '--chunk') {
+      const name = args[++i]
+      if (!name) throw new Error('--chunk needs a name, like --chunk 53_729')
+      chunks.add(chunkArea(parseChunk(name)).id)
+      continue
+    }
+    rest.push(args[i]!)
   }
-  return out
+  const argv = rest.map(Number)
+  const rects: Aoi[] = []
+  if (argv.length && argv.length % 4 === 0 && argv.every((v) => Number.isFinite(v))) {
+    for (let i = 0; i < argv.length; i += 4) {
+      rects.push({ south: argv[i]!, west: argv[i + 1]!, north: argv[i + 2]!, east: argv[i + 3]! })
+    }
+  } else if (argv.length) {
+    throw new Error(`not four numbers per rectangle: ${rest.join(' ')}`)
+  }
+  return { all: args.includes('--all'), rects, chunks }
 }
 
 async function main() {
@@ -545,8 +578,39 @@ async function main() {
   enablePhases()
   const p = DEFAULT_PARAMS
   const aois = DEFAULT_AOIS
-  const areas = workAreas(aois, p.maxLength)
-  const selection = askedFor(process.argv.slice(2))
+  /**
+   * Areas of interest first, then chunks, and never merged with each other: an area of interest is
+   * rasterised whole while a chunk is one square of a fixed lattice, and unioning the two would
+   * dissolve exactly the property the lattice exists for.
+   */
+  const chunks = DEFAULT_CHUNKS.map((name) => chunkArea(parseChunk(name)))
+  const drawn = workAreas(aois, p.maxLength)
+  const areas = [...drawn, ...chunks]
+  const asked = askedFor(process.argv.slice(2))
+  const wanted = (area: WorkArea) =>
+    asked.all ||
+    (area.kind === 'chunk'
+      ? asked.chunks.has(area.id)
+      : recomputes(area, asked.rects.length ? asked.rects : null))
+
+  /**
+   * Ground claimed by both mechanisms is searched twice. The lines dedup, since the anchor lattice
+   * is fixed to the projection and both runs find the same ones -- but the hotspot layer counts
+   * endpoints, and counting the same endpoint from two regions doubles it. Worth saying out loud
+   * rather than leaving in the data.
+   */
+  const clashes = chunks.filter((c) =>
+    drawn.some((a) =>
+      a.boxes.some((b) =>
+        b.minE < c.owns!.maxE && c.owns!.minE < b.maxE &&
+        b.minN < c.owns!.maxN && c.owns!.minN < b.maxN)))
+  if (clashes.length) {
+    console.log(
+      `\n!! ${clashes.length} chunk(s) overlap an area of interest: ` +
+        `${clashes.map((c) => c.id).join(', ')}\n` +
+        `   Lines will dedup, hotspot counts will not. Drop one side or the other.`,
+    )
+  }
 
   console.log(`${aois.length} AOI(s) in ${areas.length} region(s):`)
   for (const area of areas) {
@@ -583,10 +647,10 @@ async function main() {
   let reused = 0
   for (const [index, area] of areas.entries()) {
     const label = `region ${index + 1}/${areas.length}`
-    const hit = await readRegion<AreaResult>(area.aois)
+    const hit = await readRegion<AreaResult>(area.id)
     // Kept unless this run was told to rebuild it. A region with no cache is searched whatever the
     // selection says, since a dataset with a hole in it is worse than one that took longer.
-    const serve = hit && !recomputes(area, selection)
+    const serve = hit && !wanted(area)
     let found: AreaResult
     let vintage = new Date().toISOString()
     if (serve) {
@@ -601,8 +665,8 @@ async function main() {
     } else {
       console.log(`\n=== ${label} ===`)
       found = await searchArea(area, p, label)
-      const bytes = await writeRegion(area.aois, p, found)
-      console.log(`  cached as region_${regionId(area.aois)}.json (${(bytes / 1e6).toFixed(1)} MB)`)
+      const bytes = await writeRegion(area.id, p, found)
+      console.log(`  cached as ${area.id}.json (${(bytes / 1e6).toFixed(1)} MB)`)
     }
     found.region.generatedAt = vintage
 
