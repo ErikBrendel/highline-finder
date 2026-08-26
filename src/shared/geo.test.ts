@@ -28,6 +28,20 @@ describe('tiles', () => {
       '33408-5784',
     ])
   })
+
+  it('stops at the last tile the box reaches into, not the one its edge sits on', () => {
+    // A superchunk's edges are exact kilometre multiples, so this case fires on every side at once.
+    // 416000..424000 is eight tiles, 416 to 423; tile 424 begins where the box ends.
+    const ids = tilesForBounds(416000, 5824000, 424000, 5832000)
+    expect(ids).toHaveLength(64)
+    expect(ids).toContain('33423-5831')
+    expect(ids).not.toContain('33424-5824')
+    expect(ids).not.toContain('33416-5832')
+  })
+
+  it('still returns the one tile a box smaller than a tile sits in', () => {
+    expect(tilesForBounds(416100, 5824100, 416200, 5824200)).toEqual(['33416-5824'])
+  })
 })
 
 describe('bearings', () => {

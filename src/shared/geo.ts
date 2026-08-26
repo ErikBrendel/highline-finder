@@ -24,9 +24,25 @@ export function tileId(e: number, n: number): string {
 
 /** Every 1 km tile touching the given EPSG:25833 bounds. */
 export function tilesForBounds(minE: number, minN: number, maxE: number, maxN: number): string[] {
+  /**
+   * The last tile the box reaches *into*, which is not the tile its upper edge sits on.
+   *
+   * A box ending exactly at 425000 does not touch tile 425, which starts there -- but flooring the
+   * upper edge said it did, and added a whole spurious row. That went unnoticed while every box came
+   * from a latitude/longitude rectangle and its edges landed on arbitrary reals. A superchunk's
+   * edges are exact multiples of a kilometre by construction, so it hit the case on every side at
+   * once: 11x11 tiles fetched for a 10x10 km square, one extra ring north and east.
+   *
+   * Harmless to the answer -- the extra tiles blit into a grid that does not extend over them, and
+   * their anchors fall outside the area anyway -- but it is a city model fetched and a tile decoded
+   * for each, and it drew a halo on the debug map that nobody asked for.
+   */
+  const upper = (v: number, from: number) => Math.max(from, Math.ceil(v / 1000) - 1)
   const ids: string[] = []
-  for (let e = Math.floor(minE / 1000); e <= Math.floor(maxE / 1000); e++) {
-    for (let n = Math.floor(minN / 1000); n <= Math.floor(maxN / 1000); n++) {
+  const e0 = Math.floor(minE / 1000)
+  const n0 = Math.floor(minN / 1000)
+  for (let e = e0; e <= upper(maxE, e0); e++) {
+    for (let n = n0; n <= upper(maxN, n0); n++) {
       ids.push(`33${e}-${n}`)
     }
   }
