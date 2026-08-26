@@ -15,7 +15,7 @@ import type {
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
-import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, VINTAGE_DAYS, type TileLayer } from './MapView.js'
+import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
@@ -96,23 +96,27 @@ function DebugLegend({
   }
 
   if (layer === 'regions') {
-    const oldest = regions.reduce(
-      (worst, r) => (Date.parse(r.generatedAt) < Date.parse(worst.generatedAt) ? r : worst),
-      regions[0]!,
-    )
+    const times = regions.map((r) => Date.parse(r.generatedAt)).filter((t) => !Number.isNaN(t))
+    const [newest, oldest] = [Math.max(...times), Math.min(...times)]
+    const oneBatch = newest - oldest < SAME_VINTAGE_MS
+    const day = (t: number) => new Date(t).toISOString().slice(0, 10)
     return (
       <div className="legendbox">
         <h3>Region vintage</h3>
-        {key(DEBUG_COLORS.fresh, 'computed recently')}
-        {key(DEBUG_COLORS.aged, `computed ${VINTAGE_DAYS} days ago or more`)}
+        {key(DEBUG_COLORS.fresh, oneBatch ? 'all of one vintage' : `newest — ${day(newest)}`)}
+        {!oneBatch && key(DEBUG_COLORS.aged, `oldest — ${day(oldest)}`)}
         <div className="stat">
-          {regions.length} region{regions.length === 1 ? '' : 's'}, oldest{' '}
-          {oldest.generatedAt.slice(0, 10)}
+          {regions.length} region{regions.length === 1 ? '' : 's'}
+          {oneBatch
+            ? `, all computed ${day(newest)}`
+            : `, spanning ${Math.round((newest - oldest) / 86_400_000)} days`}
         </div>
         <div className="about">
           A region is computed once and kept until a run is told to rebuild it, so a dataset is not
           necessarily of one vintage and its lines are not necessarily comparable with each other.
-          Age is all there is to go on: neither a change to the parameters nor one to the search
+          The shading is fitted to whatever range this dataset happens to span rather than to a
+          fixed number of days, since what matters is which parts lag behind the rest, not how old
+          the whole thing is. Age is all there is to go on: neither a change to the parameters nor one to the search
           itself leaves any other mark, which is the price of not throwing away every region
           whenever the code moves. The boxes are areas of interest today; once the search is cut
           into fixed chunks instead, this becomes the map of what has been covered and when.

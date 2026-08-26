@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   BLEND_STOPS,
+  SAME_VINTAGE_MS,
   ageText,
   squareRing,
+  vintageScale,
   MIX_MAX,
   basemapOpacity,
   basemapVisible,
@@ -195,5 +197,44 @@ describe('squareRing', () => {
     const ring = squareRing(c.lat, c.lon, 1000)
     expect(apart(ring[0]!, ring[1]!)).toBeCloseTo(1000, 0)
     expect(apart(ring[1]!, ring[2]!)).toBeCloseTo(1000, 0)
+  })
+})
+
+describe('vintageScale', () => {
+  const at = (iso: string) => ({ generatedAt: iso }) as Parameters<typeof vintageScale>[0][number]
+  const day = (n: number) => new Date(Date.UTC(2026, 7, n)).toISOString()
+
+  it('is all fresh when every region is of one vintage', () => {
+    const scale = vintageScale([at(day(20)), at(day(20)), at(day(20))])
+    expect([day(20)].map(scale)).toEqual([0])
+  })
+
+  it('treats the minutes within a single run as one vintage', () => {
+    // Regions are stamped as each finishes, so they are never exactly equal. Fitting a scale to
+    // those seconds would paint whichever was searched first as the stale one.
+    const start = Date.parse(day(20))
+    const soon = new Date(start + SAME_VINTAGE_MS - 1000).toISOString()
+    const scale = vintageScale([at(day(20)), at(soon)])
+    expect(scale(day(20))).toBe(0)
+    expect(scale(soon)).toBe(0)
+  })
+
+  it('puts the newest at green and the oldest at amber, whatever the span', () => {
+    for (const span of [2, 400]) {
+      const old = day(20)
+      const fresh = new Date(Date.parse(old) + span * 86_400_000).toISOString()
+      const scale = vintageScale([at(old), at(fresh)])
+      expect(scale(fresh)).toBe(0)
+      expect(scale(old)).toBe(1)
+    }
+  })
+
+  it('places a middling region in between', () => {
+    const scale = vintageScale([at(day(10)), at(day(20)), at(day(30))])
+    expect(scale(day(20))).toBeCloseTo(0.5, 5)
+  })
+
+  it('sends an unreadable stamp to the stale end rather than the fresh one', () => {
+    expect(vintageScale([at(day(10)), at(day(30))])('not a date')).toBe(1)
   })
 })

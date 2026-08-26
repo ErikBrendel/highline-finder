@@ -125,8 +125,35 @@ export const DEBUG_COLORS = {
   aged: '#f59e0b',
 } as const
 
-/** How old a region has to be before its box is drawn fully aged. */
-export const VINTAGE_DAYS = 30
+/**
+ * Vintage differences narrower than this are one batch of work, not a gradient.
+ *
+ * Regions of a single run are stamped as each finishes, so they are seconds or minutes apart. On a
+ * scale fitted to the data those seconds would stretch to fill it, and the region that happened to
+ * be searched first would be painted as the stale one.
+ */
+export const SAME_VINTAGE_MS = 60 * 60 * 1000
+
+/**
+ * Where each region sits between the newest and the oldest in the dataset, 0 to 1.
+ *
+ * Fitted to the data rather than to a fixed span of days, because "old" has no absolute meaning
+ * here: a dataset computed entirely last night and one computed entirely last year are both
+ * internally consistent, and what matters in each is which parts are lagging behind the rest. A
+ * dataset of one vintage is therefore all green however old it is.
+ */
+export function vintageScale(regions: Region[]): (iso: string) => number {
+  const times = regions.map((r) => Date.parse(r.generatedAt)).filter((t) => !Number.isNaN(t))
+  if (!times.length) return () => 0
+  const newest = Math.max(...times)
+  const spread = newest - Math.min(...times)
+  if (spread < SAME_VINTAGE_MS) return () => 0
+  // An unreadable stamp is the worst case there is, not the best, so it sorts to the far end.
+  return (iso) => {
+    const at = Date.parse(iso)
+    return Number.isNaN(at) ? 1 : (newest - at) / spread
+  }
+}
 
 export const ageInDays = (iso: string, now: number): number =>
   Math.max(0, (now - Date.parse(iso)) / 86_400_000)
@@ -439,8 +466,9 @@ function tilesGeoJson(t: TileUsage | null, layer: TileLayer): GeoJSON.FeatureCol
  * and once the run is cut into fixed chunks rather than areas of interest this becomes the map of
  * what has been covered and when.
  */
-function regionsGeoJson(regions: Region[] | null, now: number): GeoJSON.FeatureCollection {
+function regionsGeoJson(regions: Region[] | null): GeoJSON.FeatureCollection {
   if (!regions) return { type: 'FeatureCollection', features: [] }
+  const staleness = vintageScale(regions)
   return {
     type: 'FeatureCollection',
     features: regions.map((r) => {
@@ -448,7 +476,7 @@ function regionsGeoJson(regions: Region[] | null, now: number): GeoJSON.FeatureC
       // and tile exactly in the first, so drawing the load would show a coverage map that lies.
       return {
         type: 'Feature',
-        properties: { days: ageInDays(r.generatedAt, now) },
+        properties: { stale: staleness(r.generatedAt) },
         geometry: { type: 'Polygon', coordinates: [boxRing(r.owns25833 ?? r.bbox25833)] },
       }
     }),
@@ -737,18 +765,19 @@ export function MapView({
         paint: { 'line-color': '#0b1220', 'line-width': 0.4, 'line-opacity': 0 },
       })
 
-      m.addSource('regions', { type: 'geojson', data: regionsGeoJson(null, 0) })
+      m.addSource('regions', { type: 'geojson', data: regionsGeoJson(null) })
       m.addLayer({
         id: 'regions',
         type: 'fill',
         source: 'regions',
         paint: {
-          // Green when freshly computed, fading to amber as the results age. Age is the whole
-          // signal: nothing else about a kept region is knowable. See regionCache.ts.
+          // Green for the newest region in the dataset, amber for the oldest, and green
+          // throughout when they are all of one vintage. Relative because age is the whole signal
+          // and it only means anything next to the other regions -- see regionCache.ts.
           'fill-color': [
-            'interpolate', ['linear'], ['get', 'days'],
+            'interpolate', ['linear'], ['get', 'stale'],
             0, DEBUG_COLORS.fresh,
-            VINTAGE_DAYS, DEBUG_COLORS.aged,
+            1, DEBUG_COLORS.aged,
           ],
           'fill-opacity': 0,
         },
@@ -1082,7 +1111,7 @@ export function MapView({
     const m = map.current
     if (!m || !ready) return
     const src = m.getSource('regions') as maplibregl.GeoJSONSource | undefined
-    src?.setData(regionsGeoJson(regions, Date.now()))
+    src?.setData(regionsGeoJson(regions))
     m.setPaintProperty('regions', 'fill-opacity', regions ? 0.18 : 0)
     m.setPaintProperty('regionsEdge', 'line-opacity', regions ? 0.8 : 0)
 
