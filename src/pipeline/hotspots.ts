@@ -71,7 +71,11 @@ export function clusterEndpoints(points: Endpoint[], radius: number): Hotspot[] 
   const cells = new Map<string, Hotspot[]>()
   const cellKey = (e: number, n: number) => `${Math.floor(e / radius)}_${Math.floor(n / radius)}`
 
-  for (const p of [...points].sort((a, b) => b.score - a.score)) {
+  // The same total order as the candidate dedup, for the same reason: a spot sits on the best
+  // endpoint in its neighbourhood, so a tie decided by list position would move the spot depending
+  // on how the endpoints happened to be pooled. Position is the tie-break, an endpoint having no id.
+  const bestFirst = (a: Endpoint, b: Endpoint) => b.score - a.score || a.e - b.e || a.n - b.n
+  for (const p of [...points].sort(bestFirst)) {
     const cx = Math.floor(p.e / radius)
     const cy = Math.floor(p.n / radius)
     let hit: Hotspot | null = null

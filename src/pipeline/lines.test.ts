@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dedupe, evaluateLine, findLines, refine, terrainPairs } from './lines.js'
+import { bestFirst, dedupe, evaluateLine, findLines, refine, terrainPairs } from './lines.js'
 import { chunks } from './pool.js'
 import { chooseHeights } from '../shared/scoring.js'
 import { gridFrom } from './testing.js'
@@ -437,13 +437,19 @@ describe('dedupe', () => {
 })
 
 describe('dedupe indexing', () => {
-  /** The original definition, kept as an oracle: every kept line compared against every other. */
+  /**
+   * The original definition, kept as an oracle: every kept line compared against every other.
+   *
+   * It walks the candidates in the same order the real one does, since what is under test here is
+   * the bucket index -- whether nine cells around an anchor really hold every line worth comparing
+   * against -- and not which of two tied lines wins. That is `bestFirst`'s job and has its own test.
+   */
   function bruteForce(cs: Candidate[], radius: number): Candidate[] {
     const r2 = radius * radius
     const near = (x: { e: number; n: number }, y: { e: number; n: number }) =>
       (x.e - y.e) ** 2 + (x.n - y.n) ** 2 <= r2
     const kept: Candidate[] = []
-    for (const c of [...cs].sort((x, y) => y.score - x.score)) {
+    for (const c of [...cs].sort(bestFirst)) {
       const dup = kept.some(
         (k) => (near(c.a, k.a) && near(c.b, k.b)) || (near(c.a, k.b) && near(c.b, k.a)),
       )
@@ -512,5 +518,37 @@ describe('chunks', () => {
       expect(ranges.flatMap(([from, to]) => Array.from({ length: to - from }, (_, i) => from + i)))
         .toEqual(Array.from({ length: total }, (_, i) => i))
     }
+  })
+})
+
+describe('dedup order', () => {
+  const at = (e: number, n: number, score: number): Candidate =>
+    ({
+      id: `${e.toFixed(1)}_${n.toFixed(1)}__${(e + 300).toFixed(1)}_${n.toFixed(1)}`,
+      score,
+      a: { e, n } as Candidate['a'],
+      b: { e: e + 300, n } as Candidate['b'],
+    }) as Candidate
+
+  /**
+   * The property the whole incremental plan rests on: dedup over a union has to be the same answer
+   * however that union was assembled. It keeps the first of each near-identical group, so a tie
+   * broken by list position made the survivor depend on the order the pieces arrived in.
+   */
+  it('keeps the same line however the candidates were pooled', () => {
+    // Three lines within dedupRadius of each other, two of them tied on score.
+    const group = [at(1000, 1000, 50), at(1010, 1000, 50), at(1005, 1000, 49)]
+    const orders = [
+      [0, 1, 2], [2, 1, 0], [1, 0, 2], [1, 2, 0],
+    ].map((order) => dedupe(order.map((i) => group[i]!), 25).map((c) => c.id))
+    expect(new Set(orders.map((o) => o.join('|'))).size).toBe(1)
+    expect(orders[0]).toHaveLength(1)
+  })
+
+  it('still prefers the better line over a tie-break', () => {
+    const worse = at(1000, 1000, 40)
+    const better = at(1010, 1000, 60)
+    expect(dedupe([worse, better], 25).map((c) => c.score)).toEqual([60])
+    expect(dedupe([better, worse], 25).map((c) => c.score)).toEqual([60])
   })
 })

@@ -51,3 +51,16 @@ describe('clusterEndpoints', () => {
     expect(spots[0]!.count).toBe(200)
   })
 })
+
+describe('hotspot order', () => {
+  it('puts a spot in the same place however the endpoints were pooled', () => {
+    // Two endpoints tied on score, close enough to collapse: which one the spot sits on must not
+    // depend on the order they arrived in, or a chunked run would move spots at every seam.
+    const points = [at(1000, 1000, 70), at(1020, 1000, 70), at(1010, 1000, 65)]
+    const places = [
+      [0, 1, 2], [2, 1, 0], [1, 2, 0],
+    ].map((order) => clusterEndpoints(order.map((i) => points[i]!), 50).map((s) => `${s.e},${s.n}`))
+    expect(new Set(places.map((p) => p.join('|'))).size).toBe(1)
+    expect(places[0]).toEqual(['1000,1000'])
+  })
+})

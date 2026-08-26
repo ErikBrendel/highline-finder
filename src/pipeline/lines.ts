@@ -592,6 +592,22 @@ export function bucketAnchors(table: AnchorTable, cell: number): AnchorIndex {
 }
 
 /** Fills in the WGS84 coordinates a candidate carries for display. */
+/**
+ * The order dedup walks the candidates in: best score first, and where two tie, by id.
+ *
+ * The tie-break is the point. Sorting on score alone leaves ties to whatever order the list happens
+ * to be in, and dedup keeps the first of any near-identical group -- so which line survived at a
+ * boundary depended on how the run was assembled. Growing an area of interest changed lines
+ * hundreds of metres from the new ground for exactly this reason, and a search split into chunks
+ * would have the same problem at every seam.
+ *
+ * The id is the two anchors' coordinates, so this is a deterministic total order over any set of
+ * candidates from anywhere. Dedup over a union is therefore the same answer however that union was
+ * put together, which is what lets separately computed pieces compose into one dataset.
+ */
+export const bestFirst = (x: Candidate, y: Candidate): number =>
+  y.score - x.score || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)
+
 export function locate(c: Candidate): Candidate {
   return {
     ...c,
@@ -791,7 +807,7 @@ export function dedupe(candidates: Candidate[], radius: number): Candidate[] {
   }
 
   const kept: Candidate[] = []
-  for (const c of [...candidates].sort((x, y) => y.score - x.score)) {
+  for (const c of [...candidates].sort(bestFirst)) {
     const cx = Math.floor(c.a.e / cell)
     const cy = Math.floor(c.a.n / cell)
     let duplicate = false

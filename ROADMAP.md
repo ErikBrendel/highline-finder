@@ -124,10 +124,65 @@ anchors only, one AOI, static viewer.
 
 ## Scale
 
-- **All of Brandenburg + Berlin.** The blocker is data volume, not compute: the surface model is
-  ~32 MB per km² zipped, so the whole state is ~950 GB. The cache must reduce to a 1 m normalised
-  surface on ingest and discard the 0.2 m source. The openness scan is already per-tile
-  independent, so it parallelises directly.
+### All of Brandenburg + Berlin: superchunks
+
+30,545 km², i.e. 30,545 source tiles. Scaling region 7 linearly gives 35 M anchors, 106 billion
+pairs in range, 1.1 M distinct lines and 151 M hotspot endpoints; the raw surface model would be
+~950 GB. Linear is the wrong model and the difference decides the project: the coarse pre-pass
+rejects flat ground before a single 1 m tile is fetched, and most of Brandenburg is flat. At the
+67 % keep rate region 7 saw, the surface download is ~287 GB; at 10 % it is ~43 GB.
+
+**Measure that first.** `loadCoarse` fetches 8192 m chunks at 16 m, so the whole state is ~456
+chunks, ~460 MB, minutes, and needs no new code. That one number decides everything below.
+
+**The unit of work becomes a superchunk, not a merged AOI.** An 8×8 block of the existing 1 km
+terrain tiles, pinned to EPSG:25833 the way the anchor lattice now is. Tile edges are already the
+download, cache and downsample boundaries, so chunk edges land on them for free.
+
+This dissolves the streaming question rather than answering it. A region-wide raster needs an LRU
+sampler because the pair search reads 500 m around each anchor in scan order, so the working set is
+a band the full width of the region -- 750 tiles at Brandenburg's width, which just thrashes.
+Bounding the work bounds the memory at the source: no cache layer, no eviction, no indirection in
+the hot loop.
+
+**A superchunk loads 10×10 tiles** -- 400 MB per raster at 1 m, 1.56× overhead:
+
+- 1 tile N, E and W, for the 500 m a partner anchor can sit away. Not S: the anchor scan runs
+  south→north, west→east and `terrainPairs` enumerates each pair from the lower-indexed anchor, so
+  the partner is always strictly north or due east.
+- 1 tile S anyway, because the chunk's own southernmost anchors probe 40 m south
+  (`nearProbeLength`) and test their drop 25 m out (`dropSearchRadius`).
+
+**Ownership: a line belongs to the chunk containing its first anchor**, "first" being the smaller
+`(n, e)` -- which is what the existing `j > i` already means. Recomputing a chunk emits every line
+whose first anchor is in it and drops every stored line whose first anchor is in it. A line crossing
+a boundary is produced exactly once, by exactly one chunk, with no containment test and no margin to
+tune. Ownership is decided on the lattice anchor, before refinement moves it up to 3 m.
+
+**The dirty set for a recompute area S is every chunk intersecting S ⊕ maxLength**, not just the
+chunks overlapping S: a line owned by a neighbour can pass over S, and a change to the ground there
+makes its verdict stale.
+
+**What still crosses chunks.** Dedup is greedy, so a line near a seam can be suppressed by one in
+the next chunk -- run it once over the union at assembly, which is now order-independent (see
+`bestFirst`). Hotspots are the one thing that genuinely does not scale, at 151 M endpoints: change
+the per-chunk output to a 50 m grid aggregate (count, best score, best endpoint's position), which
+merges exactly by summing and maxing, and cluster that at assembly instead.
+
+**What stops fitting in one file.** `candidates.json` is 7 MB for 8,865 lines, so ~790 MB for 1.1 M
+-- per-chunk files fetched for whatever is in view, which is hand-rolled vector tiles and the same
+pattern the profile fetch already uses. `anchors.json` likewise, or dropped from the default output.
+On disk, the `.tif` and the `dn1_*.bin` are both retained; deleting the former once the latter
+exists saves ~90 % on bdom.
+
+**Sequencing.** Coarse pass first (no code, decides the rest). Deterministic dedup (done). Then
+superchunks with ownership by first anchor; then the hotspot aggregate; then per-chunk output and a
+viewer that fetches by view. A debug overlay drawing each chunk with its `generatedAt` is worth
+having early -- `Region` already carries that field, so it can be built against today's model.
+
+One refinement for later: halo anchors are re-scanned by each neighbouring chunk (~23 % redundant at
+8 km). Persisting the per-chunk anchor table and letting neighbours read it removes that; the tables
+are ~7 MB per chunk.
 - **Other German states.** Each runs its own portal with its own tiling, formats and licence.
   NRW, Bavaria, Saxony and Thuringia all publish comparable 1 m models.
 - **WCS instead of tile downloads.** `bb_dgm` serves arbitrary bounding boxes, which avoids
