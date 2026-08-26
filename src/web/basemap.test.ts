@@ -109,8 +109,8 @@ describe('line emphasis', () => {
 
   it('draws every line wider when emphasised, at every zoom the map reaches', () => {
     for (const zoom of [6, 9, 12, 15, 18]) {
-      const plain = at(lineWidth(false), zoom)
-      const loud = at(lineWidth(true), zoom)
+      const plain = at(lineWidth(0), zoom)
+      const loud = at(lineWidth(1), zoom)
       expect(loud.plain).toBeGreaterThan(plain.plain)
       expect(loud.selected).toBeGreaterThan(plain.selected)
     }
@@ -118,8 +118,8 @@ describe('line emphasis', () => {
 
   it('keeps the selected line the widest thing on the map, emphasised or not', () => {
     for (const zoom of [9, 12, 15]) {
-      for (const emphasised of [false, true]) {
-        const { plain, selected } = at(lineWidth(emphasised), zoom)
+      for (const emphasis of [0, 0.5, 1]) {
+        const { plain, selected } = at(lineWidth(emphasis), zoom)
         expect(selected).toBeGreaterThan(plain)
       }
     }
@@ -127,12 +127,20 @@ describe('line emphasis', () => {
 
   it('helps most where a line is only a few pixels long', () => {
     // The whole point: at z15 a 400 m line already crosses the screen, at z9 it is a hairline.
-    const boost = (zoom: number) => at(lineWidth(true), zoom).plain / at(lineWidth(false), zoom).plain
+    const boost = (zoom: number) => at(lineWidth(1), zoom).plain / at(lineWidth(0), zoom).plain
     expect(boost(9)).toBeGreaterThan(boost(15))
   })
 
-  it('stops dimming the unselected lines while they are being looked for', () => {
-    expect(lineOpacity(true)).toBe(1)
-    expect(Array.isArray(lineOpacity(false))).toBe(true)
+  it('stops dimming the unselected lines as they swell, and dims them again as they settle', () => {
+    const unselected = (e: number) => (lineOpacity(e) as [string, unknown, number, number])[3]
+    expect(unselected(0)).toBeCloseTo(0.7)
+    expect(unselected(0.5)).toBeCloseTo(0.85)
+    expect(unselected(1)).toBeCloseTo(1)
+  })
+
+  it('grows smoothly rather than jumping, so a half-finished swell is half-way', () => {
+    const width = (e: number) => at(lineWidth(e), 9).plain
+    expect(width(0.5)).toBeGreaterThan(width(0))
+    expect(width(0.5)).toBeLessThan(width(1))
   })
 })

@@ -44,6 +44,63 @@ const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 
 type SeriesKey = 'ground' | 'surface' | 'line' | 'groundMax' | 'surfaceMax' | 'needed'
 
+interface Vertex {
+  /** Distance along the span, in metres. */
+  d: number
+  /** Height at that distance, in metres. */
+  h: number
+}
+
+/**
+ * One series along the span, with a vertical wall wherever a building begins or ends.
+ *
+ * Buildings have vertical walls. Every series here is already the roof over one -- terrain.ts
+ * treats a roof as ground, and the surface model sees the roof too -- so joining a pavement sample
+ * to a roof sample with a straight segment draws a ramp up the side of the building at whatever
+ * slope the sample spacing happens to give. There is no such slope, and at the resolution this
+ * chart is read at the triangle is the first thing the eye lands on: brown for the terrain fill,
+ * green for the canopy band above it, both describing material that is not there.
+ *
+ * So a sample standing on a building whose neighbour does not gets an extra vertex at its own
+ * station, down at the foot of the wall: the series runs level to the wall and steps up it. That
+ * station is exactly where the grey column's edge already is, so the two meet at a corner -- and
+ * every series steps at the same station, so the shapes between them stay closed.
+ *
+ * Only the drawing changes. Clearance, exposure and every score are measured from the samples
+ * themselves and are untouched -- the ramp was never in the numbers, only in the picture.
+ */
+export function steppedOutline(
+  p: ProfileSample[],
+  cover: Cover | null,
+  height: (s: ProfileSample) => number,
+  /**
+   * Where this series sits at the foot of the wall, when something knows better than the neighbour
+   * does. The terrain has the bare earth under the building; nothing else has an equivalent.
+   */
+  foot?: (i: number) => number,
+): Vertex[] {
+  const known = cover && cover.kind.length === p.length ? cover : null
+  if (!known) return p.map((s) => ({ d: s.d, h: height(s) }))
+  const onBuilding = (i: number) => known.kind[i] === COVER_BUILDING
+  const atFoot = (i: number, beside: number) => {
+    const under = foot?.(i)
+    return under !== undefined && Number.isFinite(under) ? under : beside
+  }
+
+  const out: Vertex[] = []
+  for (let i = 0; i < p.length; i++) {
+    const s = p[i]!
+    if (!onBuilding(i)) {
+      out.push({ d: s.d, h: height(s) })
+      continue
+    }
+    if (i > 0 && !onBuilding(i - 1)) out.push({ d: s.d, h: atFoot(i, height(p[i - 1]!)) })
+    out.push({ d: s.d, h: height(s) })
+    if (i + 1 < p.length && !onBuilding(i + 1)) out.push({ d: s.d, h: atFoot(i, height(p[i + 1]!)) })
+  }
+  return out
+}
+
 interface Props {
   c: Candidate
   profile: ProfileSample[]
@@ -193,15 +250,26 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   const x = (d: number) => PAD.left + (d / c.length) * iw
   const y = (v: number) => PAD.top + ih - ((v - lo) / (hi - lo)) * ih
 
+  /** The sagging line itself, which is a span rather than terrain and so walks no walls. */
   const path = (key: SeriesKey) =>
     p.map((s, i) => `${i ? 'L' : 'M'}${x(s.d).toFixed(1)},${y(s[key]).toFixed(1)}`).join('')
 
-  const groundFill = `${path('ground')}L${x(c.length)},${PAD.top + ih}L${PAD.left},${PAD.top + ih}Z`
-  const canopyFill = `${path('surface')}${p
-    .slice()
-    .reverse()
-    .map((s) => `L${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
-    .join('')}Z`
+  const draw = (points: Vertex[], from = 0) =>
+    points.map((v, i) => `${i || from ? 'L' : 'M'}${x(v.d).toFixed(1)},${y(v.h).toFixed(1)}`).join('')
+  /** Every series that follows the terrain, so all of them step at the same wall. */
+  const walled = (height: (s: ProfileSample) => number, foot?: (i: number) => number) =>
+    steppedOutline(p, cover, height, foot)
+  const outline = walled((s) => s.ground, cover ? (i) => cover.bare[i]! : undefined)
+  const surfaceOutline = walled((s) => s.surface)
+  const groundBand = walled((s) => s.groundMax)
+  const canopyBand = walled((s) => s.surfaceMax)
+  const groundPath = draw(outline)
+  /** The shape between two of them, each walking its own walls. */
+  const between = (top: Vertex[], bottom: Vertex[]) =>
+    `${draw(top)}${draw([...bottom].reverse(), 1)}Z`
+
+  const groundFill = `${groundPath}L${x(c.length)},${PAD.top + ih}L${PAD.left},${PAD.top + ih}Z`
+  const canopyFill = between(surfaceOutline, outline)
 
   /**
    * One filled shape per stretch of a single cover class, drawn over the terrain fill so it
@@ -294,11 +362,7 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
       {/* Vegetation the band reaches but the centreline misses: shown, never scored. */}
       {canopyBandShows && (
         <path
-          d={`${path('surfaceMax')}${p
-            .slice()
-            .reverse()
-            .map((s) => `L${x(s.d).toFixed(1)},${y(s.surface).toFixed(1)}`)
-            .join('')}Z`}
+          d={between(canopyBand, surfaceOutline)}
           fill="var(--canopy)"
           opacity="0.22"
         />
@@ -313,21 +377,17 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
           opacity="0.9"
         />
       ))}
-      <path d={path('ground')} stroke="#a08a72" strokeWidth="1.25" fill="none" />
+      <path d={groundPath} stroke="#a08a72" strokeWidth="1.25" fill="none" />
       {/* The worst the band reaches, which is what clearance is actually measured against. */}
       {bandShows && (
         <>
           <path
-            d={`${path('groundMax')}${p
-              .slice()
-              .reverse()
-              .map((s) => `L${x(s.d).toFixed(1)},${y(s.ground).toFixed(1)}`)
-              .join('')}Z`}
+            d={between(groundBand, outline)}
             fill="var(--ground)"
             opacity="0.45"
           />
           <path
-            d={path('groundMax')}
+            d={draw(groundBand)}
             stroke="#a08a72"
             strokeWidth="1"
             strokeDasharray="4 3"

@@ -130,34 +130,58 @@ const SCORE_COLOR: maplibregl.ExpressionSpecification = [
 
 const SELECTED: maplibregl.ExpressionSpecification = ['boolean', ['feature-state', 'sel'], false]
 
+/**
+ * Round ends and corners for anything that draws a highline.
+ *
+ * A line is a span between two anchors, and at 8 px of hover emphasis a butt cap ends it in a flat
+ * chisel edge whose orientation depends on the bearing -- which reads as a line that has been cut
+ * off rather than one that stops at a point. Rounding also matters where a casing sits under a
+ * line: two rectangles at different widths leave a step at the ends unless both are capped the
+ * same way.
+ */
+const SPAN_CAPS = { 'line-cap': 'round', 'line-join': 'round' } as const
+
 /** How long the lines take to swell and settle back. Long enough to read as motion, not a jump. */
 export const EMPHASIS_MS = 220
 
 /**
- * How wide the found lines are drawn, and how much wider while the lines button is hovered.
+ * How wide the found lines are drawn, at `emphasis` 0 (resting) to 1 (fully swollen).
  *
  * Filtering down to a handful is the case this exists for: six lines somewhere in 265 km2 are
  * genuinely hard to spot, and the control that says "6 lines" is the natural thing to be pointing
- * at when you are looking for them.
+ * at while looking for them.
  *
- * The emphasis is scaled by zoom because the problem is. At z15 a 400 m line already crosses the
- * screen and needs no help; at z9 it is a few pixels of hairline and doubling it is the difference
- * between finding it and not. Selection still reads through it -- the selected line stays the
- * widest thing on the map at every zoom.
+ * The swell is scaled by zoom because the problem is. At z15 a 400 m line already crosses the
+ * screen and needs no help; at z9 it is a few pixels of hairline, and four times the width is the
+ * difference between seeing it and not. The selected line stays the widest thing on the map
+ * throughout, so selection still reads at any point in the animation.
+ *
+ * A continuous parameter rather than a flag because MapView animates this itself, a frame at a
+ * time. Handing MapLibre a `line-width-transition` and two endpoints would be less code, and it is
+ * how the first attempt did it -- but whether MapLibre eases a *data-driven* width, as opposed to a
+ * plain one, is not something the style spec promises, and a silent no leaves a jump.
  */
-export function lineWidth(emphasised: boolean): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  if (!emphasised) return ['case', SELECTED, 4, 1.8]
+export function lineWidth(
+  emphasis: number,
+): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  if (emphasis <= 0) return ['case', SELECTED, 4, 1.8]
+  const mix = (from: number, to: number) => from + (to - from) * emphasis
   return [
     'interpolate', ['linear'], ['zoom'],
-    9, ['case', SELECTED, 11, 8],
-    15, ['case', SELECTED, 6, 3.6],
+    9, ['case', SELECTED, mix(4, 11), mix(1.8, 8)],
+    15, ['case', SELECTED, mix(4, 6), mix(1.8, 3.6)],
   ]
 }
 
+/** The unselected lines stop being dimmed as they swell, so faint ones come forward too. */
 export const lineOpacity = (
-  emphasised: boolean,
-): maplibregl.DataDrivenPropertyValueSpecification<number> =>
-  emphasised ? 1 : ['case', SELECTED, 1, 0.7]
+  emphasis: number,
+): maplibregl.DataDrivenPropertyValueSpecification<number> => [
+  'case',
+  SELECTED,
+  1,
+  0.7 + 0.3 * Math.min(1, Math.max(0, emphasis)),
+]
 
 /**
  * Feature ids must be numeric: MapLibre cannot use a non-numeric string id with feature-state, and
@@ -757,23 +781,20 @@ export function MapView({
         id: 'lines-hit',
         type: 'line',
         source: 'lines',
+        layout: { ...SPAN_CAPS },
         paint: { 'line-color': '#000', 'line-opacity': 0, 'line-width': 14 },
       })
       m.addLayer({
         id: 'lines',
         type: 'line',
         source: 'lines',
+        layout: { ...SPAN_CAPS },
         paint: {
           'line-color': SCORE_COLOR,
-          'line-width': lineWidth(emphasiseLinesRef.current),
-          'line-opacity': lineOpacity(emphasiseLinesRef.current),
+          'line-width': lineWidth(emphasiseLinesRef.current ? 1 : 0),
+          'line-opacity': lineOpacity(emphasiseLinesRef.current ? 1 : 0),
         },
       })
-      // Set once rather than per change, so both directions ease: MapLibre animates a paint
-      // property towards its new value whenever a transition is configured for it. The style spec's
-      // types do not carry `-transition` keys inside a layer's paint block, so it is set here.
-      m.setPaintProperty('lines', 'line-width-transition', { duration: EMPHASIS_MS, delay: 0 })
-      m.setPaintProperty('lines', 'line-opacity-transition', { duration: EMPHASIS_MS, delay: 0 })
 
       // The planned line sits above the found ones: it is never filtered out, so it must never be
       // hidden behind them either.
@@ -782,12 +803,14 @@ export function MapView({
         id: 'customCasing',
         type: 'line',
         source: 'custom',
+        layout: { ...SPAN_CAPS },
         paint: { 'line-color': '#052e16', 'line-width': 8, 'line-opacity': 0.75 },
       })
       m.addLayer({
         id: 'custom',
         type: 'line',
         source: 'custom',
+        layout: { ...SPAN_CAPS },
         paint: { 'line-color': '#22c55e', 'line-width': 3.5 },
       })
       for (const id of ['custom', 'customCasing']) {
@@ -902,6 +925,36 @@ export function MapView({
     const src = m.getSource('hotspots') as maplibregl.GeoJSONSource | undefined
     src?.setData(hotspotsGeoJson(hotspots))
   }, [hotspots, ready])
+
+  /**
+   * Swelling and settling the found lines, a frame at a time.
+   *
+   * Eased from wherever it currently is rather than from zero, so pointing at the button and away
+   * again quickly reverses mid-swell instead of snapping and starting over.
+   */
+  const emphasis = useRef(0)
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const target = emphasiseLines ? 1 : 0
+    const from = emphasis.current
+    if (from === target) return
+    const started = performance.now()
+    // The distance left to travel sets the duration, so a reversal is as quick as it is short.
+    const span = Math.max(1, EMPHASIS_MS * Math.abs(target - from))
+    let frame = 0
+    const step = (now: number) => {
+      const t = Math.min(1, (now - started) / span)
+      // Ease in and out, so it starts and stops softly rather than at full speed.
+      const eased = t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t)
+      emphasis.current = from + (target - from) * eased
+      m.setPaintProperty('lines', 'line-width', lineWidth(emphasis.current))
+      m.setPaintProperty('lines', 'line-opacity', lineOpacity(emphasis.current))
+      if (t < 1) frame = requestAnimationFrame(step)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [emphasiseLines, ready])
 
   useEffect(() => {
     const m = map.current
