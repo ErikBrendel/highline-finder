@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process'
-import { cpus } from 'node:os'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Grid } from '../shared/grid.js'
@@ -72,10 +71,33 @@ export async function loadTile(product: Product, tile: string, res: number): Pro
 }
 
 /**
+ * How many tiles are worked on at once.
+ *
+ * Sized for the download, not the decode, because the download is what the time goes on: on the run
+ * that added the roof rule the surface stage was 1023s of clock against 10s of processor. Measured
+ * against the survey's server, a single connection gets between 0.08 and 0.72 MB/s -- a nine-fold
+ * spread on identical requests -- while eight at once aggregate 2.08 MB/s and four aggregate 0.69.
+ * So the cap is per-connection and the way past it is more connections.
+ *
+ * Sixteen rather than more because there is no published rate limit to lean on, and this is a public
+ * survey office rather than a CDN. It does oversubscribe the decode by about 1.6x on ten cores, and
+ * that is the right way round: a decode that runs slightly slower while sixteen downloads are in
+ * flight still finishes long before the downloads do.
+ *
+ * Measured end to end, on the same 24 surface tiles ten minutes apart: 778s the old way, 628s this
+ * way, so 1.24x. Less than the connection test promises, and the reason is the static split below --
+ * 24 tiles over 16 lanes gives eight lanes two tiles and eight lanes one, so the batch waits on a
+ * lane running two tiles in series and the prefetch gets one chance to help. On a batch big enough
+ * for several tiles a lane it should do better, which is untested.
+ */
+const LANES = 16
+
+/**
  * Fills the cache for whatever is missing, several tiles at a time.
  *
- * Concurrency leaves two cores for everything else; each child holds one raster at a time, so the
- * ceiling is memory per tile rather than tile count.
+ * Each lane runs one tile ahead of itself, so a tile is downloading while the previous one decodes.
+ * Without that the network sits idle through every decode and the processor through every download,
+ * which on a batch of surface tiles is most of both.
  */
 export async function ensureDownsampled(
   product: Product,
@@ -88,7 +110,10 @@ export async function ensureDownsampled(
   }
   if (!missing.length) return 0
 
-  const lanes = Math.max(1, Math.min(missing.length, (cpus().length || 4) - 2))
+  const lanes = Math.max(1, Math.min(missing.length, LANES))
+  // Round-robin, which is even in tile count and not in time: one lane drawing two slow tiles sets
+  // the pace for the batch. Handing tiles out as lanes free up would need the parent to talk to its
+  // children, and is the next thing worth doing here.
   const queues: string[][] = Array.from({ length: lanes }, () => [])
   missing.forEach((tile, i) => queues[i % lanes]!.push(tile))
 
@@ -99,7 +124,9 @@ export async function ensureDownsampled(
           const child = spawn(
             process.execPath,
             [...process.execArgv, new URL(import.meta.url).pathname, product, String(res), ...q],
-            { stdio: ['ignore', 'ignore', 'inherit'] },
+            // A lane's own progress reaches the log: `tileTiff` writes a line per tile, and with
+            // stdout ignored a stage that spends seventeen minutes downloading looked like a hang.
+            { stdio: ['ignore', 'inherit', 'inherit'] },
           )
           child.on('error', reject)
           child.on('exit', (code) =>
@@ -114,8 +141,33 @@ export async function ensureDownsampled(
 // Worker mode: `downsample.ts <product> <res> <tile> [<tile> ...]`.
 if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
   const [product, res, ...tiles] = process.argv.slice(2)
+  /**
+   * One tile ahead: the next download starts before the current tile is decoded.
+   *
+   * The two use different resources, so running them in series inside a lane wastes whichever one
+   * is idle. Only one ahead, because a lane holding several downloaded tiles would hold their
+   * rasters too -- a surface tile is 100 MB decoded.
+   */
   const run = async () => {
-    for (const tile of tiles) await buildTile(product as Product, tile, Number(res))
+    // Settled rather than left to reject on its own: a download that fails while the previous tile
+    // is decoding has nothing awaiting it yet, and Node treats an unhandled rejection as fatal --
+    // so the run would die somewhere in the middle of a decode instead of at the tile that failed.
+    const start = (tile: string) =>
+      tileTiff(product as Product, tile).then(
+        () => null,
+        (error: unknown) => error ?? new Error(`fetching ${tile} failed`),
+      )
+    const raise = async (settled: Promise<unknown> | null) => {
+      const failure = await settled
+      if (failure) throw failure
+    }
+
+    let ahead = tiles.length ? start(tiles[0]!) : null
+    for (let i = 0; i < tiles.length; i++) {
+      await raise(ahead)
+      ahead = i + 1 < tiles.length ? start(tiles[i + 1]!) : null
+      await buildTile(product as Product, tiles[i]!, Number(res))
+    }
   }
   run().catch((e) => {
     console.error(e)
