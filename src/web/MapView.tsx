@@ -128,6 +128,37 @@ const SCORE_COLOR: maplibregl.ExpressionSpecification = [
   70, '#22c55e',
 ]
 
+const SELECTED: maplibregl.ExpressionSpecification = ['boolean', ['feature-state', 'sel'], false]
+
+/** How long the lines take to swell and settle back. Long enough to read as motion, not a jump. */
+export const EMPHASIS_MS = 220
+
+/**
+ * How wide the found lines are drawn, and how much wider while the lines button is hovered.
+ *
+ * Filtering down to a handful is the case this exists for: six lines somewhere in 265 km2 are
+ * genuinely hard to spot, and the control that says "6 lines" is the natural thing to be pointing
+ * at when you are looking for them.
+ *
+ * The emphasis is scaled by zoom because the problem is. At z15 a 400 m line already crosses the
+ * screen and needs no help; at z9 it is a few pixels of hairline and doubling it is the difference
+ * between finding it and not. Selection still reads through it -- the selected line stays the
+ * widest thing on the map at every zoom.
+ */
+export function lineWidth(emphasised: boolean): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  if (!emphasised) return ['case', SELECTED, 4, 1.8]
+  return [
+    'interpolate', ['linear'], ['zoom'],
+    9, ['case', SELECTED, 11, 8],
+    15, ['case', SELECTED, 6, 3.6],
+  ]
+}
+
+export const lineOpacity = (
+  emphasised: boolean,
+): maplibregl.DataDrivenPropertyValueSpecification<number> =>
+  emphasised ? 1 : ['case', SELECTED, 1, 0.7]
+
 /**
  * Feature ids must be numeric: MapLibre cannot use a non-numeric string id with feature-state, and
  * a paint expression that reads feature-state on such a source silently fails to render. So the id
@@ -402,6 +433,8 @@ function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
 interface Props {
   data: Dataset
   visible: Candidate[]
+  /** Swell the found lines, while the control that counts them is under the pointer. */
+  emphasiseLines: boolean
   selected: Candidate | null
   basemapMix: number
   anchorDump: AnchorDump | null
@@ -423,6 +456,7 @@ interface Props {
 export function MapView({
   data,
   visible,
+  emphasiseLines,
   selected,
   basemapMix,
   anchorDump,
@@ -465,6 +499,9 @@ export function MapView({
   const removeOverlay = useRef<(() => void) | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
+  // Read when the layer is first added, which can happen after the pointer is already on the button.
+  const emphasiseLinesRef = useRef(emphasiseLines)
+  emphasiseLinesRef.current = emphasiseLines
   const onViewportRef = useRef(onViewport)
   onViewportRef.current = onViewport
 
@@ -728,10 +765,15 @@ export function MapView({
         source: 'lines',
         paint: {
           'line-color': SCORE_COLOR,
-          'line-width': ['case', ['boolean', ['feature-state', 'sel'], false], 4, 1.8],
-          'line-opacity': ['case', ['boolean', ['feature-state', 'sel'], false], 1, 0.7],
+          'line-width': lineWidth(emphasiseLinesRef.current),
+          'line-opacity': lineOpacity(emphasiseLinesRef.current),
         },
       })
+      // Set once rather than per change, so both directions ease: MapLibre animates a paint
+      // property towards its new value whenever a transition is configured for it. The style spec's
+      // types do not carry `-transition` keys inside a layer's paint block, so it is set here.
+      m.setPaintProperty('lines', 'line-width-transition', { duration: EMPHASIS_MS, delay: 0 })
+      m.setPaintProperty('lines', 'line-opacity-transition', { duration: EMPHASIS_MS, delay: 0 })
 
       // The planned line sits above the found ones: it is never filtered out, so it must never be
       // hidden behind them either.

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { BLEND_STOPS, MIX_MAX, basemapOpacity, basemapVisible, stopAt } from './MapView.js'
+import {
+  BLEND_STOPS,
+  MIX_MAX,
+  basemapOpacity,
+  basemapVisible,
+  lineOpacity,
+  lineWidth,
+  stopAt,
+} from './MapView.js'
 import { SHADE_BASELINE, applyShading } from './shaded.js'
 
 const n = BLEND_STOPS.length
@@ -78,5 +86,53 @@ describe('applyShading', () => {
     const base = Uint8ClampedArray.from([120, 60, 30, 40])
     applyShading(base, px(255, 255, 255))
     expect(base[3]).toBe(40)
+  })
+})
+
+describe('line emphasis', () => {
+  /** Reads a width expression at one zoom, for both the selected and the unselected case. */
+  const at = (expr: unknown, zoom: number): { plain: number; selected: number } => {
+    // ['interpolate', ['linear'], ['zoom'], z0, caseExpr, z1, caseExpr] or a bare case expression.
+    const branch = (e: unknown, sel: boolean): number =>
+      Array.isArray(e) && e[0] === 'case' ? (sel ? (e[2] as number) : (e[3] as number)) : (e as number)
+    if (!Array.isArray(expr) || expr[0] !== 'interpolate') {
+      return { plain: branch(expr, false), selected: branch(expr, true) }
+    }
+    const stops: [number, unknown][] = []
+    for (let i = 3; i < expr.length; i += 2) stops.push([expr[i] as number, expr[i + 1]])
+    const [z0, e0] = stops[0]!
+    const [z1, e1] = stops[stops.length - 1]!
+    const t = Math.min(1, Math.max(0, (zoom - z0) / (z1 - z0)))
+    const lerp = (sel: boolean) => branch(e0, sel) + (branch(e1, sel) - branch(e0, sel)) * t
+    return { plain: lerp(false), selected: lerp(true) }
+  }
+
+  it('draws every line wider when emphasised, at every zoom the map reaches', () => {
+    for (const zoom of [6, 9, 12, 15, 18]) {
+      const plain = at(lineWidth(false), zoom)
+      const loud = at(lineWidth(true), zoom)
+      expect(loud.plain).toBeGreaterThan(plain.plain)
+      expect(loud.selected).toBeGreaterThan(plain.selected)
+    }
+  })
+
+  it('keeps the selected line the widest thing on the map, emphasised or not', () => {
+    for (const zoom of [9, 12, 15]) {
+      for (const emphasised of [false, true]) {
+        const { plain, selected } = at(lineWidth(emphasised), zoom)
+        expect(selected).toBeGreaterThan(plain)
+      }
+    }
+  })
+
+  it('helps most where a line is only a few pixels long', () => {
+    // The whole point: at z15 a 400 m line already crosses the screen, at z9 it is a hairline.
+    const boost = (zoom: number) => at(lineWidth(true), zoom).plain / at(lineWidth(false), zoom).plain
+    expect(boost(9)).toBeGreaterThan(boost(15))
+  })
+
+  it('stops dimming the unselected lines while they are being looked for', () => {
+    expect(lineOpacity(true)).toBe(1)
+    expect(Array.isArray(lineOpacity(false))).toBe(true)
   })
 })

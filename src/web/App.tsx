@@ -273,6 +273,8 @@ export function App() {
     null,
   )
   const [layerError, setLayerError] = useState<string | null>(null)
+  /** Whether the pointer is on the lines count, which is the cue to make them easy to spot. */
+  const [emphasiseLines, setEmphasiseLines] = useState(false)
   /** Why the selected candidate has no chart, or null while it might still get one. */
   const [profileFailed, setProfileFailed] = useState<string | null>(null)
 
@@ -890,7 +892,16 @@ export function App() {
           </div>
 
           <div className="toggles">
-            <button data-active={showLines} onClick={() => setShowLines(!showLines)}>
+            {/* Pointing at the count is the natural gesture when hunting for the lines it counts,
+                so it is also what swells them. Focus as well as hover, for a keyboard. */}
+            <button
+              data-active={showLines}
+              onClick={() => setShowLines(!showLines)}
+              onPointerEnter={() => setEmphasiseLines(true)}
+              onPointerLeave={() => setEmphasiseLines(false)}
+              onFocus={() => setEmphasiseLines(true)}
+              onBlur={() => setEmphasiseLines(false)}
+            >
               {visible.length} lines
             </button>
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
@@ -1001,6 +1012,7 @@ export function App() {
           <MapView
             data={data}
             visible={visible}
+            emphasiseLines={emphasiseLines}
             selected={selected}
             basemapMix={basemapMix}
             anchorDump={anchorDump}
