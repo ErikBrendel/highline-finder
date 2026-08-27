@@ -297,8 +297,16 @@ drawn a box around -- and produced more lines than the rectangle did: 9,096 agai
 5,177 natural against 4,240. The rooftop half survives on the urban rectangle alone, which is now
 independent of any area of interest.
 
-Thirty-five chunks, six areas of interest left, 13,611 lines. What remains of the hand-drawn list is
-small and natural: Tropical, Sperenberg, Lilienthal, Linthe, Vehlen and Mueggelberge.
+**Forty-eight chunks, 3,072 km2 owned**, six areas of interest left. What remains of the hand-drawn
+list is small and natural: Tropical, Sperenberg, Lilienthal, Linthe, Vehlen and Mueggelberge.
+
+What that ground has cost so far: 1,473 tiles at 1 m and 421 surface tiles -- 2.1 GB of terrain and
+13.9 GB of surface, against 158 GB had every loaded tile been fetched at both resolutions. Nine of
+the forty-eight loaded nothing at full resolution at all. 16,593 lines before the pooled dedup.
+
+That is a tenth of Brandenburg, and the shape of the bill is now clear enough to extrapolate: about
+4.5 GB per 1,000 km2, so 130-140 GB for the state -- in the range the tile census predicted from the
+coarse grid alone.
 
 Left, in order: work-stealing tile handout; then dirty-set selection (a recompute area implies every
 chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
