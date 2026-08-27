@@ -267,6 +267,7 @@ export const DEFAULT_CHUNKS: string[] = [
   '49_732', '50_732',
   // And a column east of Eberswalde, towards the Oder.
   '55_731', '55_732',
-  // Row 733, north of Eberswalde, matching the width of the two rows below it.
+  // Rows 733 and 734, north of Eberswalde, matching the width of the rows below them.
   '49_733', '50_733', '51_733', '52_733', '53_733', '54_733', '55_733',
+  '49_734', '50_734', '51_734', '52_734', '53_734', '54_734', '55_734',
 ]

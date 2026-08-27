@@ -297,16 +297,18 @@ drawn a box around -- and produced more lines than the rectangle did: 9,096 agai
 5,177 natural against 4,240. The rooftop half survives on the urban rectangle alone, which is now
 independent of any area of interest.
 
-**Forty-eight chunks, 3,072 km2 owned**, six areas of interest left. What remains of the hand-drawn
+**Fifty-five chunks, 3,520 km2 owned**, six areas of interest left. What remains of the hand-drawn
 list is small and natural: Tropical, Sperenberg, Lilienthal, Linthe, Vehlen and Mueggelberge.
 
-What that ground has cost so far: 1,473 tiles at 1 m and 421 surface tiles -- 2.1 GB of terrain and
-13.9 GB of surface, against 158 GB had every loaded tile been fetched at both resolutions. Nine of
-the forty-eight loaded nothing at full resolution at all. 16,593 lines before the pooled dedup.
+What that ground has cost: 1,634 tiles at 1 m and 443 surface tiles -- 2.3 GB of terrain and 14.6 GB
+of surface. Twelve of the fifty-five loaded nothing at full resolution at all. 16,888 lines before
+the pooled dedup.
 
-That is a tenth of Brandenburg, and the shape of the bill is now clear enough to extrapolate: about
-4.5 GB per 1,000 km2, so 130-140 GB for the state -- in the range the tile census predicted from the
-coarse grid alone.
+That is a ninth of Brandenburg at **4.8 GB per 1,000 km2, extrapolating to ~147 GB statewide** --
+which lands between the tile census's 101 GB and 190 GB bounds, from a completely different
+direction. The census counted tiles the pre-pass would keep; this counted tiles a run actually
+fetched. Two independent estimates agreeing is the strongest evidence so far that the statewide
+download is a day's work rather than a project.
 
 Left, in order: work-stealing tile handout; then dirty-set selection (a recompute area implies every
 chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
