@@ -265,4 +265,6 @@ export const DEFAULT_CHUNKS: string[] = [
   // Squaring off the western edge of those two rows against the three below, which start at 49.
   '49_731', '50_731',
   '49_732', '50_732',
+  // And a column east of Eberswalde, towards the Oder.
+  '55_731', '55_732',
 ]
