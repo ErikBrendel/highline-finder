@@ -292,7 +292,7 @@ export function App() {
    * ground you are actually studying.
    */
   const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
-  const [showUrban, setShowUrban] = useState(false)
+  const [showUrban, setShowUrban] = useState(initial.showUrban ?? false)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -865,6 +865,7 @@ export function App() {
       showLines: changed(showLines, true),
       showHotspots: changed(showHotspots, true),
       showAreas: changed(showAreas, false),
+      showUrban: changed(showUrban, false),
       // All three on is the default, so only a narrowed selection is worth a parameter.
       kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
       filters: movedFilters({
@@ -873,7 +874,7 @@ export function App() {
     })
   }, [
     bbox, selectedId, selected, custom, rig, sagPct, basemapMix, data,
-    showLines, showHotspots, showAreas, kinds,
+    showLines, showHotspots, showAreas, showUrban, kinds,
     minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
   ])
 

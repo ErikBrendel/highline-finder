@@ -178,19 +178,6 @@ export const DEFAULT_PARAMS: Params = {
  * to be riggable here, so it doubles as a sanity check that the finder produces plausible geometry.
  */
 /**
- * Eberswalde + Niederfinow: 243 km2 north-east of Berlin, with 151 m of relief.
- *
- * Its southern edge is cut to N 5848002 in EPSG:25833, two metres above where chunk row 730 stops
- * owning ground. Superchunk ownership is half-open, so the two abut without overlapping and neither
- * claims a line the other does -- which matters because lines dedup across the seam but hotspot
- * counts do not, and overlapping ground would be counted twice.
- *
- * That cut costs 22 km2 of what used to be searched here; the chunks below now cover it instead,
- * which is the direction this is all going anyway.
- */
-const EBERSWALDE: Aoi = { south: 52.778101, west: 13.715984, north: 52.869081, east: 14.058569 }
-
-/**
  * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
  * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the dedup
  * pass rather than reported twice.
@@ -201,7 +188,6 @@ const EBERSWALDE: Aoi = { south: 52.778101, west: 13.715984, north: 52.869081, e
 export const DEFAULT_AOIS: Aoi[] = [
   // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.
   { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
-  EBERSWALDE,
   // Linthe: 4.6 km2 west of Berlin.
   { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
   // Mueggelberge: 22 km2 in south-east Berlin.
@@ -267,4 +253,13 @@ export const DEFAULT_CHUNKS: string[] = [
   '57_728', '57_729',
   // Row 730, the strip Eberswalde's southern edge was cut back from.
   '49_730', '50_730', '51_730', '52_730', '53_730', '54_730', '55_730', '56_730', '57_730',
+  /**
+   * Eberswalde and Niederfinow, which used to be an area of interest and are now eight chunks.
+   *
+   * The last of the hand-drawn rectangles to go. It covered 243 km2; these cover the 512 km2 of
+   * lattice it sat inside, so 269 km2 of ground comes along that nobody had drawn a box around --
+   * which is the whole argument for a fixed grid over rectangles somebody chose.
+   */
+  '51_731', '52_731', '53_731', '54_731',
+  '51_732', '52_732', '53_732', '54_732',
 ]
