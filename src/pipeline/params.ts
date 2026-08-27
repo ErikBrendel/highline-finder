@@ -178,6 +178,16 @@ export const DEFAULT_PARAMS: Params = {
  * to be riggable here, so it doubles as a sanity check that the finder produces plausible geometry.
  */
 /**
+ * Eberswalde + Niederfinow: 261 km2 north-east of Berlin, 151 m of relief, and a strict superset of
+ * every rectangle this has been -- 18 km2 at the start, then 141, then 190.
+ *
+ * Named because it is in two lists: it is searched, and it is the one place a roof may be anchored
+ * on. Referenced rather than repeated so the two cannot drift, and so that moving the rectangle
+ * moves both at once.
+ */
+const EBERSWALDE: Aoi = { south: 52.769741, west: 13.715984, north: 52.869081, east: 14.058569 }
+
+/**
  * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
  * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the dedup
  * pass rather than reported twice.
@@ -188,9 +198,7 @@ export const DEFAULT_PARAMS: Params = {
 export const DEFAULT_AOIS: Aoi[] = [
   // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.
   { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
-  // Eberswalde + Niederfinow: 261 km2 north-east of Berlin, 151 m of relief, and a strict superset
-  // of every rectangle this has been -- 18 km2 at the start, then 141, then 190.
-  { south: 52.769741, west: 13.715984, north: 52.869081, east: 14.058569 },
+  EBERSWALDE,
   // Linthe: 4.6 km2 west of Berlin.
   { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
   // Mueggelberge: 22 km2 in south-east Berlin.
@@ -232,11 +240,14 @@ export const DEFAULT_AOIS: Aoi[] = [
  * of tiles, so the other 82 % is that case.
  *
  * The trade is the usual one-sided one: a rooftop line outside these rectangles is not missed, it
- * is never looked for. It costs a lot -- 45 % of the lines found so far are urban or mixed, and
- * Eberswalde alone holds 5,457 of them -- so add a rectangle wherever that matters. The scan
- * reports how many anchors it skipped for this, so the cost is never silent.
+ * is never looked for. It costs a lot -- 45 % of the lines found before this rule existed were
+ * urban or mixed -- so add a rectangle wherever that matters. The scan reports how many anchors it
+ * skipped for this, so the cost is never silent.
+ *
+ * Eberswalde is here because its 5,457 rooftop and mixed lines are the urban half of this project's
+ * results, found over ground that was searched deliberately rather than swept.
  */
-export const URBAN_AREAS: Aoi[] = []
+export const URBAN_AREAS: Aoi[] = [EBERSWALDE]
 
 export const DEFAULT_CHUNKS: string[] = [
   '52_728', '53_728', '52_729', '53_729',
