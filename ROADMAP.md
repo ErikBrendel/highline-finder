@@ -278,6 +278,19 @@ The saving is concentrated exactly where it has to be. The two hilliest chunks b
 52_729 kept 2,071 of 2,104 lines and 53_729 kept 855 of 878 -- while the flat ones went to nothing.
 Statewide the terrain rule keeps 18.4 % of tiles, so 82 % of Brandenburg is the second case.
 
+**Eighteen chunks are searched**, a 144 x 8 km strip from E 392000 to E 464000 across rows 728-729,
+1,152 km2 owned. What it actually cost:
+
+- 346 of a possible 1,800 tiles loaded at 1 m, **none of them for a roof**, 484 MB of DGM.
+- 85 surface tiles, 2.8 GB of bDOM, against 59.4 GB had every loaded tile been fetched at both
+  resolutions.
+- 3,251 lines, and five chunks produced none at all while needing no surface model whatsoever.
+
+The spread is the point. `52_729` and `53_729` hold 2,926 of the 3,251 lines between them; six of
+the eighteen loaded nothing at 1 m and four more found nothing worth keeping. That is 1,152 km2 of
+Brandenburg costing 3.3 GB, where the same ground with rooftop anchoring everywhere would have run
+several times that.
+
 Left, in order: work-stealing tile handout; then dirty-set selection (a recompute area implies every
 chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
 
