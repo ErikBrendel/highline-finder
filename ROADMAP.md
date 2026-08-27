@@ -291,6 +291,15 @@ the eighteen loaded nothing at 1 m and four more found nothing worth keeping. Th
 Brandenburg costing 3.3 GB, where the same ground with rooftop anchoring everywhere would have run
 several times that.
 
+**Eberswalde is chunks now**, and with it the last hand-drawn rectangle over ground that matters.
+The eight chunks it sat inside cover 512 km2 against its 243, so 269 km2 came along that nobody had
+drawn a box around -- and produced more lines than the rectangle did: 9,096 against 8,138, with
+5,177 natural against 4,240. The rooftop half survives on the urban rectangle alone, which is now
+independent of any area of interest.
+
+Thirty-five chunks, six areas of interest left, 13,611 lines. What remains of the hand-drawn list is
+small and natural: Tropical, Sperenberg, Lilienthal, Linthe, Vehlen and Mueggelberge.
+
 Left, in order: work-stealing tile handout; then dirty-set selection (a recompute area implies every
 chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
 
