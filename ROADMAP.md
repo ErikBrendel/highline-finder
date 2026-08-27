@@ -267,6 +267,17 @@ anchor at 423997.5 by its full `refineRadius` of 3 m after ownership was already
 and harmless: both neighbours decide on the same pre-refinement lattice anchor, so neither can claim
 the other's line.
 
+**Rooftop anchors are opt-in by place**, via `URBAN_AREAS` -- empty, so the search is natural-only
+everywhere until a rectangle says otherwise. Buildings are still merged into the ground, so they
+still block a line; what stops is standing an anchor on one, and fetching a tile on the strength of
+its roofs. Measured over the eight chunks, 512 km2: tiles loaded 404 -> 177, lines 7,241 -> 3,074,
+**surface tiles 161 -> 52**, so 5.3 GB of bDOM becomes 1.7 GB. Four of the eight now need no
+full-resolution data at all.
+
+The saving is concentrated exactly where it has to be. The two hilliest chunks barely moved --
+52_729 kept 2,071 of 2,104 lines and 53_729 kept 855 of 878 -- while the flat ones went to nothing.
+Statewide the terrain rule keeps 18.4 % of tiles, so 82 % of Brandenburg is the second case.
+
 Left, in order: work-stealing tile handout; then dirty-set selection (a recompute area implies every
 chunk within `maxLength` of it); then per-chunk candidate files and a viewer that fetches by view.
 
@@ -295,6 +306,20 @@ are ~7 MB per chunk.
   from 4.2; finer still trades against the per-chunk message, and the real fix is chunks sized by
   the anchors they contain rather than by index range, since a band over a town holds far more pairs
   than one over a lake.
+
+### Fetch the surface model for the lines that survive, not for every pair
+
+Not done, and worth doing on its own merits. `corridorTiles` runs on `found.pairs` -- every pair
+that cleared the terrain, 25,500 of them on chunk 52_728 -- before anything has been scored. The
+corridors of the 274 lines that actually survived cover 8 tiles against the 13 fetched, so roughly
+a third of the surface download is bought for pairs that are about to be thrown away.
+
+The restructure is a second pass: score once without canopy, since clearance, exposure and road
+crossings do not need it, keep the survivors, fetch the surface model for their corridors, then
+re-score with the canopy gate applied. Only 36 of ~20,000 rejections on that chunk were canopy, so
+the first pass produces very nearly the right survivor set.
+
+Independent of the urban rectangles above, and stacks with them.
 
 ### Line length: postponed, and here is why
 

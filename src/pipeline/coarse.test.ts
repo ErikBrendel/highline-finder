@@ -98,6 +98,14 @@ describe('tilesWithRoofAnchors', () => {
     expect(near.has('33402-5802')).toBe(true)
   })
 
+  it('ignores a roof no urban area covers', () => {
+    // The pre-pass half of the same rule: outside an urban area a building cannot pull its tile in,
+    // which is what stops every village on flat ground claiming a square kilometre at 1 m.
+    const faces = new Map([['33401-5801', [faceIn('33401-5801', tall)]]])
+    expect(tilesWithRoofAnchors(faces, flat(), p, 0, { covers: () => false }).size).toBe(0)
+    expect(tilesWithRoofAnchors(faces, flat(), p, 0, { covers: () => true }).size).toBe(1)
+  })
+
   it('respects the roof count a tile has to reach', () => {
     const faces = new Map([['33401-5801', [faceIn('33401-5801', tall)]]])
     expect(tilesWithRoofAnchors(faces, flat(), { ...p, maskMinRoofs: 2 }, 0).size).toBe(0)

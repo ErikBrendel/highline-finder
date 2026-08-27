@@ -165,3 +165,38 @@ describe('anchor order', () => {
     }
   })
 })
+
+describe('urban areas', () => {
+  /** Flat plateau west of a cliff, with a slab standing on the plateau to act as a roof. */
+  const withRoof = () => cliff(20)
+  const roofAt = (e0: number, e1: number) => ({ covers: (e: number) => e >= e0 && e <= e1 })
+
+  it('skips a point on a roof when no urban area covers it', () => {
+    const g = withRoof()
+    const roofs = roofAt(150, 199)
+    const everywhere = scanAnchors(g, p, roofs)
+    const nowhere = scanAnchors(g, p, roofs, { covers: () => false })
+    expect(everywhere.skippedRoof).toBe(0)
+    expect(nowhere.skippedRoof).toBeGreaterThan(0)
+    // Skipped rather than searched: they never reach the drop test at all.
+    expect(nowhere.scanned).toBe(everywhere.scanned)
+    expect(nowhere.anchors.length).toBeLessThan(everywhere.anchors.length)
+  })
+
+  it('searches a roof that an urban area does cover, exactly as before', () => {
+    const g = withRoof()
+    const roofs = roofAt(150, 199)
+    const open = scanAnchors(g, p, roofs)
+    const covered = scanAnchors(g, p, roofs, { covers: () => true })
+    expect(covered.skippedRoof).toBe(0)
+    expect(covered.anchors.length).toBe(open.anchors.length)
+  })
+
+  it('leaves anchors off the roof alone', () => {
+    // The ground west of the slab is not a roof, so no urban rule touches it.
+    const g = withRoof()
+    const roofs = roofAt(150, 199)
+    const nowhere = scanAnchors(g, p, roofs, { covers: () => false })
+    for (const a of nowhere.anchors) expect(a.e < 150 || a.e > 199).toBe(true)
+  })
+})

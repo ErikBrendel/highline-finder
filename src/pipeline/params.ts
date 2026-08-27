@@ -217,6 +217,27 @@ export const DEFAULT_AOIS: Aoi[] = [
  * them found 4,502 lines with none duplicated across a seam. The rest extend it westward a column
  * at a time, to E 400000.
  */
+/**
+ * Where a roof may be anchored on. Everywhere else is searched for natural lines only.
+ *
+ * Empty, which is the point: a rooftop anchor is opt-in by place. Buildings are still merged into
+ * the ground everywhere, so a line is still blocked by the warehouse it would have crossed -- what
+ * changes is that the openness scan will not stand an anchor on top of one outside these
+ * rectangles, and the coarse pre-pass will not fetch a tile on the strength of its roofs.
+ *
+ * The reason is that most of Brandenburg is flat, and on flat ground every line found is a rooftop
+ * line: chunks 51_728, 51_729, 50_728 and 52_728 produced 202, 63, 130 and 274 lines between them,
+ * every single one urban, and the surface model was fetched for 14, 6, 23 and 8 tiles to measure
+ * them. None of that ground can hold a natural line at all. Statewide the terrain rule keeps 18.4 %
+ * of tiles, so the other 82 % is that case.
+ *
+ * The trade is the usual one-sided one: a rooftop line outside these rectangles is not missed, it
+ * is never looked for. It costs a lot -- 45 % of the lines found so far are urban or mixed, and
+ * Eberswalde alone holds 5,457 of them -- so add a rectangle wherever that matters. The scan
+ * reports how many anchors it skipped for this, so the cost is never silent.
+ */
+export const URBAN_AREAS: Aoi[] = []
+
 export const DEFAULT_CHUNKS: string[] = [
   '52_728', '53_728', '52_729', '53_729',
   '51_728', '51_729',

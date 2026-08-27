@@ -69,6 +69,8 @@ export interface Anchor {
 export interface ScanResult {
   anchors: Anchor[]
   scanned: number
+  /** Points on a roof outside any urban area, which is ground nobody looked at. */
+  skippedRoof: number
   /** Points that passed the omnidirectional drop test, before any direction was considered. */
   passedDropTest: number
 }
@@ -112,7 +114,17 @@ function latticeFrom(edge: number, step: number): number {
   return Math.ceil((edge - half) / step) * step + half
 }
 
-export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null): ScanResult {
+export function scanAnchors(
+  ground: Grid,
+  p: Params,
+  roofs: Roofs | null = null,
+  /**
+   * Where a roof may be stood on. Null means anywhere, which is what every caller but the pipeline
+   * wants; the pipeline passes the urban areas, and a point on a roof outside them is skipped
+   * rather than searched -- there is no anchor under a building.
+   */
+  urban: Roofs | null = null,
+): ScanResult {
   const anchors: Anchor[] = []
   const { sectorCount } = p
   const sin = new Float64Array(sectorCount)
@@ -137,6 +149,7 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
   const firstN = latticeFrom(ground.n1 - ground.h * ground.res, p.anchorStep)
 
   let scanned = 0
+  let skippedRoof = 0
   let passedDropTest = 0
   for (let n = firstN; n < maxN; n += p.anchorStep) {
     for (let e = firstE; e < maxE; e += p.anchorStep) {
@@ -144,9 +157,15 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
       if (Number.isNaN(g)) continue
       scanned++
 
+      const onRoof = roofs?.covers(e, n) ?? false
+      if (onRoof && urban && !urban.covers(e, n)) {
+        skippedRoof++
+        continue
+      }
+
       // Test A, measured from the highest attachment because that is the most permissive case.
       const tDrop = phaseAt()
-      const range = rigRange(roofs?.covers(e, n) ?? false, p)
+      const range = rigRange(onRoof, p)
       const anchorH = g + range.max
       const deepEnough = anchorH - p.minDropDepth
       // The square window first, then the disc it is only an approximation of.
@@ -192,7 +211,7 @@ export function scanAnchors(ground: Grid, p: Params, roofs: Roofs | null = null)
       }
     }
   }
-  return { anchors, scanned, passedDropTest }
+  return { anchors, scanned, skippedRoof, passedDropTest }
 }
 
 /**

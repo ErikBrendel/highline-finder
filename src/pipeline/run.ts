@@ -25,8 +25,8 @@ import {
 } from './hotspots.js'
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Anchor } from './openness.js'
-import { DEFAULT_AOIS, DEFAULT_CHUNKS, DEFAULT_PARAMS } from './params.js'
-import { contains, recomputes, workAreas, type WorkArea } from './regions.js'
+import { DEFAULT_AOIS, DEFAULT_CHUNKS, DEFAULT_PARAMS, URBAN_AREAS } from './params.js'
+import { boxOf, contains, recomputes, workAreas, type WorkArea } from './regions.js'
 import { chunkArea, parseChunk } from './chunks.js'
 import { record, renderReport, stage } from './report.js'
 import { Pool, poolSize } from './pool.js'
@@ -215,6 +215,16 @@ const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 
 async function searchArea(area: WorkArea, p: Params, label: string): Promise<AreaResult> {
   const { bbox, boxes } = area
 
+  /**
+   * Where a roof may be stood on.
+   *
+   * Never null: an empty URBAN_AREAS means no roof anywhere is anchorable, which is the whole point
+   * of the list. Passing null for an empty list would have meant the opposite -- anchor on every
+   * roof in the state -- and did, until a chunk that is 100 % rooftop lines came back unchanged.
+   */
+  const urbanBoxes = URBAN_AREAS.map(boxOf)
+  const urban = { covers: (e: number, n: number) => urbanBoxes.some((b) => contains(b, e, n)) }
+
   const countValid = (g: Grid, atLeast = -Infinity) => {
     let n = 0
     for (const v of g.data) if (!Number.isNaN(v) && v >= atLeast) n++
@@ -252,7 +262,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
     p.maskMinDrop > 0
       ? tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, p.maxLength)
       : null
-  const byRoof = byTerrain && tilesWithRoofAnchors(faces, coarse, p, p.maxLength)
+  const byRoof = byTerrain && tilesWithRoofAnchors(faces, coarse, p, p.maxLength, urban)
   const wantedTiles = byTerrain && byRoof ? new Set([...byTerrain, ...byRoof]) : null
   const groundTiles = wantedTiles ? allTiles.filter((t) => wantedTiles.has(t)) : allTiles
   const roofOnly = byTerrain && byRoof
@@ -315,13 +325,14 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
   const scan = await stage(
     'openness scan',
     () => {
-      const found = scanAnchors(ground, p, roofs)
+      const found = scanAnchors(ground, p, roofs, urban)
       return { ...found, inside: found.anchors.filter(inAoi) }
     },
     (r) => ({
       from: [r.scanned, 'points'],
       to: [r.inside.length, 'anchors'],
       steps: [
+        ['on a roof outside an urban area, so not searched', r.skippedRoof],
         [`falls >=${p.minDropDepth}m within ${p.dropSearchRadius}m`, r.passedDropTest],
         ['some direction open', r.anchors.length],
         ['inside an AOI', r.inside.length],

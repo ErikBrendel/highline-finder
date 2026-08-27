@@ -172,6 +172,8 @@ export function tilesWithRoofAnchors(
   coarse: Grid,
   p: Params,
   reach: number,
+  /** Where a roof may be anchored on. Null means anywhere; see URBAN_AREAS. */
+  urban: { covers(e: number, n: number): boolean } | null = null,
 ): Set<string> {
   const lowest = minFilter(coarse, p.dropSearchRadius)
   const out = new Set<string>()
@@ -179,6 +181,7 @@ export function tilesWithRoofAnchors(
     let anchorable = 0
     for (const { ring, z } of tileFaces) {
       // The ring's first corner is enough: a LoD1 footprint is small next to a 16 m coarse cell.
+      if (urban && !urban.covers(ring[0]!, ring[1]!)) continue
       const near = lowest.nearest(ring[0]!, ring[1]!)
       if (!Number.isNaN(near) && z - near >= p.maskMinRoofDrop) anchorable++
     }
