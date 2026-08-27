@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Grid } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
-import { tileTiff, type Product } from './cache.js'
+import { MissingTile, tileTiff, type Product } from './cache.js'
 
 /**
  * Reduces a source tile to the working resolution once, and keeps the result.
@@ -57,9 +57,17 @@ async function exists(path: string): Promise<boolean> {
  * There is one resolution and no reason to expect a second, and disk is the constraint that
  * actually binds.
  */
-export async function buildTile(product: Product, tile: string, res: number): Promise<Grid> {
+export async function buildTile(product: Product, tile: string, res: number): Promise<Grid | null> {
   const grid = gridForTile(tile, res)
-  const tif = await tileTiff(product, tile)
+  let tif: string
+  try {
+    tif = await tileTiff(product, tile)
+  } catch (e) {
+    // Ground the survey does not cover. Nothing is written, so a later run asks once more and gets
+    // the same answer cheaply; the caller leaves those cells unfilled, which reads as no data.
+    if (e instanceof MissingTile) return null
+    throw e
+  }
   const buf = await readFile(tif)
   await blitGeoTiff(
     buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
@@ -71,8 +79,8 @@ export async function buildTile(product: Product, tile: string, res: number): Pr
   return grid
 }
 
-/** The reduced tile, from cache if it is there. */
-export async function loadTile(product: Product, tile: string, res: number): Promise<Grid> {
+/** The reduced tile, from cache if it is there, or null where the survey publishes none. */
+export async function loadTile(product: Product, tile: string, res: number): Promise<Grid | null> {
   const path = cachePath(product, tile, res)
   if (!(await exists(path))) return buildTile(product, tile, res)
   const buf = await readFile(path)
@@ -168,7 +176,10 @@ if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
     const start = (tile: string) =>
       tileTiff(product as Product, tile).then(
         () => null,
-        (error: unknown) => error ?? new Error(`fetching ${tile} failed`),
+        // A tile the survey does not publish is not a failure to hand on: the build below asks
+        // again, gets the same answer, and reports it as ground with no data. Everything else is.
+        (error: unknown) =>
+          error instanceof MissingTile ? null : (error ?? new Error(`fetching ${tile} failed`)),
       )
     const raise = async (settled: Promise<unknown> | null) => {
       const failure = await settled
@@ -179,7 +190,9 @@ if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
     for (let i = 0; i < tiles.length; i++) {
       await raise(ahead)
       ahead = i + 1 < tiles.length ? start(tiles[i + 1]!) : null
-      await buildTile(product as Product, tiles[i]!, Number(res))
+      if (!(await buildTile(product as Product, tiles[i]!, Number(res)))) {
+        process.stdout.write(`  ${product}_${tiles[i]!} is not published, skipping\n`)
+      }
     }
   }
   run().catch((e) => {

@@ -17,6 +17,7 @@ const full: UrlState = {
   basemapMix: 1.4,
   showLines: false,
   showHotspots: false,
+  showAreas: true,
   kinds: ['natural', 'urban'],
   filters: { minScore: 40, maxCanopy: 25 },
 }
@@ -165,5 +166,20 @@ describe('movedFilters', () => {
       minLength: 200,
       maxCanopy: 10,
     })
+  })
+})
+
+describe('the searched-area outlines', () => {
+  it('stays out of a link until it is switched on', () => {
+    // Off is the default, so an ordinary link should not mention it at all.
+    expect(toSearch({ ...full, showAreas: false })).not.toContain('areas')
+    expect(toSearch({ ...full, showAreas: null })).not.toContain('areas')
+    expect(toSearch({ ...full, showAreas: true })).toContain('areas=1')
+  })
+
+  it('comes back on from a link that carries it', () => {
+    expect(parseUrl('?areas=1').showAreas).toBe(true)
+    expect(parseUrl('?areas=0').showAreas).toBe(false)
+    expect(parseUrl('').showAreas).toBeNull()
   })
 })

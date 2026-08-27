@@ -286,6 +286,13 @@ export function App() {
    * the useful comparison is between them rather than of both at once.
    */
   const [debugLayer, setDebugLayer] = useState<DebugLayer>('none')
+  /**
+   * The two footprints, off by default. They say where the search looked and where it was allowed
+   * to stand on a roof -- context for reading the map, not part of the answer, and clutter over
+   * ground you are actually studying.
+   */
+  const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
+  const [showUrban, setShowUrban] = useState(false)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -857,6 +864,7 @@ export function App() {
       basemapMix: changed(basemapMix, MIX_MAX),
       showLines: changed(showLines, true),
       showHotspots: changed(showHotspots, true),
+      showAreas: changed(showAreas, false),
       // All three on is the default, so only a narrowed selection is worth a parameter.
       kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
       filters: movedFilters({
@@ -865,7 +873,7 @@ export function App() {
     })
   }, [
     bbox, selectedId, selected, custom, rig, sagPct, basemapMix, data,
-    showLines, showHotspots, kinds,
+    showLines, showHotspots, showAreas, kinds,
     minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
   ])
 
@@ -984,6 +992,14 @@ export function App() {
                 {DEBUG_LABELS[debugLayer]}
               </button>
             )}
+            <button data-active={showAreas} onClick={() => setShowAreas(!showAreas)}>
+              {data.meta.regions.length} areas
+            </button>
+            {!!data.meta.urbanAreas.length && (
+              <button data-active={showUrban} onClick={() => setShowUrban(!showUrban)}>
+                {data.meta.urbanAreas.length} urban
+              </button>
+            )}
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>
@@ -1086,6 +1102,8 @@ export function App() {
             hotspots={showHotspots ? shownHotspots : null}
             mask={debugLayer === 'coarse' ? mask : null}
             regions={debugLayer === 'regions' ? data.meta.regions : null}
+            showAreas={showAreas}
+            showUrban={showUrban}
             tiles={tileLayer ? tiles : null}
             tileLayer={tileLayer ?? 'terrain'}
             initialBbox={initial.bbox}

@@ -51,7 +51,12 @@ export async function loadProduct(
   )
   // Reduce whatever is not cached yet, several tiles at a time, then assemble from the cache.
   await ensureDownsampled(product, tiles, res)
-  for (const tile of tiles) blitGrid(await loadTile(product, tile, res), grid)
+  for (const tile of tiles) {
+    // Null where the survey publishes no such square. Those cells stay NaN, which every reader
+    // already treats as ground it knows nothing about.
+    const loaded = await loadTile(product, tile, res)
+    if (loaded) blitGrid(loaded, grid)
+  }
   return grid
 }
 

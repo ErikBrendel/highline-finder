@@ -430,6 +430,12 @@ export interface DatasetMeta {
   generatedAt: string
   regions: Region[]
   params: Params
+  /**
+   * Where a roof was allowed to be anchored on. Everywhere else was searched for natural lines
+   * only, so this is not decoration: it says which parts of the map were asked a different
+   * question. See URBAN_AREAS in params.ts.
+   */
+  urbanAreas: Aoi[]
   sources: { name: string; url: string; attribution: string; note: string }[]
   stats: {
     anchorsScanned: number

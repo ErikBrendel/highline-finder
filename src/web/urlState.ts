@@ -69,6 +69,12 @@ export interface UrlState {
   /** Layer toggles. Null means the default, which is on for both. */
   showLines: boolean | null
   showHotspots: boolean | null
+  /**
+   * The searched-area outlines, default off. Written only when switched on, so it stays out of an
+   * ordinary link -- but a link showing them is usually a link *about* them, which is exactly when
+   * it should survive being shared.
+   */
+  showAreas: boolean | null
   /** Anchor classes shown. Null means all of them, which is the default. */
   kinds: LineKind[] | null
   /** Only the sliders that have been moved off {@link FILTER_DEFAULTS}. */
@@ -84,6 +90,7 @@ const EMPTY: UrlState = {
   basemapMix: null,
   showLines: null,
   showHotspots: null,
+  showAreas: null,
   kinds: null,
   filters: {},
 }
@@ -198,6 +205,7 @@ export function parseUrl(search: string): UrlState {
     basemapMix: map ? map[0]! : null,
     showLines: toggle(q.get('lines')),
     showHotspots: toggle(q.get('spots')),
+    showAreas: toggle(q.get('areas')),
     kinds: kinds(q.get('kinds')),
     filters,
   }
@@ -214,6 +222,7 @@ export function toSearch(s: UrlState): string {
   if (s.basemapMix !== null) q.set('map', s.basemapMix.toFixed(1))
   if (s.showLines === false) q.set('lines', '0')
   if (s.showHotspots === false) q.set('spots', '0')
+  if (s.showAreas === true) q.set('areas', '1')
   if (s.kinds) q.set('kinds', s.kinds.join(','))
   for (const [field, param] of Object.entries(FILTER_PARAMS) as [keyof Filters, string][]) {
     const v = s.filters[field]

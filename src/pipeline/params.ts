@@ -178,14 +178,17 @@ export const DEFAULT_PARAMS: Params = {
  * to be riggable here, so it doubles as a sanity check that the finder produces plausible geometry.
  */
 /**
- * Eberswalde + Niederfinow: 261 km2 north-east of Berlin, 151 m of relief, and a strict superset of
- * every rectangle this has been -- 18 km2 at the start, then 141, then 190.
+ * Eberswalde + Niederfinow: 243 km2 north-east of Berlin, with 151 m of relief.
  *
- * Named because it is in two lists: it is searched, and it is the one place a roof may be anchored
- * on. Referenced rather than repeated so the two cannot drift, and so that moving the rectangle
- * moves both at once.
+ * Its southern edge is cut to N 5848002 in EPSG:25833, two metres above where chunk row 730 stops
+ * owning ground. Superchunk ownership is half-open, so the two abut without overlapping and neither
+ * claims a line the other does -- which matters because lines dedup across the seam but hotspot
+ * counts do not, and overlapping ground would be counted twice.
+ *
+ * That cut costs 22 km2 of what used to be searched here; the chunks below now cover it instead,
+ * which is the direction this is all going anyway.
  */
-const EBERSWALDE: Aoi = { south: 52.769741, west: 13.715984, north: 52.869081, east: 14.058569 }
+const EBERSWALDE: Aoi = { south: 52.778101, west: 13.715984, north: 52.869081, east: 14.058569 }
 
 /**
  * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
@@ -244,10 +247,14 @@ export const DEFAULT_AOIS: Aoi[] = [
  * urban or mixed -- so add a rectangle wherever that matters. The scan reports how many anchors it
  * skipped for this, so the cost is never silent.
  *
- * Eberswalde is here because its 5,457 rooftop and mixed lines are the urban half of this project's
- * results, found over ground that was searched deliberately rather than swept.
+ * The north-west quarter of Eberswalde is here because its rooftop and mixed lines are the urban
+ * half of this project's results, found over ground that was searched deliberately rather than
+ * swept. Narrowed to the town itself rather than the whole area of interest: the rest is the
+ * Niederfinow side, where the lines worth having come off the terrain.
  */
-export const URBAN_AREAS: Aoi[] = [EBERSWALDE]
+export const URBAN_AREAS: Aoi[] = [
+  { south: 52.816791, west: 13.715984, north: 52.869081, east: 13.850062 },
+]
 
 export const DEFAULT_CHUNKS: string[] = [
   '52_728', '53_728', '52_729', '53_729',
@@ -258,4 +265,6 @@ export const DEFAULT_CHUNKS: string[] = [
   '55_728', '55_729',
   '56_728', '56_729',
   '57_728', '57_729',
+  // Row 730, the strip Eberswalde's southern edge was cut back from.
+  '49_730', '50_730', '51_730', '52_730', '53_730', '54_730', '55_730', '56_730', '57_730',
 ]

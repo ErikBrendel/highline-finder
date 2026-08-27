@@ -754,6 +754,7 @@ async function main() {
       generatedAt: new Date().toISOString(),
       regions,
       params: p,
+      urbanAreas: URBAN_AREAS,
       sources: [
         {
           name: 'DGM 1 m (LiDAR terrain model)',

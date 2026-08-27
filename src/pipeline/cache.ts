@@ -66,7 +66,14 @@ export const backoffMs = (attempt: number) => Math.min(60_000, 5_000 * 2 ** atte
  * A status code is the server answering the question, and it will answer the same way in a minute:
  * a tile outside the survey's coverage is not there, and eight minutes of backoff spent confirming
  * that is eight minutes not spent on the tiles that exist.
+ *
+ * A 404 is that answer and not an error. Brandenburg's border is ragged and the survey publishes a
+ * tile only where it has data, so a run that reaches the edge -- which every statewide run does --
+ * asks for squares that do not exist. `MissingTile` says so in a way callers can act on, because
+ * the alternative is what happened: nine chunks of work thrown away on the eighth for one square
+ * of Poland.
  */
+export class MissingTile extends Error {}
 export async function tileTiff(product: Product, tile: string): Promise<string> {
   await mkdir(CACHE_DIR, { recursive: true })
   const tifPath = join(CACHE_DIR, `${product}_${tile}.tif`)
@@ -87,6 +94,7 @@ export async function tileTiff(product: Product, tile: string): Promise<string> 
       last = e
       continue
     }
+    if (res.status === 404) throw new MissingTile(`${product}_${tile} is not published`)
     if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`)
     try {
       const zip = new Uint8Array(await res.arrayBuffer())

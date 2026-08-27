@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl, { type Map as MlMap } from 'maplibre-gl'
 import type {
+  Aoi,
   AnchorDump,
   Candidate,
   Dataset,
@@ -404,6 +405,11 @@ function boxRing(b: Box25833): [number, number][] {
 
 type Box25833 = { minE: number; minN: number; maxE: number; maxN: number }
 
+/** The rectangles a roof could be anchored in, as outlines. Plain boxes, not a region's geometry. */
+function urbanRings(areas: Aoi[]): [number, number][][] {
+  return areas.map((a) => boxRing(utmBounds(a)))
+}
+
 /**
  * What each region actually searched, as outlines.
  *
@@ -561,6 +567,9 @@ interface Props {
   tileLayer: TileLayer
   /** The regions whose vintage to draw, or null when that view is off. */
   regions: Region[] | null
+  /** Whether to outline the ground that was searched, and the ground a roof counted in. */
+  showAreas: boolean
+  showUrban: boolean
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
   custom: CustomPoints
@@ -584,6 +593,8 @@ export function MapView({
   tiles,
   tileLayer,
   regions,
+  showAreas,
+  showUrban,
   initialBbox,
   custom,
   showLines,
@@ -843,7 +854,32 @@ export function MapView({
           'line-color': '#38bdf8',
           'line-width': 2.5,
           'line-dasharray': [3, 2],
-          'line-opacity': 0.9,
+          'line-opacity': 0,
+        },
+      })
+
+      m.addSource('urban', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: urbanRings(data.meta.urbanAreas).map((ring) => ({
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'LineString', coordinates: ring },
+          })),
+        },
+      })
+      m.addLayer({
+        id: 'urban',
+        type: 'line',
+        source: 'urban',
+        // Amber against the blue of the searched areas, and a longer dash: the two overlap by
+        // definition, so they have to be told apart where they do.
+        paint: {
+          'line-color': '#f59e0b',
+          'line-width': 2.5,
+          'line-dasharray': [6, 3],
+          'line-opacity': 0,
         },
       })
 
@@ -1099,6 +1135,13 @@ export function MapView({
       : 0)
     m.setPaintProperty('maskEdge', 'line-opacity', mask ? 0.35 : 0)
   }, [mask, ready])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    m.setPaintProperty('aoi', 'line-opacity', showAreas ? 0.9 : 0)
+    m.setPaintProperty('urban', 'line-opacity', showUrban ? 0.9 : 0)
+  }, [showAreas, showUrban, ready])
 
   /**
    * The region boxes, with a stamp on each saying when it was last computed.
