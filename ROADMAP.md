@@ -296,6 +296,52 @@ are ~7 MB per chunk.
   the anchors they contain rather than by index range, since a band over a town holds far more pairs
   than one over a lake.
 
+### Line length: postponed, and here is why
+
+`maxLength` is 500 m. Raising it was priced in both directions and shelved; these numbers are here
+so the question does not get asked from scratch again.
+
+**What it would cost.** Statewide pre-pass keep rate, measured over the cached coarse grid with
+`tileCensus.ts <seconds> <reach>`, since `tilesWorthLoading` grows every passing cell into a
+`ceil(L/1000)`-tile ring:
+
+| reach | tiles kept | of the state | surface | halo | chunk load |
+|-------|-----------|--------------|---------|------|------------|
+| 500 m | 5,769 | 18.4 % | ~190 GB | 1 tile | 10x10 km, 400 MB/raster |
+| 800 m | 6,557 | 21.0 % | ~216 GB | 1 tile | 10x10 km, 400 MB/raster |
+| 1500 m | 10,201 | 35.0 % | ~337 GB | 2 tiles | 12x12 km, 576 MB/raster |
+| 3000 m | 15,632 | 53.6 % | ~516 GB | 3 tiles | 14x14 km, 784 MB/raster |
+
+The pair search is separately quadratic in `maxLength` -- every anchor scans a 3x3 grid of cells of
+that side -- so 800 m is 2.6x and 3 km is 36x on a stage that is a third of the run. Region 7's
+pairing is 141 s of processor at 500 m.
+
+**What it would buy: less than nothing past about a kilometre.** A span sags `sagRatio * L` = 5 % of
+its length, so the ground has to fall that far below the anchors within roughly `L/2`. Counted on the
+coarse grid over three windows including the best relief in the state:
+
+| span | sags | needs | ground that could hold it |
+|------|------|-------|---------------------------|
+| 500 m | 25 m | 28 m within 250 m | 1.945 % |
+| 800 m | 40 m | 43 m within 400 m | 1.089 % |
+| 1200 m | 60 m | 63 m within 600 m | 0.574 % |
+| 2000 m | 100 m | 103 m within 1000 m | 0.039 % |
+| 3000 m | 150 m | 153 m within 1500 m | **0 of 16 million cells** |
+
+Brandenburg's entire relief is 151 m, so a 3 km line has nowhere to be. Raising the limit there buys
+a 2.7x download and 36x the pair search to find nothing.
+
+**Two things fall out of that.** The cliff is at exactly 1000 m, where `ceil(L/1000)` ticks over and
+the halo, the chunk memory and the dilation ring all step together -- everything below is nearly
+free and the first metre above is a step change. And the present cap is barely binding: 2 lines of
+13,634 reach 500 m, against 220 in the 450-500 m band and a tail that was already decaying.
+
+**If it is ever revisited**, 800 m is the only candidate, and the cheap test is to raise it on an
+already-downloaded chunk such as 52_729 and count what appears -- minutes of compute and no new
+downloads. The deeper question is `sagRatio` itself: a constant fraction of span is a stand-in, not a
+model, and it is what makes long spans impossible here. A catenary would not change the conclusion
+by much, but it would change these numbers.
+
 ## Viewer
 
 - 3D terrain view with the line drawn in space.
