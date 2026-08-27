@@ -262,4 +262,7 @@ export const DEFAULT_CHUNKS: string[] = [
    */
   '51_731', '52_731', '53_731', '54_731',
   '51_732', '52_732', '53_732', '54_732',
+  // Squaring off the western edge of those two rows against the three below, which start at 49.
+  '49_731', '50_731',
+  '49_732', '50_732',
 ]
