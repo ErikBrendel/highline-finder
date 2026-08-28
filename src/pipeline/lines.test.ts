@@ -635,11 +635,11 @@ describe('thinCrossings', () => {
   it('leaves ground alone where nothing crosses much', () => {
     // Parallel spans, no crossings at all. This is what most of the state looks like.
     const apart = Array.from({ length: 40 }, (_, i) => span(0, i * 50, 400, i * 50))
-    expect(thinCrossings(apart, 50)).toHaveLength(40)
+    expect(thinCrossings(apart, 50, 0)).toHaveLength(40)
   })
 
   it('holds every kept line under the limit', () => {
-    const kept = thinCrossings(fan(20), 50)
+    const kept = thinCrossings(fan(20), 50, 0)
     expect(kept.length).toBeLessThan(400)
     for (const c of kept) {
       const crossing = kept.filter((o) => o !== c && crossesFixture(c, o)).length
@@ -652,19 +652,19 @@ describe('thinCrossings', () => {
     // chunked run would thin differently depending on how its candidates happened to be pooled.
     const lines = fan(14)
     const ids = (cs: Candidate[]) => cs.map((c) => c.id).sort().join('|')
-    expect(ids(thinCrossings([...lines].reverse(), 20))).toBe(ids(thinCrossings(lines, 20)))
+    expect(ids(thinCrossings([...lines].reverse(), 20, 0))).toBe(ids(thinCrossings(lines, 20, 0)))
   })
 
   it('keeps low scores as readily as high ones', () => {
     // Deliberate. In a mesh the best lines are near-duplicates of each other, so favouring score
     // would keep a tight cluster of them and throw away the band that holds the variety.
-    const kept = thinCrossings(fan(16), 20)
+    const kept = thinCrossings(fan(16), 20, 0)
     const below = kept.filter((c) => c.score < 65).length
     expect(below).toBeGreaterThan(kept.length * 0.3)
   })
 
   it('does nothing when the limit is off', () => {
-    expect(thinCrossings(fan(10), 0)).toHaveLength(100)
+    expect(thinCrossings(fan(10), 0, 0)).toHaveLength(100)
   })
 })
 
@@ -678,3 +678,46 @@ function crossesFixture(p: Candidate, q: Candidate): boolean {
   const d4 = side(q.a.e, q.a.n, q.b.e, q.b.n, p.b.e, p.b.n)
   return d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0
 }
+
+describe('thinCrossings keeps the best', () => {
+  const span = (ae: number, an: number, be: number, bn: number, score: number): Candidate =>
+    ({
+      id: `${ae}_${an}__${be}_${bn}`,
+      score,
+      length: Math.hypot(be - ae, bn - an),
+      a: { e: ae, n: an } as Candidate['a'],
+      b: { e: be, n: bn } as Candidate['b'],
+    }) as Candidate
+
+  /** A fan dense enough that the rule alone would drop most of it, with distinct scores. */
+  const scored = () => {
+    const out: Candidate[] = []
+    for (let i = 0; i < 20; i++) {
+      for (let j = 0; j < 20; j++) out.push(span(0, i * 10, 400, j * 10, i * 20 + j))
+    }
+    return out
+  }
+
+  it('keeps the very best line whatever the shuffle would have done with it', () => {
+    // Only the guaranteed direction is asserted. Unprotected, the best line survives or not
+    // depending on where the shuffle puts it, and pinning that would be testing the seed.
+    const lines = scored()
+    const best = [...lines].sort(bestFirst)[0]!
+    for (const keep of [1, 10, 50]) {
+      expect(thinCrossings(lines, 20, keep).some((c) => c.id === best.id)).toBe(true)
+    }
+  })
+
+  it('keeps exactly the top N by score', () => {
+    const lines = scored()
+    const top = new Set([...lines].sort(bestFirst).slice(0, 25).map((c) => c.id))
+    const kept = new Set(thinCrossings(lines, 20, 25).map((c) => c.id))
+    for (const id of top) expect(kept.has(id)).toBe(true)
+  })
+
+  it('still thins around them', () => {
+    // The protected lines are not a licence to keep everything near them.
+    const lines = scored()
+    expect(thinCrossings(lines, 20, 25).length).toBeLessThan(lines.length / 2)
+  })
+})

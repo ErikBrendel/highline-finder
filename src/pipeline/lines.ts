@@ -831,12 +831,16 @@ export function refine(
  * Sorted by id before shuffling, so the answer depends on the set and not on the order it arrived
  * in -- the same property dedup has, and for the same reason.
  *
- * The guarantee is on the finished set: every kept line crosses at most `maxCrossings` other kept
- * lines. Checking only what a candidate meets on the way in is not enough -- that holds at the
+ * The guarantee is on the finished set: every line the *rule* admitted crosses at most
+ * `maxCrossings` other kept lines. The `keepBest` highest-scoring are exempt from it. Checking only what a candidate meets on the way in is not enough -- that holds at the
  * moment it is admitted and is then broken by everything admitted after it, which a test caught
  * doing exactly that at 73 crossings under a limit of 50.
  */
-export function thinCrossings(candidates: Candidate[], maxCrossings: number): Candidate[] {
+export function thinCrossings(
+  candidates: Candidate[],
+  maxCrossings: number,
+  keepBest: number,
+): Candidate[] {
   if (maxCrossings <= 0 || candidates.length <= maxCrossings) return candidates
 
   // mulberry32. A fixed seed, because the point is a reproducible subset rather than a fresh one.
@@ -869,9 +873,22 @@ export function thinCrossings(candidates: Candidate[], maxCrossings: number): Ca
     return out
   }
 
+  /**
+   * The best lines are admitted before the shuffle sees them and are not subject to the limit.
+   *
+   * Without this the headline line of a region is kept or dropped on geometry alone, which is the
+   * one loss never worth the bytes saved.
+   * They still count towards what a later candidate crosses, so the ground around them is measured
+   * honestly, but their own tallies do not bar anything: the cap governs the lines the rule admits,
+   * not the ones held back from it.
+   */
+  const protectedLines = new Set(
+    keepBest > 0 ? [...candidates].sort(bestFirst).slice(0, keepBest) : [],
+  )
+
   const kept: Candidate[] = []
   const crossedBy = new Map<Candidate, number>()
-  for (const c of order) {
+  for (const c of [...protectedLines, ...order.filter((x) => !protectedLines.has(x))]) {
     // Every kept line this one would cross. Collected rather than counted, because admitting it
     // raises their tallies too: a line accepted early is otherwise pushed past the limit by ones
     // accepted later, and the guarantee would hold at the moment of admission and nowhere else.
@@ -884,8 +901,10 @@ export function thinCrossings(candidates: Candidate[], maxCrossings: number): Ca
         if (segmentsCross(c, other)) meets.push(other)
       }
     }
-    if (meets.length > maxCrossings) continue
-    if (meets.some((other) => (crossedBy.get(other) ?? 0) >= maxCrossings)) continue
+    if (!protectedLines.has(c)) {
+      if (meets.length > maxCrossings) continue
+      if (meets.some((o) => !protectedLines.has(o) && (crossedBy.get(o) ?? 0) >= maxCrossings)) continue
+    }
 
     kept.push(c)
     crossedBy.set(c, meets.length)

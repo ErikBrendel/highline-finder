@@ -528,7 +528,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
 
     const thinned = await stage(
       'thinning crossed-out meshes',
-      () => thinCrossings(ref.candidates, p.maxCrossings),
+      () => thinCrossings(ref.candidates, p.maxCrossings, p.keepBest),
       (out) => ({ from: [ref.candidates.length, 'distinct'], to: [out.length, 'kept'] }),
     )
 

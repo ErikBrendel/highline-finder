@@ -114,7 +114,12 @@ export const DEFAULT_PARAMS: Params = {
   // than a hundred others, against 0-2.8% everywhere else. So this acts on ground that produces a
   // fan and leaves ordinary ground untouched. 50 keeps about half of such a mesh; see thinCrossings
   // for why the survivors are chosen by a seeded shuffle rather than by score.
-  maxCrossings: 50,
+  maxCrossings: 20,
+  // The best of a region survives the thinning whatever its geometry, because a shuffle keeps or
+  // drops the headline line on geometry alone. Measured on 58_717: its best scored 79.1 before
+  // thinning and 79.1 after, with all of its top ten surviving; 92 of its top hundred reach the
+  // output, the other eight going to the pooled dedup rather than to this.
+  keepBest: 100,
 
   // Local hill-climb of each anchor after dedup. 3 m comfortably exceeds half of anchorStep, so
   // the 5 m lattice stops being the limiting factor on where an anchor is reported. 0 disables.

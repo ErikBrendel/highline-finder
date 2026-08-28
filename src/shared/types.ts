@@ -80,6 +80,8 @@ export interface Params {
    * A limit on how dense a mesh of near-identical lines is allowed to get. See thinCrossings.
    */
   maxCrossings: number
+  /** Highest-scoring lines per region kept regardless of how much they cross. */
+  keepBest: number
   /** Grid spacing of candidate anchor positions. */
   anchorStep: number
   /** Number of angular sectors in the openness bitmask. */
