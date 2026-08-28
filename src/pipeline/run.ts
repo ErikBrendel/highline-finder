@@ -50,6 +50,22 @@ import type {
 } from '../shared/types.js'
 
 /**
+ * Runs with a raised heap; see the `pipeline` script in package.json.
+ *
+ * Node defaults to about 4.5 GB of old space regardless of the machine, and a region holds every
+ * candidate and every line endpoint it found until dedup and the hotspot grid have run -- dedup
+ * needs to see them all at once, so that is inherent rather than sloppy. A chunk in the Lausitz
+ * mining country, where 8 % of scanned points pass the drop test against the usual 0.3-3 %, ran
+ * that out during scoring. Twelve gigabytes of a thirty-four gigabyte machine is a limit chosen
+ * rather than inherited. The rasters do not compete for it: they live on SharedArrayBuffers, which
+ * are external memory.
+ *
+ * The narrower fix is to reduce endpoints to their 25 m grid inside each worker instead of pooling
+ * them raw -- the aggregate is exactly mergeable, so it would collapse millions of objects at the
+ * worker boundary. Worth doing before this bites again.
+ */
+
+/**
  * CLI entry point. Writes src/web/public/candidates.json, which is the only artefact the web app
  * needs -- the app is a static viewer over precomputed results and never talks to the pipeline.
  *
