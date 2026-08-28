@@ -28,13 +28,15 @@ const present = !!loaded?.lines?.natural
 const data: Dataset = loaded ?? ({ meta: { regions: [] }, lines: {} } as unknown as Dataset)
 const { params, regions } = data.meta
 /**
- * An AOI is given in latitude and longitude but searched as its UTM bounding box, which is a
- * slightly larger, skewed quadrilateral -- so an anchor near a corner can sit outside the
- * lat/lon rectangle and still be inside the area the search was asked to cover. The boxes are
- * what the pipeline actually confines anchors to, so they are what this checks.
+ * The ground each region is answerable for.
+ *
+ * A chunk carries it directly. An area of interest is given in latitude and longitude but searched
+ * as its UTM bounding box, a slightly larger and skewed quadrilateral, so an anchor near a corner
+ * can sit outside the lat/lon rectangle and still be inside what the search was asked to cover --
+ * the box is what the pipeline confines anchors to, so the box is what this checks.
  */
-const boxes = regions.flatMap((r) => r.aois.map(boxOf))
-const inSomeAoi = (e: number, n: number) => boxes.some((b) => contains(b, e, n))
+const boxes = regions.flatMap((r) => (r.owns25833 ? [r.owns25833] : r.aois.map(boxOf)))
+const covered = (e: number, n: number) => boxes.some((b) => contains(b, e, n))
 // The file stores three lists; every rule below holds of a line whichever one it came out of.
 const candidates = present
   ? LINE_KINDS.flatMap((kind) => data.lines[kind].map((c) => ({ ...c, kind })))
@@ -80,7 +82,7 @@ describe.skipIf(!present)('generated candidates.json', () => {
     }
   })
 
-  it('keeps anchor coordinates consistent between WGS84 and UTM, and inside an AOI', () => {
+  it('keeps anchor coordinates consistent between WGS84 and UTM', () => {
     for (const c of candidates.slice(0, 40)) {
       for (const a of [c.a, c.b]) {
         expect(a.aFrame).toBeGreaterThanOrEqual(params.aFrameMin - 1e-9)
@@ -88,9 +90,28 @@ describe.skipIf(!present)('generated candidates.json', () => {
         const [e, n] = toUtm33(a.lat, a.lon)
         expect(e).toBeCloseTo(a.e, 1)
         expect(n).toBeCloseTo(a.n, 1)
-        expect(inSomeAoi(a.e, a.n)).toBe(true)
       }
     }
+  })
+
+  it('anchors every line on ground some region is answerable for', () => {
+    /**
+     * The ownership rule, read off the finished dataset. `a` is the first anchor of the pair, so
+     * the region that reported the line is the one that owns the ground under it -- give or take
+     * the `refineRadius` that refinement can nudge it after ownership was decided.
+     *
+     * `b` is deliberately not checked. A chunk scans a kilometre beyond what it owns so a partner
+     * across the seam exists to be found, so a partner may legitimately stand on ground no region
+     * owns at all -- which is exactly what happens at the edge of the covered area, where the
+     * neighbouring chunk has not been searched yet.
+     */
+    const slack = params.refineRadius + 1e-9
+    const outside = candidates.filter(
+      (c) => !covered(c.a.e, c.a.n) && !covered(c.a.e + slack, c.a.n) &&
+        !covered(c.a.e - slack, c.a.n) && !covered(c.a.e, c.a.n + slack) &&
+        !covered(c.a.e, c.a.n - slack),
+    )
+    expect(outside).toHaveLength(0)
   })
 
   it('reports a length that matches the anchor separation', () => {
