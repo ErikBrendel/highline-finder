@@ -253,6 +253,10 @@ export const DEFAULT_CHUNKS: string[] = [
   '39_726', '40_726',                       // Vehlen
   '43_726', '44_726',                       // Otto Lilienthal
 
+  // The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E, where the relief is largely
+  // mining spoil rather than anything the ice left.
+  '58_717', '59_717', '58_718', '59_718',
+
   // Row 727, along the southern edge, matching the width of the three rows above it.
   '49_727', '50_727', '51_727', '52_727', '53_727', '54_727', '55_727', '56_727', '57_727',
   '52_728', '53_728', '52_729', '53_729',
