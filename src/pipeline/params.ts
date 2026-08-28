@@ -149,7 +149,15 @@ export const DEFAULT_PARAMS: Params = {
   maskRes: 16,
   maskRadius: 32,
   maskMinDrop: 10,
-  maskMinCoverage: 0.02,
+  // 1%, loosened from 2% to reach small hills. The coverage rule asks what fraction of a square
+  // kilometre is steep, so a compact hill fails it for being small rather than for being shallow:
+  // the Gollenberg at Otto Lilienthal has 46 passing cells, 1.2% of its tile, and 65 lines on it.
+  // At 2% that tile was skipped and every one of those lines went missing.
+  //
+  // Measured statewide, tiles kept: 18.4% at 2%, 24.7% at 1%, 30.2% at 0.5%. So this costs about a
+  // third more surface model, ~190 -> ~255 GB at the ceiling, and the step to 0.5% would cost as
+  // much again to reach hills half this size.
+  maskMinCoverage: 0.01,
   // Anchorable roofs a tile needs before it is fetched for its buildings alone, and how tall each
   // has to stand above the ground nearby. The mirror of maskMinDrop and maskMinCoverage.
   //
@@ -257,6 +265,10 @@ export const DEFAULT_CHUNKS: string[] = [
   '50_725', '51_725', '50_726', '51_726',   // Mueggelberge
   '39_726', '40_726',                       // Vehlen
   '43_726', '44_726',                       // Otto Lilienthal
+  // The ring around it, opened up by the coverage rule reaching small hills at 1%.
+  '42_725', '43_725', '44_725', '45_725',
+  '42_726', '45_726',
+  '42_727', '43_727', '44_727', '45_727',
 
   // The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E, where the relief is largely
   // mining spoil rather than anything the ice left.

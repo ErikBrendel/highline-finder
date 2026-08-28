@@ -202,30 +202,42 @@ export function tilesWorthLoading(
   reach: number,
 ): Set<string> {
   const tileOf = (e: number, n: number) => `${Math.floor(e / 1000)}_${Math.floor(n / 1000)}`
-  const counts = new Map<string, { pass: number; total: number }>()
+  const passes = new Map<string, number>()
   const passing: [number, number][] = []
 
   for (let y = 0; y < drop.h; y++) {
     for (let x = 0; x < drop.w; x++) {
       const v = drop.data[y * drop.w + x]!
-      if (Number.isNaN(v)) continue
+      // Negated rather than `v < minDrop`, so a hole in the data is skipped rather than counted.
+      // Both NaN and an out-of-range read compare false against everything, and the wrong sense of
+      // this test silently promoted every hole to a passing cell.
+      if (!(v >= minDrop)) continue
       const e = drop.e0 + (x + 0.5) * drop.res
       const n = drop.n1 - (y + 0.5) * drop.res
-      const key = tileOf(e, n)
-      const rec = counts.get(key) ?? { pass: 0, total: 0 }
-      rec.total++
-      if (v >= minDrop) {
-        rec.pass++
-        passing.push([e, n])
-      }
-      counts.set(key, rec)
+      passes.set(tileOf(e, n), (passes.get(tileOf(e, n)) ?? 0) + 1)
+      passing.push([e, n])
     }
   }
 
+  /**
+   * A whole tile's worth of cells, not the number this window happened to see.
+   *
+   * Counting only what is in the window makes a tile's verdict depend on the shape of whatever asks
+   * about it, which is exactly what a chunked pipeline cannot have. It cost real ground: the
+   * Gollenberg at Otto Lilienthal has 46 passing cells in its tile, 1.2 % of it, and was fetched for
+   * years only because the area of interest drawn around it clipped that tile to a 1000 x 490 m
+   * sliver sitting on the valley -- within which the fraction looked like 9 %. The first chunk to
+   * see the whole tile rejected it and the 65 lines there vanished.
+   *
+   * A tile only partly inside the window is now judged on the cells that are, against the full
+   * denominator, so it is rejected rather than flattered. That is the conservative direction and
+   * only reaches tiles at the very edge of a window, which chunks load a halo beyond anyway.
+   */
+  const cellsPerTile = (1000 / drop.res) ** 2
+
   const out = new Set<string>()
   for (const [e, n] of passing) {
-    const rec = counts.get(tileOf(e, n))!
-    if (rec.pass < rec.total * minCoverage) continue
+    if ((passes.get(tileOf(e, n)) ?? 0) < cellsPerTile * minCoverage) continue
     for (let te = Math.floor((e - reach) / 1000); te <= Math.floor((e + reach) / 1000); te++) {
       for (let tn = Math.floor((n - reach) / 1000); tn <= Math.floor((n + reach) / 1000); tn++) {
         out.add(`33${te}-${tn}`)

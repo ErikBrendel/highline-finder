@@ -42,6 +42,8 @@ const CHUNK_TILES = 8
 const seconds = Number(process.argv[2] ?? 120)
 /** Overrides `maxLength`, to price a longer line before committing to one. */
 const reach = Number(process.argv[3] ?? DEFAULT_PARAMS.maxLength)
+/** Overrides `maskMinCoverage`, to price loosening the rule before loosening it. */
+const coverage = Number(process.argv[4] ?? DEFAULT_PARAMS.maskMinCoverage)
 
 function stateBounds() {
   const corners = [
@@ -68,7 +70,8 @@ async function main() {
   const ny = Math.ceil((b.maxN - b.minN) / (CORE * 1000))
   console.log(
     `${nx} x ${ny} = ${nx * ny} windows of ${CORE} km over ` +
-      `E ${b.minE}..${b.maxE} N ${b.minN}..${b.maxN}, reach ${reach} m, stopping after ${seconds}s\n`,
+      `E ${b.minE}..${b.maxE} N ${b.minN}..${b.maxN}, reach ${reach} m, coverage ${coverage}, ` +
+      `stopping after ${seconds}s\n`,
   )
 
   /** Tiles with any terrain under them at all, which is the state's real extent. */
@@ -108,7 +111,7 @@ async function main() {
       }
 
       const drop = dropField(coarse, p.maskRadius)
-      for (const id of tilesWorthLoading(drop, p.maskMinDrop, p.maskMinCoverage, reach)) {
+      for (const id of tilesWorthLoading(drop, p.maskMinDrop, coverage, reach)) {
         const [te, tn] = id.slice(2).split('-').map(Number) as [number, number]
         const inCore =
           te >= core.minE / 1000 && te < core.maxE / 1000 &&
