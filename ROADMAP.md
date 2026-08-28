@@ -297,12 +297,14 @@ drawn a box around -- and produced more lines than the rectangle did: 9,096 agai
 5,177 natural against 4,240. The rooftop half survives on the urban rectangle alone, which is now
 independent of any area of interest.
 
-**Fifty-five chunks, 3,520 km2 owned**, six areas of interest left. What remains of the hand-drawn
+**Eighty-two chunks, 5,248 km2 owned**, and no areas of interest at all. What remains of the hand-drawn
 list is small and natural: Tropical, Sperenberg, Lilienthal, Linthe, Vehlen and Mueggelberge.
 
-What that ground has cost: 1,634 tiles at 1 m and 443 surface tiles -- 2.3 GB of terrain and 14.6 GB
-of surface. Twelve of the fifty-five loaded nothing at full resolution at all. 16,888 lines before
-the pooled dedup.
+The Lausitz is the outlier worth recording. Four chunks around Spremberg produced 16,999 lines from
+120 tiles -- 11,223 of them from `58_718` alone, more than the whole dataset held a week earlier.
+Mining spoil is artificial relief in every direction, so 8 % of scanned points pass the drop test
+against the usual 0.3-3 %, and almost every anchor finds a partner. It also ran the pipeline out of
+memory, which is what raised the heap from Node's inherited 4.5 GB to a chosen 12 GB.
 
 That is a ninth of Brandenburg at **4.8 GB per 1,000 km2, extrapolating to ~147 GB statewide** --
 which lands between the tile census's 101 GB and 190 GB bounds, from a completely different
