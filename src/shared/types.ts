@@ -123,14 +123,6 @@ export interface Params {
   refineStep: number
   refineIterations: number
   /**
-   * Whether to store an elevation profile per line.
-   *
-   * Profiles are ~85% of the dataset, and every one of them is recoverable from the elevation
-   * service the interactive planner already uses. Off, the file scales to far more lines and the
-   * chart for a line costs a couple of 256 m windows when it is opened; on, everything is instant
-   * and offline but the file grows by ~2.5 KB per line.
-   */
-  /**
    * Most canopy a line may run through before it is rejected outright, as a fraction of the span's
    * interior.
    *
@@ -140,7 +132,6 @@ export interface Params {
    * highline anyone could rig, and reporting it as a candidate is noise rather than information.
    */
   maxCanopyBlocked: number
-  storeProfiles: boolean
   /**
    * Resolution the coarse pre-pass measures terrain at, in metres. Fetched from the survey's WCS
    * with the scaling extension, so no new product is involved.
@@ -380,8 +371,10 @@ export interface Candidate {
    */
   crossings?: Crossing[]
   /**
-   * Absent when the pipeline ran with `storeProfiles: false`, in which case the browser rebuilds it
-   * from the elevation service for whichever line is actually opened.
+   * Never present in the dataset. It is working state while a line is being evaluated, and the slot
+   * the browser fills in for the one line it is looking at, measured live from the elevation
+   * service. The pipeline strips it: a profile per candidate was most of the file, and the viewer
+   * only ever needs the one that is open -- at a far finer resolution than the search can afford.
    */
   profile?: StoredProfile
 }

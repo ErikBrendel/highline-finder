@@ -14,7 +14,7 @@ import type {
   TileUsage,
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
+import { VIEWER_PROFILE, buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
 import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
@@ -538,7 +538,10 @@ export function App() {
       groundSampler,
       surfaceSampler,
       sagPct / 100,
-      data.meta.params,
+      // The viewer's resolution, like the selected line's. The optimiser calls planLine too and
+      // deliberately does not get this: it evaluates dozens of positions a step, and it is choosing
+      // where to put an anchor rather than reporting what is under one.
+      { ...data.meta.params, ...VIEWER_PROFILE },
       rig,
       scene,
     )
@@ -725,9 +728,14 @@ export function App() {
   /**
    * A profile for the selected line, when the dataset does not carry one.
    *
-   * This is the other half of `storeProfiles: false` -- the chart and the exact metrics still exist,
-   * they are just built for the one line being looked at instead of all of them up front, from the
-   * same elevation service and the same buildProfile the planner uses.
+   * The dataset carries none, so the chart and the exact metrics are built for the one line being
+   * looked at instead of for all of them up front -- from the same elevation service and the same
+   * buildProfile the planner uses, but at the viewer's resolution rather than the search's. A metre
+   * apart instead of four, which is the difference between seeing a gully and averaging over it.
+   *
+   * The metrics below are re-derived from this profile, so they are finer than the ones the search
+   * assigned. That is the point: a clearance figure that stepped over a four-metre gap was wrong.
+   * It does mean the number in the panel can differ slightly from the one the list sorted on.
    */
   useEffect(() => {
     if (!data || !selected || selected.profile) return
@@ -738,9 +746,10 @@ export function App() {
     Promise.all([ensureTerrain(a, b), ensureCover(a, b)])
       .then(() => {
         if (stale) return
+        const fine = { ...data.meta.params, ...VIEWER_PROFILE }
         const built = buildProfile(
           a, b, selected.a.anchor, selected.b.anchor, selected.length,
-          groundSampler, surfaceSampler, data.meta.params, { water },
+          groundSampler, surfaceSampler, fine, { water },
         )
         // A hole in the terrain means the chart would be drawn with gaps, so it is not drawn -- but
         // returning silently here is what left a spinner running forever with no request in flight
@@ -752,7 +761,7 @@ export function App() {
           setProfileFailed(why)
           return
         }
-        setFetchedProfile({ id: selected.id, profile: packProfile(built, data.meta.params) })
+        setFetchedProfile({ id: selected.id, profile: packProfile(built, fine) })
       })
       .catch((e: unknown) => {
         report('building a profile for the selected line', e)

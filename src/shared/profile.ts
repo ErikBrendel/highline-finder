@@ -86,6 +86,21 @@ function worstAcross(
 }
 
 /** How the span is walked, shared by whichever half of the profile is being built. */
+/**
+ * What the viewer measures a line at, overriding the search's own figures.
+ *
+ * The two want opposite things and no longer have to agree. The search walks billions of pairs, so
+ * it samples every 2 m and caps at 120 stations -- which on a 500 m span is one reading per 4.2 m
+ * of a raster that has four times that detail, and a gully narrower than that is simply not seen.
+ * The viewer measures one line, once, when somebody opens it: a metre apart is the resolution of
+ * the data itself, and 4,000 stations covers the planner's 4 km span cap at that spacing. Finer
+ * would be measuring the interpolation between cells rather than the ground.
+ *
+ * Not applied while the optimiser is running. That evaluates dozens of candidate positions per
+ * step, and it is looking for where to put an anchor rather than reporting what is under one.
+ */
+export const VIEWER_PROFILE = { profileStep: 1, profilePoints: 4000 }
+
 function stationsAlong(a: Pos, b: Pos, length: number, p: Params) {
   const de = (b.e - a.e) / length
   const dn = (b.n - a.n) / length

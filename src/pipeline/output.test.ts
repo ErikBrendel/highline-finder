@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { toUtm33 } from '../shared/geo.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { unpackProfile } from '../shared/profile.js'
 import { boxOf, contains } from './regions.js'
 import { LINE_KINDS } from '../shared/types.js'
 import type { Dataset } from '../shared/types.js'
@@ -100,21 +99,11 @@ describe.skipIf(!present)('generated candidates.json', () => {
     }
   })
 
-  it.skipIf(!params.storeProfiles)(
-    'has profiles that start at A, end at B, and never dip below the terrain',
-    () => {
-      for (const c of candidates.slice(0, 40)) {
-        const samples = unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, params.sagRatio, params)
-        const first = samples[0]!
-        const last = samples[samples.length - 1]!
-        expect(first.d).toBe(0)
-        expect(last.d).toBeCloseTo(c.length, 0)
-        expect(first.line).toBeCloseTo(c.a.anchor, 0)
-        expect(last.line).toBeCloseTo(c.b.anchor, 0)
-        for (const s of samples) expect(s.surface).toBeGreaterThanOrEqual(s.ground)
-      }
-    },
-  )
+  it('carries no profile, since the viewer measures the one line it opens', () => {
+    // The reason candidates.json is a tenth of what it was. If one ever appears here, something has
+    // started writing a hundred numbers per line into a file meant to hold millions of them.
+    expect(candidates.filter((c) => c.profile)).toHaveLength(0)
+  })
 
   it('survives rescoring at its own generation sag without drift', () => {
     // The web app re-derives every clearance from the serialised profile. If the pipeline measured

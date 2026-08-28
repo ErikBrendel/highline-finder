@@ -11,7 +11,7 @@ import {
   type AnchorTable,
 } from './openness.js'
 import type { Endpoint } from './hotspots.js'
-import type { AnchorOut, Candidate, Params } from '../shared/types.js'
+import type { AnchorOut, Candidate, Params, StoredProfile } from '../shared/types.js'
 import {
   chooseHeights,
   lineHeightAt,
@@ -25,7 +25,7 @@ import { lineKind, rigRange } from '../shared/anchoring.js'
 import type { Scene } from '../shared/scene.js'
 import { owns, type Box } from './regions.js'
 import { clearanceNeeded, type WaterCover } from '../shared/water.js'
-import { canopyProfile, groundProfile, trimProfile } from '../shared/profile.js'
+import { canopyProfile, groundProfile } from '../shared/profile.js'
 import { phaseAt, phaseDone } from '../shared/phases.js'
 
 /**
@@ -153,6 +153,8 @@ function clearsTerrain(
  */
 export interface Evaluated {
   line: Candidate | null
+  /** The terrain the line was judged on. Never stored; see Candidate.profile. */
+  profile: StoredProfile | null
   reject: Reject | 'geometry' | 'length' | 'offlevel' | 'terrain' | null
   /** Where the failure is, when it has a place: the crossing, for a line that passes too low. */
   at: Pos | null
@@ -160,6 +162,7 @@ export interface Evaluated {
 
 const failed = (reject: Evaluated['reject'], at: Pos | null = null): Evaluated => ({
   line: null,
+  profile: null,
   reject,
   at,
 })
@@ -324,7 +327,8 @@ export function evaluateLine(
   // The canopy band is drawn rather than scored, so the search never pays for it. A profile that is
   // going to be stored, or one the browser builds for a line being looked at, gets the full thing.
   const tCanopy = phaseAt()
-  const canopy = canopyProfile(a, b, roundedLength, surface, terrain, p, p.storeProfiles)
+  // No band series: it is only wanted for drawing, and nothing the pipeline emits is drawn.
+  const canopy = canopyProfile(a, b, roundedLength, surface, terrain, p, false)
   provisional.profile = { ...terrain, ...canopy }
   phaseDone('canopy profile', tCanopy)
 
@@ -363,12 +367,11 @@ export function evaluateLine(
    * nothing when they say nothing.
    */
   if (!scored) return failed('geometry')
+  // The profile is dropped rather than carried: it is a hundred numbers a candidate, it was most of
+  // candidates.json, and the viewer rebuilds the one line it opens from the elevation service
+  // instead. Returned beside the candidate so a test can look at the terrain a line was judged on.
   const { profile, ...bare } = scored
-  return {
-    line: p.storeProfiles ? { ...bare, profile: trimProfile(profile!, p) } : bare,
-    reject: null,
-    at: null,
-  }
+  return { line: bare, profile: profile ?? null, reject: null, at: null }
 }
 
 export interface TerrainPairs {

@@ -735,8 +735,7 @@ async function main() {
     const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
     say(
       `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +
-        `${finalCandidates.length} distinct` +
-        (p.storeProfiles ? ' (with profiles)' : ' (profiles fetched on demand)'),
+        `${finalCandidates.length} distinct`,
     )
 
     // Split rather than labelled: the list a line is in is its kind, so the word does not have to be

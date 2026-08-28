@@ -124,7 +124,6 @@ export const DEFAULT_PARAMS: Params = {
   // endpoints in the current data are canopy-clear, so a strict gate here would empty the dataset.
   maxCanopyBlocked: 0.8,
 
-  storeProfiles: false,
 
   // Coarse pre-pass. 16 m costs ~15 KB per square kilometre against 1.4 MB for the 1 m tiles, so
   // screening at this resolution is effectively free.

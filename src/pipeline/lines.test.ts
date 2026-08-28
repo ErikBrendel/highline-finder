@@ -12,17 +12,16 @@ import { unpackProfile } from '../shared/profile.js'
 const p: Params = DEFAULT_PARAMS
 
 /**
- * Params that keep the profile on each candidate.
+ * The terrain a line was judged on, with its derived fields back, as the browser sees it.
  *
- * The pipeline drops it otherwise, since nothing downstream reads it -- so a test that wants to
- * look at the terrain under a line has to ask for it, exactly as a run that wants profiles in its
- * output does.
+ * The pipeline never stores a profile -- it is a hundred numbers a candidate that the viewer
+ * rebuilds live and far more finely -- so a test that wants to look under a line evaluates the pair
+ * again and reads what `evaluateLine` returns beside the candidate.
  */
-const withProfiles: Params = { ...DEFAULT_PARAMS, storeProfiles: true }
-
-/** The stored profile with its derived fields back, as the browser sees it. */
-const expand = (c: Candidate) =>
-  unpackProfile(c.profile!, c.length, c.a.anchor, c.b.anchor, p.sagRatio, p)
+function expand(a: Pos, b: Pos, g: Grid, surface: Grid = g) {
+  const { line, profile } = evaluateLine(a, b, g, surface, p, {}, true)
+  return unpackProfile(profile!, line!.length, line!.a.anchor, line!.b.anchor, p.sagRatio, p)
+}
 
 /**
  * An anchor that is open in every direction, so tests exercise lines.ts in isolation. Ground
@@ -62,14 +61,15 @@ const sagOf = (length: number) => p.sagRatio * length
 describe('findLines', () => {
   it('finds a line across a canyon and sags it by sagRatio at midspan', () => {
     const g = canyon(20)
-    const { candidates } = findLines(rimsOf(g), g, g, withProfiles)
+    const { candidates } = findLines(rimsOf(g), g, g, p)
     expect(candidates).toHaveLength(1)
     const c = candidates[0]!
     expect(c.length).toBeCloseTo(220, 0)
     expect(c.sag).toBeCloseTo(sagOf(220), 2)
     expect(c.offLevel).toBe(0)
 
-    const samples = expand(c)
+    const [rimA, rimB] = rimsOf(g)
+    const samples = expand(rimA!, rimB!, g)
     const mid = samples.reduce((a, s) => (Math.abs(s.d - 110) < Math.abs(a.d - 110) ? s : a))
     expect(mid.line).toBeCloseTo(50 + p.aFrameMax - sagOf(220), 1)
     expect(c.canopyBlockedFraction).toBe(0)
@@ -79,8 +79,9 @@ describe('findLines', () => {
     // The line is highest where it has only just left the anchor, so over a flat canyon floor
     // the biggest gap is the first sample past the edge, not the sagging middle.
     const g = canyon(20)
-    const c = findLines(rimsOf(g), g, g, withProfiles).candidates[0]!
-    const gaps = expand(c).map((s) => s.line - s.ground)
+    const [rimA, rimB] = rimsOf(g)
+    const c = findLines(rimsOf(g), g, g, p).candidates[0]!
+    const gaps = expand(rimA!, rimB!, g).map((s) => s.line - s.ground)
     expect(c.exposure).toBeCloseTo(Math.max(...gaps), 0)
     expect(Math.max(...gaps)).toBeGreaterThan(50 + p.aFrameMax - sagOf(220) - 20)
   })
@@ -89,8 +90,9 @@ describe('findLines', () => {
     // The line leaves the anchor at most aFrameMax up, which is under minClearance. Without the
     // anchorZone exclusion this candidate -- and every other -- would be rejected.
     const g = canyon(20)
-    const c = findLines(rimsOf(g), g, g, withProfiles).candidates[0]!
-    const first = expand(c)[0]!
+    const [rimA, rimB] = rimsOf(g)
+    const c = findLines(rimsOf(g), g, g, p).candidates[0]!
+    const first = expand(rimA!, rimB!, g)[0]!
     expect(first.line - first.ground).toBeLessThanOrEqual(p.aFrameMax)
     expect(p.aFrameMax).toBeLessThan(p.minClearance)
     expect(c.clearanceMin).toBeGreaterThanOrEqual(p.minClearance)
