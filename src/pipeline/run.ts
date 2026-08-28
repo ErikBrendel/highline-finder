@@ -658,6 +658,216 @@ async function main() {
     refineGain: 0,
   }
 
+  /**
+   * Assembles and writes every output file from what has been searched so far.
+   *
+   * Called after each region that produced something new, not only at the end, so a chunk is
+   * visible in the viewer the moment it finishes rather than after the run it happens to be part
+   * of. A statewide pass is hours of downloading; waiting for all of it to see any of it is the
+   * difference between watching progress and watching a log.
+   *
+   * Cheap enough to do repeatedly: the whole set is ~480 ms to serialise and write at present, and
+   * dedup and hotspot clustering are both under a tenth of a second. Against a chunk that takes
+   * minutes to fetch, it does not register.
+   *
+   * `final` decides whether the work is charged to the run report. Only the last call is, because
+   * `stage` accumulates by label and timing the same dedup fifty times would make it the largest
+   * row in the table while telling you nothing. The console lines are the last call's too.
+   */
+  const emit = async (final: boolean) => {
+    const timed: typeof stage = final
+      ? stage
+      : async (_label, run) => run()
+    const say = (line: string) => {
+      if (final) console.log(line)
+    }
+  // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
+    // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
+    // line found is stored.
+    const deduped = (
+      await timed('pooled dedup', () => dedupe(refinedAll, p.dedupRadius), (out) => ({
+        from: [refinedAll.length, 'pooled'],
+        to: [out.length, 'distinct'],
+      }))
+    ).map(locate)
+    // evaluateLine already drops the profile unless it is wanted, so there is nothing left to strip.
+    const finalCandidates = deduped
+    const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
+    say(
+      `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +
+        `${finalCandidates.length} distinct` +
+        (p.storeProfiles ? ' (with profiles)' : ' (profiles fetched on demand)'),
+    )
+
+    // Split rather than labelled: the list a line is in is its kind, so the word does not have to be
+    // repeated on every line. `kind` is dropped here for the same reason and put back on load.
+    const lines = byKind<Candidate[]>(() => [])
+    for (const { kind, ...rest } of finalCandidates) lines[kind].push(rest as Candidate)
+    say(
+      `  ${LINE_KINDS.map((k) => `${lines[k].length} ${k}`).join(', ')}`,
+    )
+
+    const dataset: Dataset = {
+      meta: {
+        generatedAt: new Date().toISOString(),
+        regions,
+        params: p,
+        urbanAreas: URBAN_AREAS,
+        sources: [
+          {
+            name: 'DGM 1 m (LiDAR terrain model)',
+            url: 'https://data.geobasis-bb.de/geobasis/daten/dgm/tif/',
+            attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
+            note: '1 m grid, DHHN2016 heights, bare earth',
+          },
+          {
+            name: 'bDOM 0.2 m (photogrammetric surface model)',
+            url: 'https://data.geobasis-bb.de/geobasis/daten/bdom/tif/',
+            attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
+            note: 'includes vegetation and structures; different survey epoch than the DGM',
+          },
+          {
+            name: 'LoD1 city model (3d_gebaeude)',
+            url: 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml/',
+            attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
+            note: 'extruded footprints with one roof height each; merged into the ground so a roof is both an anchor and an obstacle. Brandenburg only, so no buildings in Berlin',
+          },
+          {
+            name: 'OpenStreetMap roads, railways and water',
+            url: 'https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf',
+            attribution: 'OpenStreetMap contributors, ODbL',
+            note: 'extracted once by `npm run osm` and shipped as blocks under public/osm; sets the clearance a line owes over traffic. Brandenburg extract, which includes Berlin',
+          },
+        ],
+        stats: {
+          anchorsScanned: totals.anchorsScanned,
+          anchorsKept: totals.anchorsKept,
+          pairsInRange: totals.pairsInRange,
+          pairsSectorPassed: totals.pairsSectorPassed,
+          pairsLevelEnough: totals.pairsLevelEnough,
+          pairsFeasible: totals.pairsFeasible,
+          candidatesAfterDedup: totals.candidatesAfterDedup,
+          refinedCount: totals.refinedCount,
+          refineMeanGain: Math.round(meanGain * 100) / 100,
+          runtimeMs: Date.now() - started,
+        },
+      },
+      lines,
+    }
+
+    await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
+    const datasetText = JSON.stringify(dataset)
+    await writeFile(OUT, datasetText)
+
+    const dump: AnchorDump = {
+      sectorCount: p.sectorCount,
+      aFrameMin: p.aFrameMin,
+      aFrameMax: p.aFrameMax,
+      anchorStep: p.anchorStep,
+      nearProbeLength: p.nearProbeLength,
+      minDropDepth: p.minDropDepth,
+      dropSearchRadius: p.dropSearchRadius,
+      ...dumpAnchors,
+    }
+    /**
+     * The one output not written per region.
+     *
+     * It is a development overlay, it is by far the largest file, and it is the only one that does
+     * not survive being scaled up: 57 MB for the 1.2 million anchors of a 3,520 km2 block
+     * extrapolates to ~496 MB statewide, which is within a rounding error of the longest string V8
+     * will build. Serialising that once at the end is a risk worth watching; doing it after every
+     * chunk of a statewide run would be minutes of pure stringify and would fall over at the end
+     * regardless.
+     */
+    let anchorKb = 0
+    if (final) {
+      const anchorsText = JSON.stringify(dump)
+      anchorKb = anchorsText.length / 1024
+      await writeFile(ANCHORS_OUT, anchorsText)
+    }
+
+    const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+    const mask: MaskCells = {
+      res: p.maskExportRes,
+      sourceRes: p.maskRes,
+      minDrop: p.maskMinDrop,
+      lat: maskCells.flatMap((m) => m.lat),
+      lon: maskCells.flatMap((m) => m.lon),
+      drop: maskCells.flatMap((m) => m.drop),
+    }
+    const tiles: TileUsage = {
+      size: 1000,
+      lat: tileUse.flatMap((t) => t.lat),
+      lon: tileUse.flatMap((t) => t.lon),
+      terrain: tileUse.flatMap((t) => t.terrain),
+      surface: tileUse.flatMap((t) => t.surface),
+      anchors: tileUse.flatMap((t) => t.anchors),
+      roofCells: tileUse.flatMap((t) => t.roofCells),
+      roadKills: tileUse.flatMap((t) => t.roadKills),
+    }
+    await writeFile(TILES_OUT, JSON.stringify(tiles))
+    const barren = tiles.terrain.filter((t, i) => t && tiles.anchors[i] === 0).length
+    say(
+      `tiles: ${tiles.terrain.filter(Boolean).length}/${tiles.lat.length} terrain fetched ` +
+        `(${barren} yielded no anchor), ${tiles.surface.filter(Boolean).length} surface`,
+    )
+
+    const maskText = JSON.stringify(mask)
+    await writeFile(MASK_OUT, maskText)
+    const skipped = mask.drop.filter((d) => d < p.maskMinDrop).length
+    say(
+      `mask: ${mask.drop.length} cells @${p.maskExportRes}m, ${skipped} below the ${p.maskMinDrop}m ` +
+        `threshold (${((100 * skipped) / Math.max(1, mask.drop.length)).toFixed(0)}% of the area) ` +
+        `(${(maskText.length / 1024).toFixed(0)} KB)`,
+    )
+
+    /**
+     * Clustered across all regions at once, so a spot straddling two of them is one spot -- but once
+     * per kind, so the layer splits the same way the lines do.
+     *
+     * Three independent clusterings rather than one tagged set, because a place where both a natural
+     * and an urban line work really is two answers: a spot only appears in a layer if that kind of
+     * line can actually be rigged there, which is what makes switching the filter mean something.
+     */
+    const hotspots: Hotspots = { radius: HOTSPOT_RADIUS, ...byKind<HotspotArrays>(emptyHotspots) }
+    const cells = LINE_KINDS.reduce((n, k) => n + spotCells[k].length, 0)
+    const spotCounts = await timed('hotspot clustering', () =>
+      LINE_KINDS.map((kind) => {
+        // Merged through the same grid the regions were reduced on, so two regions that overlap a
+        // cell contribute to one cell rather than to two spots on top of each other.
+        const spots = clusterSpots(gridSpots(spotCells[kind], SPOT_RES), HOTSPOT_RADIUS)
+        spots.sort((a, b) => b.count - a.count)
+        for (const s of spots) {
+          const { lat, lon } = toWgs84(s.e, s.n)
+          hotspots[kind].lat.push(r6(lat))
+          hotspots[kind].lon.push(r6(lon))
+          hotspots[kind].count.push(s.count)
+          hotspots[kind].score.push(Math.round(s.score * 10) / 10)
+        }
+        return spots.length
+      }),
+    (out) => ({
+      from: [cells, `${SPOT_RES}m cells`],
+      to: [out.reduce((n, spots) => n + spots, 0), 'spots'],
+    }))
+    const hotspotsText = JSON.stringify(hotspots)
+    await writeFile(HOTSPOTS_OUT, hotspotsText)
+    const hotKb = (hotspotsText.length / 1024).toFixed(0)
+    say(
+      `hotspots: ${endpointsFeasible} feasible endpoints, ${endpointsWalkable} clear of canopy ` +
+        `-> ${cells} cells @${SPOT_RES}m ` +
+        `-> ${LINE_KINDS.map((k, i) => `${spotCounts[i]} ${k}`).join(', ')} spots ` +
+        `@${HOTSPOT_RADIUS}m (${hotKb} KB)`,
+    )
+    say(
+      `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> ` +
+        `candidates.json (${(datasetText.length / 1024).toFixed(0)} KB), ` +
+        `anchors.json (${anchorKb.toFixed(0)} KB, ${dumpAnchors.lat.length} points)`,
+    )
+    return finalCandidates
+  }
+
+
   let reused = 0
   for (const [index, area] of areas.entries()) {
     const label = `region ${index + 1}/${areas.length}`
@@ -712,6 +922,11 @@ async function main() {
     totals.candidatesAfterDedup += found.find.candidatesAfterDedup
     totals.refinedCount += found.improved
     totals.refineGain += found.totalGain
+
+    // Written now rather than only at the end, so this region is on the map as soon as it is done.
+    // Only when something was actually searched: a run over cached regions would otherwise rewrite
+    // the same files once per region for no change at all.
+    if (!serve) await emit(false)
   }
   if (reused) {
     // Said plainly every time, because nothing else will say it: results are kept until asked to
@@ -723,173 +938,7 @@ async function main() {
     )
   }
 
-  // One pass over the pooled results: overlapping AOIs find the same line twice, and refinement
-  // can walk two neighbours onto the same optimum. Nothing is capped after that -- every distinct
-  // line found is stored.
-  const deduped = (
-    await stage('pooled dedup', () => dedupe(refinedAll, p.dedupRadius), (out) => ({
-      from: [refinedAll.length, 'pooled'],
-      to: [out.length, 'distinct'],
-    }))
-  ).map(locate)
-  // evaluateLine already drops the profile unless it is wanted, so there is nothing left to strip.
-  const finalCandidates = deduped
-  const meanGain = totals.refinedCount ? totals.refineGain / totals.refinedCount : 0
-  console.log(
-    `\npooled ${refinedAll.length} from ${areas.length} region(s) -> ` +
-      `${finalCandidates.length} distinct` +
-      (p.storeProfiles ? ' (with profiles)' : ' (profiles fetched on demand)'),
-  )
-
-  // Split rather than labelled: the list a line is in is its kind, so the word does not have to be
-  // repeated on every line. `kind` is dropped here for the same reason and put back on load.
-  const lines = byKind<Candidate[]>(() => [])
-  for (const { kind, ...rest } of finalCandidates) lines[kind].push(rest as Candidate)
-  console.log(
-    `  ${LINE_KINDS.map((k) => `${lines[k].length} ${k}`).join(', ')}`,
-  )
-
-  const dataset: Dataset = {
-    meta: {
-      generatedAt: new Date().toISOString(),
-      regions,
-      params: p,
-      urbanAreas: URBAN_AREAS,
-      sources: [
-        {
-          name: 'DGM 1 m (LiDAR terrain model)',
-          url: 'https://data.geobasis-bb.de/geobasis/daten/dgm/tif/',
-          attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
-          note: '1 m grid, DHHN2016 heights, bare earth',
-        },
-        {
-          name: 'bDOM 0.2 m (photogrammetric surface model)',
-          url: 'https://data.geobasis-bb.de/geobasis/daten/bdom/tif/',
-          attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
-          note: 'includes vegetation and structures; different survey epoch than the DGM',
-        },
-        {
-          name: 'LoD1 city model (3d_gebaeude)',
-          url: 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml/',
-          attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
-          note: 'extruded footprints with one roof height each; merged into the ground so a roof is both an anchor and an obstacle. Brandenburg only, so no buildings in Berlin',
-        },
-        {
-          name: 'OpenStreetMap roads, railways and water',
-          url: 'https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf',
-          attribution: 'OpenStreetMap contributors, ODbL',
-          note: 'extracted once by `npm run osm` and shipped as blocks under public/osm; sets the clearance a line owes over traffic. Brandenburg extract, which includes Berlin',
-        },
-      ],
-      stats: {
-        anchorsScanned: totals.anchorsScanned,
-        anchorsKept: totals.anchorsKept,
-        pairsInRange: totals.pairsInRange,
-        pairsSectorPassed: totals.pairsSectorPassed,
-        pairsLevelEnough: totals.pairsLevelEnough,
-        pairsFeasible: totals.pairsFeasible,
-        candidatesAfterDedup: totals.candidatesAfterDedup,
-        refinedCount: totals.refinedCount,
-        refineMeanGain: Math.round(meanGain * 100) / 100,
-        runtimeMs: Date.now() - started,
-      },
-    },
-    lines,
-  }
-
-  await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
-  await writeFile(OUT, JSON.stringify(dataset))
-
-  const dump: AnchorDump = {
-    sectorCount: p.sectorCount,
-    aFrameMin: p.aFrameMin,
-    aFrameMax: p.aFrameMax,
-    anchorStep: p.anchorStep,
-    nearProbeLength: p.nearProbeLength,
-    minDropDepth: p.minDropDepth,
-    dropSearchRadius: p.dropSearchRadius,
-    ...dumpAnchors,
-  }
-  await writeFile(ANCHORS_OUT, JSON.stringify(dump))
-
-  const r6 = (v: number) => Math.round(v * 1e6) / 1e6
-  const mask: MaskCells = {
-    res: p.maskExportRes,
-    sourceRes: p.maskRes,
-    minDrop: p.maskMinDrop,
-    lat: maskCells.flatMap((m) => m.lat),
-    lon: maskCells.flatMap((m) => m.lon),
-    drop: maskCells.flatMap((m) => m.drop),
-  }
-  const tiles: TileUsage = {
-    size: 1000,
-    lat: tileUse.flatMap((t) => t.lat),
-    lon: tileUse.flatMap((t) => t.lon),
-    terrain: tileUse.flatMap((t) => t.terrain),
-    surface: tileUse.flatMap((t) => t.surface),
-    anchors: tileUse.flatMap((t) => t.anchors),
-    roofCells: tileUse.flatMap((t) => t.roofCells),
-    roadKills: tileUse.flatMap((t) => t.roadKills),
-  }
-  await writeFile(TILES_OUT, JSON.stringify(tiles))
-  const barren = tiles.terrain.filter((t, i) => t && tiles.anchors[i] === 0).length
-  console.log(
-    `tiles: ${tiles.terrain.filter(Boolean).length}/${tiles.lat.length} terrain fetched ` +
-      `(${barren} yielded no anchor), ${tiles.surface.filter(Boolean).length} surface`,
-  )
-
-  await writeFile(MASK_OUT, JSON.stringify(mask))
-  const skipped = mask.drop.filter((d) => d < p.maskMinDrop).length
-  console.log(
-    `mask: ${mask.drop.length} cells @${p.maskExportRes}m, ${skipped} below the ${p.maskMinDrop}m ` +
-      `threshold (${((100 * skipped) / Math.max(1, mask.drop.length)).toFixed(0)}% of the area) ` +
-      `(${(JSON.stringify(mask).length / 1024).toFixed(0)} KB)`,
-  )
-
-  /**
-   * Clustered across all regions at once, so a spot straddling two of them is one spot -- but once
-   * per kind, so the layer splits the same way the lines do.
-   *
-   * Three independent clusterings rather than one tagged set, because a place where both a natural
-   * and an urban line work really is two answers: a spot only appears in a layer if that kind of
-   * line can actually be rigged there, which is what makes switching the filter mean something.
-   */
-  const hotspots: Hotspots = { radius: HOTSPOT_RADIUS, ...byKind<HotspotArrays>(emptyHotspots) }
-  const cells = LINE_KINDS.reduce((n, k) => n + spotCells[k].length, 0)
-  const spotCounts = await stage('hotspot clustering', () =>
-    LINE_KINDS.map((kind) => {
-      // Merged through the same grid the regions were reduced on, so two regions that overlap a
-      // cell contribute to one cell rather than to two spots on top of each other.
-      const spots = clusterSpots(gridSpots(spotCells[kind], SPOT_RES), HOTSPOT_RADIUS)
-      spots.sort((a, b) => b.count - a.count)
-      for (const s of spots) {
-        const { lat, lon } = toWgs84(s.e, s.n)
-        hotspots[kind].lat.push(r6(lat))
-        hotspots[kind].lon.push(r6(lon))
-        hotspots[kind].count.push(s.count)
-        hotspots[kind].score.push(Math.round(s.score * 10) / 10)
-      }
-      return spots.length
-    }),
-  (out) => ({
-    from: [cells, `${SPOT_RES}m cells`],
-    to: [out.reduce((n, spots) => n + spots, 0), 'spots'],
-  }))
-  await writeFile(HOTSPOTS_OUT, JSON.stringify(hotspots))
-  const hotKb = (JSON.stringify(hotspots).length / 1024).toFixed(0)
-  console.log(
-    `hotspots: ${endpointsFeasible} feasible endpoints, ${endpointsWalkable} clear of canopy ` +
-      `-> ${cells} cells @${SPOT_RES}m ` +
-      `-> ${LINE_KINDS.map((k, i) => `${spotCounts[i]} ${k}`).join(', ')} spots ` +
-      `@${HOTSPOT_RADIUS}m (${hotKb} KB)`,
-  )
-  const anchorKb = (JSON.stringify(dump).length / 1024).toFixed(0)
-  const kb = (JSON.stringify(dataset).length / 1024).toFixed(0)
-  console.log(
-    `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> candidates.json (${kb} KB), ` +
-      `anchors.json (${anchorKb} KB, ${dumpAnchors.lat.length} points)`,
-  )
-
+  const finalCandidates = await emit(true)
   renderReport((Date.now() - started) / 1000)
 
   if (finalCandidates.length) {
