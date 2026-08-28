@@ -15,7 +15,7 @@ import {
   tilesWorthLoading,
 } from './coarse.js'
 import { packAnchors, packSectors, scanAnchors } from './openness.js'
-import { dedupe, locate, pairsOf } from './lines.js'
+import { dedupe, locate, pairsOf, thinCrossings } from './lines.js'
 import {
   HOTSPOT_RADIUS,
   SPOT_RES,
@@ -526,6 +526,12 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
         `mean +${gain.toFixed(2)} score`,
     )
 
+    const thinned = await stage(
+      'thinning crossed-out meshes',
+      () => thinCrossings(ref.candidates, p.maxCrossings),
+      (out) => ({ from: [ref.candidates.length, 'distinct'], to: [out.length, 'kept'] }),
+    )
+
     const tiles = tileUsage(
       allTiles, anchors, r.roadKills, wantedTiles, wanted, buildings.cellsPerTile,
     )
@@ -574,7 +580,7 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
       spots,
       endpointsFeasible: r.endpoints.length,
       endpointsWalkable: walkable.length,
-      candidates: ref.candidates,
+      candidates: thinned,
       improved: ref.improved,
       totalGain: ref.totalGain,
       find: {

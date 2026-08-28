@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { bestFirst, dedupe, evaluateLine, findLines, refine, terrainPairs } from './lines.js'
+import {
+  bestFirst,
+  dedupe,
+  evaluateLine,
+  findLines,
+  refine,
+  terrainPairs,
+  thinCrossings,
+} from './lines.js'
 import { chunks } from './pool.js'
 import { chooseHeights } from '../shared/scoring.js'
 import { gridFrom } from './testing.js'
@@ -603,3 +611,70 @@ describe('dedup order', () => {
     expect(dedupe([better, worse], 25).map((c) => c.score)).toEqual([60])
   })
 })
+
+describe('thinCrossings', () => {
+  /** A line as the thinner sees it: two endpoints, an id, and a score it must not consult. */
+  const span = (ae: number, an: number, be: number, bn: number, score = 50): Candidate =>
+    ({
+      id: `${ae}_${an}__${be}_${bn}`,
+      score,
+      length: Math.hypot(be - ae, bn - an),
+      a: { e: ae, n: an } as Candidate['a'],
+      b: { e: be, n: bn } as Candidate['b'],
+    }) as Candidate
+
+  /** A fan across a pit: `n` anchors on each rim, every one joined to every other. */
+  const fan = (n: number) => {
+    const out: Candidate[] = []
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) out.push(span(0, i * 10, 400, j * 10, 50 + ((i * 7 + j) % 30)))
+    }
+    return out
+  }
+
+  it('leaves ground alone where nothing crosses much', () => {
+    // Parallel spans, no crossings at all. This is what most of the state looks like.
+    const apart = Array.from({ length: 40 }, (_, i) => span(0, i * 50, 400, i * 50))
+    expect(thinCrossings(apart, 50)).toHaveLength(40)
+  })
+
+  it('holds every kept line under the limit', () => {
+    const kept = thinCrossings(fan(20), 50)
+    expect(kept.length).toBeLessThan(400)
+    for (const c of kept) {
+      const crossing = kept.filter((o) => o !== c && crossesFixture(c, o)).length
+      expect(crossing).toBeLessThanOrEqual(50)
+    }
+  })
+
+  it('gives the same subset for the same set, in any order', () => {
+    // Seeded and sorted by id before shuffling, so the answer is a property of the set. Otherwise a
+    // chunked run would thin differently depending on how its candidates happened to be pooled.
+    const lines = fan(14)
+    const ids = (cs: Candidate[]) => cs.map((c) => c.id).sort().join('|')
+    expect(ids(thinCrossings([...lines].reverse(), 20))).toBe(ids(thinCrossings(lines, 20)))
+  })
+
+  it('keeps low scores as readily as high ones', () => {
+    // Deliberate. In a mesh the best lines are near-duplicates of each other, so favouring score
+    // would keep a tight cluster of them and throw away the band that holds the variety.
+    const kept = thinCrossings(fan(16), 20)
+    const below = kept.filter((c) => c.score < 65).length
+    expect(below).toBeGreaterThan(kept.length * 0.3)
+  })
+
+  it('does nothing when the limit is off', () => {
+    expect(thinCrossings(fan(10), 0)).toHaveLength(100)
+  })
+})
+
+/** The same proper-crossing test thinCrossings uses, written out so the test does not trust it. */
+function crossesFixture(p: Candidate, q: Candidate): boolean {
+  const side = (ax: number, an: number, bx: number, bn: number, cx: number, cn: number) =>
+    (bx - ax) * (cn - an) - (bn - an) * (cx - ax)
+  const d1 = side(p.a.e, p.a.n, p.b.e, p.b.n, q.a.e, q.a.n)
+  const d2 = side(p.a.e, p.a.n, p.b.e, p.b.n, q.b.e, q.b.n)
+  const d3 = side(q.a.e, q.a.n, q.b.e, q.b.n, p.a.e, p.a.n)
+  const d4 = side(q.a.e, q.a.n, q.b.e, q.b.n, p.b.e, p.b.n)
+  return d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0
+}

@@ -804,6 +804,112 @@ export function refine(
  * remove. Note that `radius` interacts with `anchorStep`: at or below the anchor spacing it only
  * catches immediate lattice neighbours, so it has to be a multiple of it to thin results out.
  */
+/**
+ * Thins a mesh of mutually crossing lines down to a subset that still says the same thing.
+ *
+ * Some ground produces a fan rather than a handful of spans: the Lausitz spoil heaps are artificial
+ * relief in every direction, so a chunk there found 8,888 lines from 1,170 anchor positions around
+ * one pit, 896 of them with a midpoint inside the same 300 m. Every one is a real crossing and they
+ * are collectively almost no information -- 31 % of the dataset describing one hole in the ground.
+ *
+ * `dedupe` cannot help: it collapses lines whose *both* endpoints are within `dedupRadius`, and
+ * these differ by tens of metres at each end while being the same crossing of the same pit.
+ *
+ * Crossing count is the measure that works, and the reason is that it is self-targeting. Measured
+ * over the whole dataset, 85 % and 76 % of the lines in the two Lausitz chunks cross more than a
+ * hundred others, against 0-2.8 % everywhere else -- so a threshold acts on a mesh and leaves
+ * ordinary ground alone. A rule based on similarity instead ("keep the best per cell and bearing")
+ * would also strip sparse ground, where three lines in a cell are three different lines.
+ *
+ * Which line goes is decided by a seeded shuffle rather than by score. Tempting to drop the worse of
+ * each pair, but in a mesh the highest-scoring lines are near-duplicates of *each other*, so
+ * favouring score keeps a tight cluster of the best and discards the whole band below it -- which is
+ * where the variety is. Shuffling preserves the shape of the distribution: measured at this
+ * threshold the median score falls 3 points, every bearing survives in proportion, and the single
+ * best line survives because it is judged on geometry rather than quality.
+ *
+ * Sorted by id before shuffling, so the answer depends on the set and not on the order it arrived
+ * in -- the same property dedup has, and for the same reason.
+ *
+ * The guarantee is on the finished set: every kept line crosses at most `maxCrossings` other kept
+ * lines. Checking only what a candidate meets on the way in is not enough -- that holds at the
+ * moment it is admitted and is then broken by everything admitted after it, which a test caught
+ * doing exactly that at 73 crossings under a limit of 50.
+ */
+export function thinCrossings(candidates: Candidate[], maxCrossings: number): Candidate[] {
+  if (maxCrossings <= 0 || candidates.length <= maxCrossings) return candidates
+
+  // mulberry32. A fixed seed, because the point is a reproducible subset rather than a fresh one.
+  let state = 0x9e3779b9
+  const random = () => {
+    state = (state + 0x6d2b79f5) | 0
+    let t = Math.imul(state ^ (state >>> 15), 1 | state)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const order = [...candidates].sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0))
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1))
+    ;[order[i], order[j]] = [order[j]!, order[i]!]
+  }
+
+  /**
+   * Kept lines bucketed by the cells their bounding box touches, so a candidate is only tested
+   * against lines that could possibly meet it. Without it this is quadratic in a set of thousands.
+   */
+  const CELL = 500
+  const buckets = new Map<number, Candidate[]>()
+  const cellsOf = (c: Candidate) => {
+    const out: number[] = []
+    const e0 = Math.floor(Math.min(c.a.e, c.b.e) / CELL)
+    const e1 = Math.floor(Math.max(c.a.e, c.b.e) / CELL)
+    const n0 = Math.floor(Math.min(c.a.n, c.b.n) / CELL)
+    const n1 = Math.floor(Math.max(c.a.n, c.b.n) / CELL)
+    for (let e = e0; e <= e1; e++) for (let n = n0; n <= n1; n++) out.push(e * 100000 + n)
+    return out
+  }
+
+  const kept: Candidate[] = []
+  const crossedBy = new Map<Candidate, number>()
+  for (const c of order) {
+    // Every kept line this one would cross. Collected rather than counted, because admitting it
+    // raises their tallies too: a line accepted early is otherwise pushed past the limit by ones
+    // accepted later, and the guarantee would hold at the moment of admission and nowhere else.
+    const meets: Candidate[] = []
+    const seen = new Set<Candidate>()
+    for (const cell of cellsOf(c)) {
+      for (const other of buckets.get(cell) ?? []) {
+        if (seen.has(other)) continue
+        seen.add(other)
+        if (segmentsCross(c, other)) meets.push(other)
+      }
+    }
+    if (meets.length > maxCrossings) continue
+    if (meets.some((other) => (crossedBy.get(other) ?? 0) >= maxCrossings)) continue
+
+    kept.push(c)
+    crossedBy.set(c, meets.length)
+    for (const other of meets) crossedBy.set(other, (crossedBy.get(other) ?? 0) + 1)
+    for (const cell of cellsOf(c)) {
+      const held = buckets.get(cell)
+      if (held) held.push(c)
+      else buckets.set(cell, [c])
+    }
+  }
+  return kept
+}
+
+/** Whether two spans properly cross. Touching at a shared endpoint does not count. */
+function segmentsCross(p: Candidate, q: Candidate): boolean {
+  const side = (ax: number, an: number, bx: number, bn: number, cx: number, cn: number) =>
+    (bx - ax) * (cn - an) - (bn - an) * (cx - ax)
+  const d1 = side(p.a.e, p.a.n, p.b.e, p.b.n, q.a.e, q.a.n)
+  const d2 = side(p.a.e, p.a.n, p.b.e, p.b.n, q.b.e, q.b.n)
+  const d3 = side(q.a.e, q.a.n, q.b.e, q.b.n, p.a.e, p.a.n)
+  const d4 = side(q.a.e, q.a.n, q.b.e, q.b.n, p.b.e, p.b.n)
+  return d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0
+}
+
 export function dedupe(candidates: Candidate[], radius: number): Candidate[] {
   const r2 = radius * radius
   const near = (p: AnchorOut, q: AnchorOut) => (p.e - q.e) ** 2 + (p.n - q.n) ** 2 <= r2

@@ -110,20 +110,21 @@ export const DEFAULT_PARAMS: Params = {
 
   profileStep: 2,
   dedupRadius: 25,
+  // Measured over the whole dataset: 85% and 76% of the lines in the two Lausitz chunks cross more
+  // than a hundred others, against 0-2.8% everywhere else. So this acts on ground that produces a
+  // fan and leaves ordinary ground untouched. 50 keeps about half of such a mesh; see thinCrossings
+  // for why the survivors are chosen by a seeded shuffle rather than by score.
+  maxCrossings: 50,
 
   // Local hill-climb of each anchor after dedup. 3 m comfortably exceeds half of anchorStep, so
   // the 5 m lattice stops being the limiting factor on where an anchor is reported. 0 disables.
   refineRadius: 3,
   refineStep: 1,
   refineIterations: 8,
-  // Off: profiles were 89% of the dataset and every one is recoverable from the WCS the planner
-  // already uses, so the file scales with the number of lines rather than with 2.5 KB each. The
-  // cost is a couple of elevation windows when a line is opened. See Candidate.profile.
   // Deliberately loose. This exists to drop lines buried in forest, not to enforce a clean line --
   // the score already handles the difference between 5% and 40% blocked, and 0.2% of feasible
   // endpoints in the current data are canopy-clear, so a strict gate here would empty the dataset.
   maxCanopyBlocked: 0.8,
-
 
   // Coarse pre-pass. 16 m costs ~15 KB per square kilometre against 1.4 MB for the 1 m tiles, so
   // screening at this resolution is effectively free.

@@ -74,6 +74,12 @@ export interface Params {
    * Most lateral samples per side at one station. The step grows past this rather than the count.
    */
   sideSamplesPerSide: number
+  /**
+   * Most other kept lines any one line may cross, or 0 to keep everything.
+   *
+   * A limit on how dense a mesh of near-identical lines is allowed to get. See thinCrossings.
+   */
+  maxCrossings: number
   /** Grid spacing of candidate anchor positions. */
   anchorStep: number
   /** Number of angular sectors in the openness bitmask. */
