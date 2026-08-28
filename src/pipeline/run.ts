@@ -1,3 +1,5 @@
+import { createWriteStream } from 'node:fs'
+import { once } from 'node:events'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { tilesForBounds, toWgs84 } from '../shared/geo.js'
 import { corridorTiles, loadProduct } from './raster.js'
@@ -204,6 +206,44 @@ function exportMask(drop: Grid, p: Params): MaskCells {
 }
 
 const pctOf = (n: number, d: number) => (d ? `${((n / d) * 100).toFixed(1)}%` : 'n/a')
+
+/**
+ * Writes the anchor dump a column at a time rather than as one enormous string.
+ *
+ * It is the largest output by a wide margin -- 57 MB for the 1.2 million anchors of a 3,520 km2
+ * block, which extrapolates to around 496 MB for Brandenburg. `JSON.stringify` would have to build
+ * that as a single JavaScript string, and V8 will not make one much past 537 MB, so the obvious
+ * implementation fails at the end of the longest run rather than the start of a short one. Written
+ * in pieces there is no such ceiling: nothing larger than a few thousand values exists at once.
+ *
+ * The shape is columnar, which is what makes this easy -- a header of scalars and five arrays, each
+ * of which can be emitted in slices without ever holding the whole file.
+ */
+async function writeAnchorDump(path: string, dump: AnchorDump): Promise<number> {
+  const { lat, lon, ground, drop, open, ...scalars } = dump
+  const out = createWriteStream(path)
+  let length = 0
+  const put = async (text: string) => {
+    length += text.length
+    // Backpressure matters here and nowhere else in this file: the columns are written far faster
+    // than a disk accepts them, and ignoring it buffers the whole file in memory again.
+    if (!out.write(text)) await once(out, 'drain')
+  }
+
+  await put(`{${Object.entries(scalars).map(([k, v]) => `${JSON.stringify(k)}:${v}`).join(',')}`)
+  for (const [name, column] of Object.entries({ lat, lon, ground, drop, open })) {
+    await put(`,${JSON.stringify(name)}:[`)
+    for (let i = 0; i < column.length; i += 4096) {
+      const slice = column.slice(i, i + 4096) as (number | string)[]
+      await put(slice.map((v) => JSON.stringify(v)).join(',') + (i + 4096 < column.length ? ',' : ''))
+    }
+    await put(']')
+  }
+  await put('}')
+  out.end()
+  await once(out, 'finish')
+  return length
+}
 
 /**
  * Stage numbers are deliberately absent from the labels.
@@ -769,22 +809,9 @@ async function main() {
       dropSearchRadius: p.dropSearchRadius,
       ...dumpAnchors,
     }
-    /**
-     * The one output not written per region.
-     *
-     * It is a development overlay, it is by far the largest file, and it is the only one that does
-     * not survive being scaled up: 57 MB for the 1.2 million anchors of a 3,520 km2 block
-     * extrapolates to ~496 MB statewide, which is within a rounding error of the longest string V8
-     * will build. Serialising that once at the end is a risk worth watching; doing it after every
-     * chunk of a statewide run would be minutes of pure stringify and would fall over at the end
-     * regardless.
-     */
-    let anchorKb = 0
-    if (final) {
-      const anchorsText = JSON.stringify(dump)
-      anchorKb = anchorsText.length / 1024
-      await writeFile(ANCHORS_OUT, anchorsText)
-    }
+    // Written every time like the rest, so a run that dies leaves a set of files that agree with
+    // each other rather than a candidate list describing chunks the anchor dump has never heard of.
+    const anchorKb = (await writeAnchorDump(ANCHORS_OUT, dump)) / 1024
 
     const r6 = (v: number) => Math.round(v * 1e6) / 1e6
     const mask: MaskCells = {
