@@ -895,8 +895,30 @@ async function main() {
   }
 
 
+  /**
+   * Everything that needs no work first, everything that does after it.
+   *
+   * Because the output files are now written after each region that produced something, the order
+   * decides what a half-finished run is serving. Left in list order, a run whose new chunks happen
+   * to come first publishes a dataset holding only those -- the caches are all still on disk, but
+   * the map shows a fraction of them until the loop reaches the rest, which on a statewide pass is
+   * hours of looking at a hole. Folding the cached regions in first means the first write is
+   * already complete and every later one only adds to it.
+   *
+   * The classification reads each cache and drops it again rather than holding them all: the loop
+   * below reads them properly, and a statewide run's worth of parsed regions at once is not
+   * something to keep in memory for the sake of one boolean.
+   *
+   * Safe to reorder. Pooled dedup sorts by score with a canonical tie-break, and the hotspot grid
+   * merges by cell, so neither depends on the order regions arrive in.
+   */
+  const cached = new Set<string>()
+  for (const area of areas) if (await readRegion(area.id)) cached.add(area.id)
+  const needsWork = (a: WorkArea) => !cached.has(a.id) || wanted(a)
+  const ordered = [...areas].sort((a, b) => Number(needsWork(a)) - Number(needsWork(b)))
+
   let reused = 0
-  for (const [index, area] of areas.entries()) {
+  for (const [index, area] of ordered.entries()) {
     const label = `region ${index + 1}/${areas.length}`
     const hit = await readRegion<AreaResult>(area.id)
     // Kept unless this run was told to rebuild it. A region with no cache is searched whatever the

@@ -243,6 +243,8 @@ export const URBAN_AREAS: Aoi[] = [
 ]
 
 export const DEFAULT_CHUNKS: string[] = [
+  // Row 727, along the southern edge, matching the width of the three rows above it.
+  '49_727', '50_727', '51_727', '52_727', '53_727', '54_727', '55_727', '56_727', '57_727',
   '52_728', '53_728', '52_729', '53_729',
   '51_728', '51_729',
   '50_728', '50_729',
