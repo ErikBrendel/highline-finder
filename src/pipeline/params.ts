@@ -178,27 +178,19 @@ export const DEFAULT_PARAMS: Params = {
  * to be riggable here, so it doubles as a sanity check that the finder produces plausible geometry.
  */
 /**
- * Where to search. Add rectangles freely: any that come within `maxLength` of each other are
- * rasterised as one grid so lines can cross between them, and overlaps are collapsed by the dedup
- * pass rather than reported twice.
+ * Hand-drawn rectangles to search. Empty: every one of them is a superchunk now.
  *
- * Adding an area here searches that area alone: every other is already cached under the ground it
- * covers, and a cached region is kept until a run is told to rebuild it.
+ * Kept rather than deleted because the two mechanisms are still meant to coexist -- a rectangle is
+ * the right shape for "look at exactly this and nothing else", and the pipeline supports both. What
+ * changed is that none of the seven this project grew up on earned their shape any more. Each was
+ * replaced by the chunks of lattice it sat inside, which cover more ground for the same machinery
+ * and tile with their neighbours instead of merging into them.
+ *
+ * Eberswalde was the instructive one: 243 km2 of rectangle became 512 km2 of chunks and found 9,096
+ * lines against 8,138, because the lattice covers ground nobody thought to draw a box around.
  */
-export const DEFAULT_AOIS: Aoi[] = [
-  // Tropical: 38 m of relief in flat Brandenburg, and the reason this project exists.
-  { south: 52.197701, west: 13.651291, north: 52.206631, east: 13.668149 },
-  // Linthe: 4.6 km2 west of Berlin.
-  { south: 52.133925, west: 12.777441, north: 52.151606, east: 12.811591 },
-  // Mueggelberge: 22 km2 in south-east Berlin.
-  { south: 52.390088, west: 13.601721, north: 52.428357, east: 13.677498 },
-  // Vehlen: 10.6 km2, further west again.
-  { south: 52.422160, west: 12.297235, north: 52.444399, east: 12.360257 },
-  // Sperenberg: 1.9 km2 south of Berlin, around the old gypsum quarry.
-  { south: 52.134358, west: 13.367475, north: 52.141191, east: 13.392128 },
-  // Otto Lilienthal: 3.4 km2 west of Berlin, around the Gollenberg he flew from.
-  { south: 52.403294, west: 12.814322, north: 52.415410, east: 12.851882 },
-]
+export const DEFAULT_AOIS: Aoi[] = []
+
 
 /**
  * Superchunks claimed for the search, by their place on the 8 km EPSG:25833 lattice.
@@ -243,6 +235,24 @@ export const URBAN_AREAS: Aoi[] = [
 ]
 
 export const DEFAULT_CHUNKS: string[] = [
+  /**
+   * The seven original areas of interest, as the chunks that cover them.
+   *
+   * Scattered rather than a block, because that is where the interesting ground was found before
+   * there was a lattice to find it with. Tropical and Mueggelberge each straddle a lattice corner
+   * and so cost four chunks for one small rectangle; that is the price of a fixed grid, and the
+   * same trade Eberswalde made and won.
+   *
+   * Mueggelberge is in Berlin, which the city model does not cover, so its chunks are natural-only
+   * whatever the urban rectangles say. Its lines always were.
+   */
+  '50_722', '51_722', '50_723', '51_723',   // Tropical
+  '43_722',                                 // Linthe
+  '48_722',                                 // Sperenberg
+  '50_725', '51_725', '50_726', '51_726',   // Mueggelberge
+  '39_726', '40_726',                       // Vehlen
+  '43_726', '44_726',                       // Otto Lilienthal
+
   // Row 727, along the southern edge, matching the width of the three rows above it.
   '49_727', '50_727', '51_727', '52_727', '53_727', '54_727', '55_727', '56_727', '57_727',
   '52_728', '53_728', '52_729', '53_729',
