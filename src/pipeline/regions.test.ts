@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { boxOf, contains, recomputes, workAreas, type WorkArea } from './regions.js'
 import type { Aoi } from '../shared/types.js'
+import { DEFAULT_CHUNKS } from './params.js'
+import { parseChunk } from './chunks.js'
 
 const at = (south: number, west: number, size = 0.005): Aoi => ({
   south,
@@ -74,5 +76,20 @@ describe('recomputes', () => {
     // A region is searched as one grid, so naming half of one selects all of it.
     expect(recomputes(area(tropical, linthe), [{ ...linthe, north: 52.14 }])).toBe(true)
     expect(recomputes(area(tropical), [linthe])).toBe(false)
+  })
+})
+
+describe('the chunk list', () => {
+  it('names each chunk once', () => {
+    // Hand-maintained and long. A repeat is searched once and then counted twice: the pooled dedup
+    // hides that for the lines, since they carry the same ids, and cannot for the hotspot cells,
+    // which are summed.
+    const seen = new Set<string>()
+    const twice = DEFAULT_CHUNKS.filter((c) => seen.size === seen.add(c).size)
+    expect(twice).toEqual([])
+  })
+
+  it('parses every name it lists', () => {
+    for (const c of DEFAULT_CHUNKS) expect(() => parseChunk(c)).not.toThrow()
   })
 })

@@ -275,6 +275,16 @@ export const DEFAULT_CHUNKS: string[] = [
   '41_726', '46_726',
   '41_727', '46_727',
   '41_728', '42_728', '43_728', '44_728', '45_728', '46_728',
+  // A third ring, columns 40-47 across rows 723-729. 40_726 is not repeated here: it came in with
+  // Vehlen, and a chunk listed twice would be searched once and then counted twice, which the
+  // pooled dedup would hide for the lines and not for the hotspot cells.
+  '40_723', '41_723', '42_723', '43_723', '44_723', '45_723', '46_723', '47_723',
+  '40_724', '47_724',
+  '40_725', '47_725',
+  '47_726',
+  '40_727', '47_727',
+  '40_728', '47_728',
+  '40_729', '41_729', '42_729', '43_729', '44_729', '45_729', '46_729', '47_729',
 
   // The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E, where the relief is largely
   // mining spoil rather than anything the ice left.
