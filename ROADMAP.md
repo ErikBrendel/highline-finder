@@ -297,7 +297,7 @@ drawn a box around -- and produced more lines than the rectangle did: 9,096 agai
 5,177 natural against 4,240. The rooftop half survives on the urban rectangle alone, which is now
 independent of any area of interest.
 
-**Eighty-two chunks, 5,248 km2 owned**, and no areas of interest at all. What remains of the hand-drawn
+**A hundred and ten chunks, 7,040 km2 owned**, and no areas of interest at all. What remains of the hand-drawn
 list is small and natural: Tropical, Sperenberg, Lilienthal, Linthe, Vehlen and Mueggelberge.
 
 The Lausitz is the outlier worth recording. Four chunks around Spremberg produced 16,999 lines from
@@ -306,9 +306,11 @@ Mining spoil is artificial relief in every direction, so 8 % of scanned points p
 against the usual 0.3-3 %, and almost every anchor finds a partner. It also ran the pipeline out of
 memory, which is what raised the heap from Node's inherited 4.5 GB to a chosen 12 GB.
 
-That is a ninth of Brandenburg at **4.8 GB per 1,000 km2, extrapolating to ~147 GB statewide** --
-which lands between the tile census's 101 GB and 190 GB bounds, from a completely different
-direction. The census counted tiles the pre-pass would keep; this counted tiles a run actually
+That is now 2,974 tiles and 669 surface tiles over 7,040 km2 -- 4.2 GB of terrain and 22.1 GB of
+surface, **3.7 MB per km2, extrapolating to ~114 GB statewide**. Thirteen of the hundred and ten
+chunks loaded nothing at full resolution at all. The figure has come *down* as the block spread away
+from the Barnim edge and the Oder valley, which is the honest direction: the first samples were the
+hilliest ground in the state. The census counted tiles the pre-pass would keep; this counted tiles a run actually
 fetched. Two independent estimates agreeing is the strongest evidence so far that the statewide
 download is a day's work rather than a project.
 
