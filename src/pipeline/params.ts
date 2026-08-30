@@ -269,6 +269,12 @@ export const DEFAULT_CHUNKS: string[] = [
   '42_725', '43_725', '44_725', '45_725',
   '42_726', '45_726',
   '42_727', '43_727', '44_727', '45_727',
+  // And the ring outside that one, taking the block to six by five.
+  '41_724', '42_724', '43_724', '44_724', '45_724', '46_724',
+  '41_725', '46_725',
+  '41_726', '46_726',
+  '41_727', '46_727',
+  '41_728', '42_728', '43_728', '44_728', '45_728', '46_728',
 
   // The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E, where the relief is largely
   // mining spoil rather than anything the ice left.
