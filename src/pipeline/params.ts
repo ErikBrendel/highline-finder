@@ -312,7 +312,20 @@ export const DEFAULT_CHUNKS: string[] = [
    * the one place `URBAN_AREAS` lets a line stand on a roof, and those lines are the urban half of
    * this project's results.
    */
-  ...rows(49, 55, 731, 734),
+  ...rows(38, 55, 731, 734),
+
+  /**
+   * The four rows' own ragged ends, west and east.
+   *
+   * The north-west corner is a staircase rather than an edge: the Elbe leaves Brandenburg going
+   * north-west, so each row reaches a column further out than the one below it. The east is the
+   * Oder doing something similar and much smaller, with 56_732 missing from the run because the
+   * river bulges west there and the chunk holds no Brandenburg ground at all.
+   */
+  '36_732', '37_732',
+  '35_733', '36_733', '37_733',
+  '34_734', '35_734', '36_734', '37_734',
+  '56_731', '56_733', '56_734', '57_734',
 
   /**
    * The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E.
