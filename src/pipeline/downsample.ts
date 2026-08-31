@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Grid } from '../shared/grid.js'
@@ -13,9 +14,10 @@ import { MissingTile, tileTiff, type Product } from './cache.js'
  * source pixels per square kilometre, and it was 43% of a full run -- decoded from scratch every
  * time, always producing exactly the same answer.
  *
- * So the reduced grid is cached: 4 MB per tile against 32 MB for the source, and every later run
- * reads it instead of decoding. Geometry is not stored, because a tile id and a resolution fix it
- * completely, which leaves the file a bare Float32Array.
+ * So the reduced grid is cached: under a megabyte per tile against 32 MB for the source, and every
+ * later run reads it instead of decoding. Geometry is not stored, because a tile id and a
+ * resolution fix it completely, which leaves the file nothing but heights -- see `packGrid` for
+ * what they are stored as and why.
  *
  * Decoding is spread across processes rather than threads. The work is pure CPU in a decoder we do
  * not control, and separate processes need no shared memory, no loader tricks to run TypeScript off
@@ -27,7 +29,50 @@ import { MissingTile, tileTiff, type Product } from './cache.js'
 const CACHE_DIR = new URL('../../data/cache/', import.meta.url).pathname
 
 const cachePath = (product: Product, tile: string, res: number) =>
-  join(CACHE_DIR, `dn${res}_${product}_${tile}.bin`)
+  join(CACHE_DIR, `dn${res}_${product}_${tile}.i16.gz`)
+
+/**
+ * A reduced grid on disk: heights as decimetres in int16, gzipped.
+ *
+ * It was a bare Float32Array, which is four bytes a cell and a million cells a tile, and the cache
+ * reached 19 GB of them. Two changes, and between them they take a terrain tile from 3.81 MB to
+ * 0.47 MB and a surface tile to 0.92 MB -- eight times and four times.
+ *
+ * Decimetres because the product does not know its own height to a centimetre. The survey's own
+ * figure for agreement between the terrain and surface models on open ground is +/-0.2 m, and this
+ * quantisation is +/-0.05 m, so it disappears into a quarter of the error that is already there.
+ * Nothing downstream reads a height to better than a decimetre either: profiles are rounded to two
+ * decimals for display and clearance is decided in metres.
+ *
+ * Gzip because the quantisation is what makes it work. Float32 elevation compresses barely at all
+ * -- the low mantissa bits of a metre-accurate reading are noise, and noise does not compress --
+ * while neighbouring decimetre integers share their high bytes, which is exactly what a compressor
+ * wants. The same file that gzips from 3.81 to 1.61 MB as float32 gzips to 0.47 MB as int16.
+ *
+ * The cost is a decode on every read: about five milliseconds a tile, against a download measured
+ * in seconds. It is charged on the cache hit rather than the miss, which is the wrong way round in
+ * principle and irrelevant in practice.
+ */
+const NO_DATA = -32768
+
+function packGrid(data: Float32Array): Buffer {
+  const out = new Int16Array(data.length)
+  for (let i = 0; i < data.length; i++) {
+    const v = data[i]!
+    // Anything the sentinel could not represent is treated as no data, which for a height in
+    // Brandenburg means it was already NaN: the range here is -3276.8 to 3276.7 m.
+    out[i] = Number.isFinite(v) ? Math.max(NO_DATA + 1, Math.min(32767, Math.round(v * 10))) : NO_DATA
+  }
+  return gzipSync(Buffer.from(out.buffer, out.byteOffset, out.byteLength))
+}
+
+function unpackGrid(buf: Buffer): Float32Array {
+  const raw = gunzipSync(buf)
+  const dm = new Int16Array(raw.buffer, raw.byteOffset, raw.byteLength / 2)
+  const out = new Float32Array(dm.length)
+  for (let i = 0; i < dm.length; i++) out[i] = dm[i] === NO_DATA ? NaN : dm[i]! / 10
+  return out
+}
 
 /** The 1 km square a tile id names, as a grid at `res`. */
 export function gridForTile(tile: string, res: number): Grid {
@@ -74,7 +119,7 @@ export async function buildTile(product: Product, tile: string, res: number): Pr
     grid,
   )
   await mkdir(CACHE_DIR, { recursive: true })
-  await writeFile(cachePath(product, tile, res), Buffer.from(grid.data.buffer))
+  await writeFile(cachePath(product, tile, res), packGrid(grid.data))
   await rm(tif, { force: true })
   return grid
 }
@@ -83,10 +128,7 @@ export async function buildTile(product: Product, tile: string, res: number): Pr
 export async function loadTile(product: Product, tile: string, res: number): Promise<Grid | null> {
   const path = cachePath(product, tile, res)
   if (!(await exists(path))) return buildTile(product, tile, res)
-  const buf = await readFile(path)
-  const data = new Float32Array(
-    buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
-  )
+  const data = unpackGrid(await readFile(path))
   const empty = gridForTile(tile, res)
   return new Grid(data, empty.w, empty.h, empty.e0, empty.n1, res)
 }

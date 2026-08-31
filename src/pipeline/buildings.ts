@@ -1,6 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { unzipSync } from 'fflate'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { blitGrid, type Grid } from '../shared/grid.js'
 import { RoofMask } from '../shared/anchoring.js'
 import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
@@ -39,8 +40,13 @@ async function exists(path: string): Promise<boolean> {
  */
 async function tileGml(tile: string): Promise<string> {
   await mkdir(CACHE_DIR, { recursive: true })
-  const path = join(CACHE_DIR, `lod1_${tile}.gml`)
-  if (await exists(path)) return readFile(path, 'utf8')
+  const path = join(CACHE_DIR, `lod1_${tile}.gml.gz`)
+  if (await exists(path)) {
+    const buf = await readFile(path)
+    // Empty means the survey publishes nothing here, which is nearly half of Brandenburg. Kept as
+    // a zero-byte file rather than the gzip of an empty string, so the answer costs no bytes.
+    return buf.byteLength ? gunzipSync(buf).toString('utf8') : ''
+  }
 
   const url = `${BASE}/lod1_${tile}.zip`
   let last: unknown
@@ -56,7 +62,11 @@ async function tileGml(tile: string): Promise<string> {
       const name = Object.keys(entries).find((k) => k.endsWith('.gml'))
       if (!name) throw new Error(`no .gml inside ${url}`)
       const gml = Buffer.from(entries[name]!).toString('utf8')
-      await writeFile(path, gml)
+      // Gzipped, because CityGML is the most compressible thing this project stores: it is XML with
+      // one deeply repetitive element per building wall, and it goes to about a twentieth. The
+      // cache held 8.7 GB of it against 0.4 GB this way, for a decompression nobody can measure
+      // against the fetch it replaces.
+      await writeFile(path, gzipSync(gml))
       return gml
     } catch (e) {
       last = e

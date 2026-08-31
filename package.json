@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "downsample": "tsx src/pipeline/downsample.ts",
     "osm": "tsx src/tools/osmRefresh.ts",
-    "boundaries": "tsx src/tools/boundaries.ts"
+    "boundaries": "tsx src/tools/boundaries.ts",
+    "shrink": "tsx src/tools/shrinkCache.ts"
   },
   "dependencies": {
     "fflate": "^0.8.2",
