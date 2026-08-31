@@ -845,6 +845,36 @@ export function MapView({
         },
       })
 
+      /**
+       * The two state borders, always on.
+       *
+       * Not a debug view and not a filter: everything in this dataset is inside Brandenburg, so the
+       * border is where the answers stop -- and the hole in the middle of it is Berlin, which the
+       * city model does not cover, so a line there is natural whatever the urban rectangles say.
+       * Both facts are ones you want on screen without having asked for them.
+       *
+       * Loaded rather than bundled, and small enough not to care: 38 KB for both, simplified to
+       * 100 m by `npm run boundaries`. A failure is left silent, which is the one place in this file
+       * that is right -- the border is context, and a map that refuses to draw because it could not
+       * decorate itself would be worse than one without the decoration.
+       */
+      m.addSource('borders', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      m.addLayer({
+        id: 'borders',
+        type: 'line',
+        source: 'borders',
+        paint: { 'line-color': '#cbd5e1', 'line-width': 3, 'line-opacity': 0.55 },
+      })
+      fetch(`${import.meta.env.BASE_URL}boundaries.json`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((geo: GeoJSON.FeatureCollection) => {
+          ;(m.getSource('borders') as maplibregl.GeoJSONSource | undefined)?.setData(geo)
+        })
+        .catch((e: unknown) => report('loading boundaries.json', e))
+
       m.addSource('aoi', {
         type: 'geojson',
         data: {
