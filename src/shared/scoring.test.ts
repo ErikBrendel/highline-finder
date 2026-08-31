@@ -198,9 +198,30 @@ describe('violationsOf', () => {
     crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
   })
 
+  it('never prints a figure at float precision', () => {
+    /**
+     * "under the 1.240000000000009 m minimum" reached the panel, from subtracting two rounded
+     * metrics and formatting the result raw. Every figure here is read by a person, so none of them
+     * has any business carrying more than a couple of decimals.
+     */
+    const nasty: Metrics = {
+      ...at(1.04), clearanceMargin: -0.2000000000000009, exposure: 0.1 + 0.2,
+      canopyBlockedFraction: 0.8100000000000001, crossingDeficit: 3, worstCrossing: 0,
+      worstClearance: 1.1000000000000005,
+    }
+    const said = violationsOf(nasty, 40.000000000001, 9.100000000000001, p, [
+      { d: 20.5, from: 18, to: 23, offset: 0.30000000000000004, kind: 'path', tier: 'path', onBridge: false },
+    ] as never)
+    expect(said.length).toBeGreaterThan(3)
+    for (const line of said) expect(line).not.toMatch(/\d\.\d{3,}/)
+  })
+
   it('quotes the shortfall when the line is merely too low', () => {
+    // The shortfall, not a clearance beside a requirement: 1.4 m against the 3 m minimum is 1.6 m
+    // short, and that figure belongs to one station rather than being the difference of two minima
+    // taken at different ones.
     expect(violationsOf(at(1.4), 200, 0, p).join(' ')).toMatch(
-      /clears the ground by only 1.4 m, under the 3 m minimum/,
+      /comes 1\.60 m short of the clearance it needs/,
     )
   })
 

@@ -350,16 +350,25 @@ export function violationsOf(
   if (length < p.minLength) out.push(`${length.toFixed(0)} m is under the ${p.minLength} m minimum`)
   if (length > p.maxLength) out.push(`${length.toFixed(0)} m is over the ${p.maxLength} m maximum`)
   if (m.clearanceMargin < 0) {
-    // A negative clearance is not a small one. "Clears the ground by only -2.6 m" is arithmetic
-    // rather than a description: the line is inside the hill, and saying so is the whole answer.
-    // The figure it is short of is quoted rather than assumed, since over water it is not the same
-    // number the rest of the span is held to.
-    const needed = m.clearanceMin - m.clearanceMargin
+    /**
+     * The shortfall, which is one place on the span, and not a clearance next to a requirement.
+     *
+     * It used to quote both, deriving the requirement as `clearanceMin - clearanceMargin`. Those
+     * are two separate minima taken over the whole span and there is no reason they fall at the
+     * same station: with a metre required over water and three over land, a span can take its
+     * tightest gap at the water and its worst margin on the land, and subtracting them invents a
+     * requirement of 1.24 m that applies nowhere -- printed unrounded, as
+     * "under the 1.240000000000009 m minimum", which is how it was noticed.
+     *
+     * The margin is a single sample's fact and needs no arithmetic, so that is what is reported.
+     * What the line does clear is in the panel's own figures a few lines below.
+     */
     out.push(
       m.clearanceMin < 0
-        ? 'intersects the ground'
-        : `clears the ground by only ${m.clearanceMin.toFixed(1)} m, under the ` +
-          `${needed} m minimum`,
+        ? // A negative clearance is not a small one: the line is inside the hill, and saying so is
+          // the whole answer.
+          'intersects the ground'
+        : `comes ${(-m.clearanceMargin).toFixed(2)} m short of the clearance it needs`,
     )
   }
   if (m.exposure < p.minExposure) {
