@@ -8,6 +8,7 @@ import {
   rigPenalty,
   scoreOf,
   violationsOf,
+  type Metrics,
   type RigEnd,
 } from './scoring.js'
 import { lineKind, rigRange } from './anchoring.js'
@@ -45,6 +46,58 @@ export interface PlannedLine {
 }
 
 /**
+ * A height to stand an anchor on when the survey has not covered the ground under it.
+ *
+ * Without one there is no span to draw at all: the whole line's elevation hangs off its two
+ * attachment heights, so a single unmeasured anchor used to mean an empty chart -- which is most of
+ * the time an anchor is being dragged, since dragging is the act of moving it somewhere new.
+ *
+ * Three guesses, in order of how much they are worth:
+ *
+ *   - One end measured: the other copies it, which draws the span level. A level line is the one
+ *     assumption that adds nothing of its own -- any other offset would be inventing a slope.
+ *   - Neither end measured: the mean of whatever ground the span does cross, so the line sits in
+ *     the terrain that is on screen rather than above or below all of it.
+ *   - Nothing measured anywhere: zero, and the span floats over an empty chart. Honest enough,
+ *     since there is nothing for it to be wrong about.
+ *
+ * The guess reaches the chart and nothing else. `Candidate.a.ground` keeps the measured value, NaN
+ * and all, so every figure derived from the anchor reads as unknown instead of as a survey reading.
+ */
+const GROUND_SCAN = 32
+
+function standOn(a: Pos, b: Pos, gA: number, gB: number, ground: Sampler): [number, number] {
+  if (!Number.isNaN(gA)) return [gA, gA]
+  if (!Number.isNaN(gB)) return [gB, gB]
+  let sum = 0
+  let seen = 0
+  for (let i = 0; i <= GROUND_SCAN; i++) {
+    const t = i / GROUND_SCAN
+    const v = ground.sample(a.e + (b.e - a.e) * t, a.n + (b.n - a.n) * t)
+    if (!Number.isNaN(v)) {
+      sum += v
+      seen++
+    }
+  }
+  const mean = seen ? sum / seen : 0
+  return [mean, mean]
+}
+
+/** What a line whose span crosses no measured ground at all knows about itself: nothing. */
+const NOTHING_MEASURED: Metrics = {
+  clearanceMin: NaN,
+  clearanceMargin: NaN,
+  exposure: NaN,
+  canopyClearanceMin: NaN,
+  canopyBlockedFraction: NaN,
+  clearanceDeficit: 0,
+  anchorZoneDeficit: 0,
+  crossingDeficit: 0,
+  worstCrossing: -1,
+  worstClearance: NaN,
+}
+
+/**
  * Measures an arbitrary user-placed line, whether or not it qualifies.
  *
  * The counterpart to evaluateLine in the pipeline, and deliberately built from the same parts --
@@ -75,22 +128,29 @@ export function planLine(
    * line" and skips the position, which is how an anchor is kept out of ground nothing is known
    * about. Turning it on there would let a walk wander into a gap and score it as clear air.
    *
-   * The panel turns it on, because a chart of most of a line beats a spinner over all of it while a
-   * dragged anchor crosses into ground still being fetched. What came back partial is not reported
-   * separately: the profile carries a NaN at every station that was not measured, which is the same
-   * fact and the one thing that draws the chart. Every figure on a partial line describes only the
+   * The panel turns it on, and for the panel a line is never nothing: a chart of most of a line
+   * beats a spinner over all of it, and a dragged anchor is in ground still being fetched most of
+   * the time it is moving. It goes as far as standing an anchor on a height nobody has measured --
+   * see `standOn` -- so that the span itself always draws.
+   *
+   * What came back partial is not reported separately: the profile carries a NaN at every station
+   * that was not measured, and the first and last of those are the anchors, which is the same fact
+   * and the one thing that draws the chart. Every figure on a partial line describes only the
    * ground that was seen, and describes it optimistically -- a clearance minimum cannot see into a
    * stretch it never read, and the hill that would have set it may be exactly there. Anything
    * showing those numbers has to say so.
    */
   { tolerateGaps = false }: { tolerateGaps?: boolean } = {},
 ): PlannedLine | null {
-  const gA = ground.sample(a.e, a.n)
-  const gB = ground.sample(b.e, b.n)
-  if (Number.isNaN(gA) || Number.isNaN(gB)) return null
+  const measuredA = ground.sample(a.e, a.n)
+  const measuredB = ground.sample(b.e, b.n)
+  const blind = Number.isNaN(measuredA) || Number.isNaN(measuredB)
+  if (blind && !tolerateGaps) return null
 
   const length = Math.hypot(b.e - a.e, b.n - a.n)
   if (length < 1) return null
+
+  const [gA, gB] = blind ? standOn(a, b, measuredA, measuredB, ground) : [measuredA, measuredB]
 
   const onRoofA = scene.roofs?.covers(a.e, a.n) ?? false
   const onRoofB = scene.roofs?.covers(b.e, b.n) ?? false
@@ -108,15 +168,16 @@ export function planLine(
   if (!h) return null
 
   const profile = buildProfile(a, b, h.hA, h.hB, length, ground, surface, p, scene)
-  const unmeasured = profile.reduce((n, s) => n + (Number.isNaN(s.ground) ? 1 : 0), 0)
-  // Every station missing is not a partial line, it is no line. The anchors are already known to
-  // stand on measured ground, so this only happens for a length under one sample.
-  if (unmeasured === profile.length) return null
-  if (unmeasured && !tolerateGaps) return null
+  if (!tolerateGaps && profile.some((s) => Number.isNaN(s.ground))) return null
 
   const stored = packProfile(profile, p)
   const crossings = scene.roads?.crossings(a, b, p, { ground, surface }) ?? []
-  const m = rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings)
+  // Null means not one station along the span was measured, which for a tolerant caller is a line
+  // whose figures are unknown rather than a line that does not exist. NaN says unknown where zero
+  // would say measured-and-fine, and the charges are zero because nothing seen is nothing to charge.
+  const m =
+    rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings) ??
+    (tolerateGaps ? NOTHING_MEASURED : null)
   if (!m) return null
 
   const r2 = (v: number) => Math.round(v * 100) / 100
@@ -134,8 +195,11 @@ export function planLine(
     candidate: {
       id: PLANNED_ID,
       kind: lineKind(onRoofA, onRoofB),
-      a: { ...wa, e: a.e, n: a.n, ground: r2(gA), anchor: r2(h.hA), aFrame: r2(h.hA - gA) },
-      b: { ...wb, e: b.e, n: b.n, ground: r2(gB), anchor: r2(h.hB), aFrame: r2(h.hB - gB) },
+      // The *measured* ground, so an assumed one reads as unknown rather than as a survey figure.
+      // `anchor` is the height the span is actually drawn at, assumed or not, because the chart has
+      // to put the line somewhere and that is where it put it.
+      a: { ...wa, e: a.e, n: a.n, ground: r2(measuredA), anchor: r2(h.hA), aFrame: r2(h.hA - measuredA) },
+      b: { ...wb, e: b.e, n: b.n, ground: r2(measuredB), anchor: r2(h.hB), aFrame: r2(h.hB - measuredB) },
       length: Math.round(length * 10) / 10,
       bearing: Math.round((Math.atan2(b.e - a.e, b.n - a.n) * 180) / Math.PI + 360) % 360,
       sag: r2(sagRatio * length),

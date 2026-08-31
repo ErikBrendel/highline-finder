@@ -174,3 +174,49 @@ describe('planLine over ground the service has not covered', () => {
     expect(blocked.candidate.score).toBeLessThan(open.candidate.score)
   })
 })
+
+
+describe('planLine with the anchors themselves unmeasured', () => {
+  const from = (h: (e: number) => number): Sampler => ({ sample: h, nearest: h })
+  const ends = [{ e: 100, n: 100 }, { e: 200, n: 100 }] as const
+  const tolerant = (g: Sampler) =>
+    planLine(ends[0], ends[1], g, g, 0.05, p, null, {}, { tolerateGaps: true })
+
+  it('refuses by default however much of the span is measured', () => {
+    const g = from((e) => (e < 150 ? NaN : 50))
+    expect(planLine(ends[0], ends[1], g, g, 0.05, p)).toBeNull()
+    expect(tolerant(g)).not.toBeNull()
+  })
+
+  it('stands an unmeasured anchor level with the measured one', () => {
+    // Only anchor A is missing; the ground under the rest sits at 50.
+    const out = tolerant(from((e) => (e < 105 ? NaN : 50)))!
+    expect(out.candidate.a.anchor).toBe(out.candidate.b.anchor)
+    expect(out.candidate.offLevel).toBe(0)
+    // The measured value is what the panel reports, so the guess cannot be read as a survey figure.
+    expect(Number.isNaN(out.candidate.a.ground)).toBe(true)
+    expect(out.candidate.b.ground).toBe(50)
+  })
+
+  it('stands both on the ground the span does cross, when only the middle is measured', () => {
+    // Anchors blind; the middle of the span sits at 40, so that is the height to draw the line at.
+    const out = tolerant(from((e) => (e < 120 || e > 180 ? NaN : 40)))!
+    expect(out.candidate.a.anchor).toBe(out.candidate.b.anchor)
+    // The A-frame is chosen on top of whatever it stands on, so the span sits a frame above 40.
+    expect(out.candidate.a.anchor - 40).toBeGreaterThanOrEqual(0)
+    expect(out.candidate.a.anchor - 40).toBeLessThanOrEqual(p.aFrameMax)
+  })
+
+  it('still draws a span when nothing anywhere is measured, and claims nothing about it', () => {
+    const out = tolerant(from(() => NaN))!
+    // Nothing to stand on anywhere, so sea level -- plus whatever frame it chose on top of it.
+    expect(out.candidate.a.anchor).toBe(out.candidate.b.anchor)
+    expect(out.candidate.a.anchor).toBeGreaterThanOrEqual(0)
+    expect(out.candidate.a.anchor).toBeLessThanOrEqual(p.aFrameMax)
+    expect(out.candidate.length).toBeCloseTo(100, 6)
+    // Unknown, not fine: a zero here would read as a measurement that came out clear.
+    expect(Number.isNaN(out.candidate.clearanceMin)).toBe(true)
+    expect(Number.isNaN(out.candidate.exposure)).toBe(true)
+    expect(Number.isNaN(out.candidate.score)).toBe(true)
+  })
+})

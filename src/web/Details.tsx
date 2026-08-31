@@ -187,10 +187,32 @@ export function Details({
   const pctUnmeasured = profile?.length
     ? `${Math.max(1, Math.round((100 * unmeasured) / profile.length))} %`
     : ''
+  /**
+   * Whether the span is drawn at a height nobody measured.
+   *
+   * A worse thing to be missing than a gap in the middle, and worth its own sentence: a gap leaves
+   * the line where it is and hides a stretch of what is under it, but an unmeasured anchor means
+   * the line's own elevation was guessed and the whole curve could be sitting anywhere. The first
+   * and last stations are the anchors, so the profile says this too -- see planLine's `standOn`.
+   */
+  const assumedEnds = profile?.length
+    ? [profile[0]!, profile[profile.length - 1]!].filter((s) => Number.isNaN(s.ground)).length
+    : 0
   const ends = c ? { a: c.a, b: c.b } : at
   // Length and bearing need no elevation, so they are shown before the measurement lands.
   const geom = c ?? (ends && spanGeometry(ends.a, ends.b))
-  const stat = (fn: (c: Candidate) => string) => (c ? fn(c) : DASH)
+  /**
+   * A figure, or a dash where there is none.
+   *
+   * The NaN check covers a partially measured line: a metric with nothing behind it comes through
+   * as NaN rather than as zero, precisely so it cannot be read as "measured, and fine". Checked on
+   * the formatted string so every row gets it without seventeen separate guards.
+   */
+  const stat = (fn: (c: Candidate) => string) => {
+    if (!c) return DASH
+    const shown = fn(c)
+    return shown.includes('NaN') ? DASH : shown
+  }
   const pct = (v: number) => (v * 100).toFixed(0)
 
   const rows: { label: string; value: string; neg?: boolean }[] = [
@@ -247,7 +269,13 @@ export function Details({
       <div className="head">
         <strong style={{ color: isPlanned ? '#22c55e' : scoreColor(c!.score) }}>
           {isPlanned && 'Planned line · '}
-          {c ? `Score ${c.score.toFixed(1)}` : failed ? 'could not measure' : 'measuring…'}
+          {c && Number.isFinite(c.score)
+            ? `Score ${c.score.toFixed(1)}`
+            : c
+              ? 'not measured yet'
+              : failed
+                ? 'could not measure'
+                : 'measuring…'}
         </strong>
         {isPlanned && c && (
           <button
@@ -383,6 +411,16 @@ export function Details({
               : `No elevation for ${pctUnmeasured} of this line`}
           </b>
           <div>
+            {assumedEnds > 0 && (
+              <>
+                {assumedEnds === 2
+                  ? 'Neither anchor has ground under it yet, so the span is drawn level at the ' +
+                    'average height of the terrain it crosses. '
+                  : 'One anchor has no ground under it yet, so the span is drawn level with the ' +
+                    'other. '}
+                <strong>Its height is a guess, not a measurement.</strong>{' '}
+              </>
+            )}
             {fetching
               ? 'The figures below cover the part that has arrived, so they can only improve as ' +
                 'the rest does. Clearance especially: the tightest point may be in the gap.'

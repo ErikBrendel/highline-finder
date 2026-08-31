@@ -197,8 +197,12 @@ export function bridgeGaps(profile: ProfileSample[]): {
     for (let j = i; j <= end; j++) {
       const t = before && after ? (j - i + 1) / (end - i + 2) : before ? 1 : 0
       for (const key of BRIDGED) {
-        const lo = (before ?? after)![key]
-        const hi = (after ?? before)![key]
+        // Neither side has ground when nothing on the span was measured at all. The span itself is
+        // still known -- it is a parabola between two attachment heights, assumed or not -- so the
+        // terrain is laid along it, which keeps the paths drawable and the y-range sane under a
+        // band that covers the whole chart anyway.
+        const lo = (before ?? after)?.[key] ?? samples[j]!.line
+        const hi = (after ?? before)?.[key] ?? samples[j]!.line
         ;(samples[j]! as unknown as Record<string, number>)[key] = lo + (hi - lo) * t
       }
     }
@@ -351,7 +355,9 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   // the ground it actually read -- pointing either marker at a bridged station would put a number
   // on the chart that nothing measured.
   const seen = p.filter((_, i) => measured[i])
-  const deepest = seen.reduce((a, s) => (s.line - s.ground > a.line - a.ground ? s : a), seen[0]!)
+  const deepest = seen.length
+    ? seen.reduce((a, s) => (s.line - s.ground > a.line - a.ground ? s : a), seen[0]!)
+    : null
   const inner = seen.filter((s) => s.d >= 10 && s.d <= c.length - 10)
   const tightest = inner.length
     ? inner.reduce((a, s) => (s.line - s.groundMax < a.line - a.groundMax ? s : a), inner[0]!)
@@ -451,21 +457,30 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
         </>
       )}
 
-      <line
-        x1={x(deepest.d)} x2={x(deepest.d)} y1={y(deepest.line)} y2={y(deepest.ground)}
-        stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 2"
-      />
-      <text x={x(deepest.d) + 5} y={(y(deepest.line) + y(deepest.ground)) / 2} fill="#38bdf8" fontSize="10">
-        {c.exposure.toFixed(1)} m air
-      </text>
+      {/* Both mark a figure measured off real ground, so neither is drawn when there is none. */}
+      {deepest && (
+        <>
+          <line
+            x1={x(deepest.d)} x2={x(deepest.d)} y1={y(deepest.line)} y2={y(deepest.ground)}
+            stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 2"
+          />
+          <text x={x(deepest.d) + 5} y={(y(deepest.line) + y(deepest.ground)) / 2} fill="#38bdf8" fontSize="10">
+            {c.exposure.toFixed(1)} m air
+          </text>
+        </>
+      )}
 
-      <line
-        x1={x(tightest.d)} x2={x(tightest.d)} y1={y(tightest.line)} y2={y(tightest.groundMax)}
-        stroke="#fbbf24" strokeWidth="1" strokeDasharray="3 2"
-      />
-      <text x={x(tightest.d) + 5} y={y(tightest.groundMax) - 4} fill="#fbbf24" fontSize="10">
-        {c.clearanceMin.toFixed(1)} m
-      </text>
+      {tightest && (
+        <>
+          <line
+            x1={x(tightest.d)} x2={x(tightest.d)} y1={y(tightest.line)} y2={y(tightest.groundMax)}
+            stroke="#fbbf24" strokeWidth="1" strokeDasharray="3 2"
+          />
+          <text x={x(tightest.d) + 5} y={y(tightest.groundMax) - 4} fill="#fbbf24" fontSize="10">
+            {c.clearanceMin.toFixed(1)} m
+          </text>
+        </>
+      )}
 
       {/* The clearance rule, drawn before the line so the line reads as sitting over or under it. */}
       {requiredPoints.length > 1 && (
