@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  clusterSpots,
-  gridSpots,
-  isWalkable,
-  spotOf,
-  stretchOverCells,
-  type Endpoint,
-  type Spot,
-} from './hotspots.js'
+import { clusterSpots, isWalkable, spotOf, type Endpoint, type Spot } from './hotspots.js'
 
 // Kind plays no part in clustering -- run.ts partitions on it before calling in -- so one is enough.
 const at = (
@@ -38,68 +30,25 @@ describe('isWalkable', () => {
   })
 })
 
-describe('gridSpots', () => {
-  it('keeps one point per cell, on the best endpoint, counting them all', () => {
-    const spots = gridSpots([at(1002, 1000, 40), at(1018, 1012, 70), at(1005, 1005, 55)].map(spotOf), 25)
-    expect(spots).toEqual([{ e: 1018, n: 1012, score: 70, count: 3, ...bounds }])
-  })
-
-  it('keeps points in different cells apart', () => {
-    expect(gridSpots([at(1000, 1000), at(1030, 1000)].map(spotOf), 25)).toHaveLength(2)
-  })
-
-  /**
-   * The property the chunked plan rests on: an aggregate built piecewise has to equal the one built
-   * whole, or every seam between two runs would move the map.
-   */
-  it('adds up the same however the points were split between runs', () => {
-    const points = Array.from({ length: 60 }, (_, i) =>
-      spotOf(at(1000 + (i % 7) * 9, 1000 + Math.floor(i / 7) * 11, 40 + (i % 13))))
-    const whole = gridSpots(points, 25)
-    for (const cut of [1, 17, 43]) {
-      const pieces = [points.slice(0, cut), points.slice(cut)].map((part) => gridSpots(part, 25))
-      expect(gridSpots(pieces.flat(), 25)).toEqual(whole)
-    }
-  })
-
-  it('stretches each bound over every endpoint in the cell', () => {
-    const [spot] = gridSpots([
+describe('clusterSpots', () => {
+  it('stretches each bound over every endpoint in the spot', () => {
+    const [spot] = clusterSpots([
       at(1002, 1000, 40, 0.1, { length: 300, exposure: 8, offLevel: 0.02 }),
       at(1005, 1005, 70, 0.0, { length: 120, exposure: 25, offLevel: 0.01 }),
-    ].map(spotOf), 25)
+    ].map(spotOf), 50)
     // A minimum on the slider reads the largest value here, a maximum the smallest -- so the two
     // bounds a filter can never ask about are simply not kept.
     expect(spot).toMatchObject({
+      count: 2, score: 70,
       lengthMin: 120, lengthMax: 300, exposureMax: 25, canopyMin: 0, offLevelMin: 0.01,
     })
   })
 
   it('breaks a tie on position, not on which point arrived first', () => {
     const tied = [at(1010, 1000, 70), at(1002, 1000, 70)].map(spotOf)
-    expect(gridSpots(tied, 25)).toEqual(gridSpots([...tied].reverse(), 25))
-  })
-})
-
-describe('stretchOverCells', () => {
-  const cells = () => gridSpots([spotOf(at(1002, 1000, 60))], 25)
-
-  it('widens a cell to cover a line that refinement improved', () => {
-    const grid = cells()
-    stretchOverCells(grid, [spotOf(at(1004, 1001, 64, 0, { length: 400, exposure: 30 }))], 25)
-    // Count untouched: the improved line is the same line, not another one. Score moves, because
-    // it is that line's own reading and the filter compares against it.
-    expect(grid[0]).toMatchObject({ count: 1, score: 64, lengthMax: 400, exposureMax: 30 })
+    expect(clusterSpots(tied, 50)).toEqual(clusterSpots([...tied].reverse(), 50))
   })
 
-  it('will not invent a cell for ground no endpoint reached', () => {
-    const grid = cells()
-    stretchOverCells(grid, [spotOf(at(1200, 1000, 90, 0, { length: 400 }))], 25)
-    expect(grid).toHaveLength(1)
-    expect(grid[0]!.lengthMax).toBe(100)
-  })
-})
-
-describe('clusterSpots', () => {
   it('collapses everything within the radius into one spot', () => {
     const spots = clusterSpots([cell(0, 0), cell(30, 0), cell(0, 40)], 50)
     expect(spots).toHaveLength(1)

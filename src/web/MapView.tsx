@@ -815,13 +815,18 @@ export function MapView({
         type: 'heatmap',
         source: 'hotspots',
         paint: {
-          // Log-scaled: counts run from 1 to several hundred, and a linear ramp would leave
-          // everything but the single busiest spot invisible.
+          // Log-scaled, because the counts are long-tailed either way: a linear ramp leaves
+          // everything but the busiest spot invisible. The stops sit on the distribution the line
+          // list actually produces -- a median of 3 lines per spot, a ninetieth percentile of 11
+          // and a ceiling around 40. They were three times higher when a spot counted every
+          // feasible span rather than every kept line, and a ramp topping out at 316 now saturates
+          // nowhere at all.
           'heatmap-weight': [
             'interpolate', ['linear'], ['log10', ['max', ['get', 'count'], 1]],
             0, 0.15,
-            1, 0.5,
-            2.5, 1,
+            0.5, 0.4,
+            1, 0.7,
+            1.6, 1,
           ],
           'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 6, 0.6, 11, 1.2, 16, 2.5],
           'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 6, 5, 11, 16, 16, 60],

@@ -170,12 +170,6 @@ const failed = (reject: Evaluated['reject'], at: Pos | null = null): Evaluated =
 export interface FindResult {
   /** Deduplicated but not capped; run.ts refines and caps. */
   candidates: Candidate[]
-  /**
-   * Both anchors of every feasible line, before dedup, with the canopy figure the hotspot layer
-   * filters on. Kept as bare positions because the full candidates would be tens of thousands of
-   * 120-sample profiles; density is exactly what dedup destroys.
-   */
-  endpoints: Endpoint[]
   pairsInRange: number
   pairsSectorPassed: number
   pairsLevelEnough: number
@@ -550,7 +544,6 @@ export function terrainPairs(
 /** Everything one chunk of the profile pass produced, before dedup pools them. */
 export interface Scored {
   feasible: Candidate[]
-  endpoints: Endpoint[]
   rejects: Record<string, number>
   roadKills: Pos[]
 }
@@ -568,7 +561,6 @@ export function scorePairs(
   scene: Scene = {},
 ): Scored {
   const feasible: Candidate[] = []
-  const endpoints: Endpoint[] = []
   const rejects: Record<string, number> = {}
   const roadKills: Pos[] = []
   for (const [a, b] of pairs) {
@@ -579,16 +571,15 @@ export function scorePairs(
       continue
     }
     feasible.push(c)
-    endpoints.push(...endpointsOf(c))
   }
-  return { feasible, endpoints, rejects, roadKills }
+  return { feasible, rejects, roadKills }
 }
 
 /**
- * The two spot-layer endpoints a line contributes.
+ * The two spot-layer endpoints a line contributes. See hotspots.ts.
  *
- * Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
- * rigged from here", and a line with one end on a roof is an urban line at either end of it.
+ * Both ends carry the *line's* kind, not their own: the layer answers "what could be rigged from
+ * here", and a line with one end on a roof is an urban line at either end of it.
  */
 export function endpointsOf(c: Candidate): [Endpoint, Endpoint] {
   const of = {
@@ -676,12 +667,10 @@ function evaluatePairs(
  */
 export function poolScored(parts: Scored[], found: TerrainPairs, p: Params): FindResult {
   const feasible: Candidate[] = []
-  const endpoints: Endpoint[] = []
   const rejects: Record<string, number> = {}
   const roadKills: Pos[] = []
   for (const part of parts) {
     for (const c of part.feasible) feasible.push(c)
-    for (const e of part.endpoints) endpoints.push(e)
     for (const at of part.roadKills) roadKills.push(at)
     for (const [why, n] of Object.entries(part.rejects)) rejects[why] = (rejects[why] ?? 0) + n
   }
@@ -691,7 +680,6 @@ export function poolScored(parts: Scored[], found: TerrainPairs, p: Params): Fin
   phaseDone('dedup', tDedup)
   return {
     candidates,
-    endpoints,
     pairsInRange: found.pairsInRange,
     pairsSectorPassed: found.pairsSectorPassed,
     pairsLevelEnough: found.pairsLevelEnough,

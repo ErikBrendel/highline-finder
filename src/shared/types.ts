@@ -481,9 +481,10 @@ export interface AnchorDump {
 /**
  * Where lines are possible at all, at a scale where individual lines are meaningless.
  *
- * Parallel arrays rather than objects, and derived from every feasible line rather than the capped
- * candidate list: `count` is how many line endpoints collapsed into the spot, which is the whole
- * signal -- one workable line and four hundred look identical on a map of candidates.
+ * Parallel arrays rather than objects, and clustered from the same line list the map draws, so
+ * `count` is distinct kept lines with an anchor in the spot -- single figures to a few dozen, not
+ * the thousands it read when every feasible span was counted. See hotspots.ts for what that
+ * traded away and what it bought.
  */
 export interface HotspotArrays {
   lat: number[]

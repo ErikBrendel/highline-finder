@@ -205,9 +205,10 @@ makes its verdict stale.
 
 **What still crosses chunks.** Dedup is greedy, so a line near a seam can be suppressed by one in
 the next chunk -- run it once over the union at assembly, which is now order-independent (see
-`bestFirst`). Hotspots were the one thing that genuinely did not scale, at 151 M endpoints; done, as
-a 25 m grid aggregate (count, best score, best endpoint's position) that merges exactly by feeding
-cells back through the same reduction, clustered at assembly.
+`bestFirst`). Hotspots were the one thing that genuinely did not scale, at 151 M endpoints. First
+solved as a 25 m grid aggregate per region; since then solved by deleting the problem, since the
+layer is clustered from the deduped line list and the endpoints are never built at all. A statewide
+`--hotspots` rebuild from cached regions is 1.6 s.
 
 **What stops fitting in one file.** `candidates.json` is 7 MB for 8,865 lines, so ~790 MB for 1.1 M
 -- per-chunk files fetched for whatever is in view, which is hand-rolled vector tiles and the same
@@ -215,8 +216,8 @@ pattern the profile fetch already uses. `anchors.json` likewise, or dropped from
 On disk the source `.tif` is now deleted once its reduced grid exists, which halves the cache and
 takes ~90 % off bdom.
 
-**Sequencing.** Done so far: deterministic dedup, ownership by first anchor, the hotspot grid
-aggregate, `.tif` deletion, and a debug view drawing each region's box with its vintage. Measured
+**Sequencing.** Done so far: deterministic dedup, ownership by first anchor, the hotspot layer,
+`.tif` deletion, and a debug view drawing each region's box with its vintage. Measured
 together on the seven regions: the line set is unchanged (9,660, every id shared), the region cache
 falls 68.6 -> 25.3 MB, and 1.39 M feasible endpoints reduce to 3,926 cells, which cluster to 1,293
 spots against 1,360 before -- the same total weight, a few adjacent spots merged.
