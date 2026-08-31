@@ -934,6 +934,7 @@ export function App() {
     Math.ceil(candidates.reduce((m, c) => Math.max(m, pick(c)), floor))
   const maxScore = highest((c) => c.score, 1)
   const maxLen = highest((c) => c.length, 100)
+  const minLen = Math.floor(data.meta.params.minLength)
   const maxExp = highest((c) => c.exposure, 10)
   // The pipeline already caps offlevel, so the slider only needs to reach that cap.
   const offLevelCap = Math.ceil(data.meta.params.maxOffLevelRatio * 100 * 10) / 10
@@ -1084,18 +1085,23 @@ export function App() {
 
               <h2 style={{ marginTop: 14 }}>Filters</h2>
               <Slider label="Min score" value={Math.min(minScore, maxScore)} min={0} max={maxScore} step={1} unit="" onChange={setMinScore} />
+              {/* Logarithmic, because the search spans a decade and the short end is where the
+                  choices are: half the dataset is under 150 m, which is a fifth of a linear track.
+                  The floor is the shortest line the pipeline will report rather than zero, both
+                  because a ratio needs a positive end and because nothing exists below it. */}
               <RangeSlider
                 label="Length"
                 from={minLength}
                 to={Math.min(maxLength, maxLen)}
-                min={0}
+                min={minLen}
                 max={maxLen}
                 step={10}
                 unit=" m"
+                log
                 onChange={(from, to) => {
-                  setMinLength(from)
-                  // At the top of the track the ceiling stops filtering rather than pinning itself
-                  // to a number that came from whichever dataset happened to be loaded.
+                  // At either end of the track the filter stops filtering rather than pinning
+                  // itself to a number that came from whichever dataset happened to be loaded.
+                  setMinLength(from <= minLen ? 0 : from)
                   setMaxLength(to >= maxLen ? Infinity : to)
                 }}
               />
