@@ -318,4 +318,17 @@ export const DEFAULT_CHUNKS: string[] = [
   // Rows 733 and 734, north of Eberswalde, matching the width of the rows below them.
   '49_733', '50_733', '51_733', '52_733', '53_733', '54_733', '55_733',
   '49_734', '50_734', '51_734', '52_734', '53_734', '54_734', '55_734',
+  /**
+   * A fourth ring around the western group, closing it into a solid E39-48 x N722-730 block.
+   *
+   * The group grew outwards from the Gollenberg at Otto Lilienthal -- 44_726, the valley whose
+   * lines the coverage rule lost and got back -- so each ring is one more square of ground the
+   * previous one was only guessing about. Three of these were already here: 39_726 came in with
+   * the Rathenow area of interest, and 43_722 and 48_722 with the southern row, which is what a
+   * lattice does for you -- ground claimed for one reason turns out to be claimed for the next.
+   */
+  '39_722', '39_723', '39_724', '39_725', '39_727', '39_728', '39_729', '39_730',
+  '40_722', '41_722', '42_722', '44_722', '45_722', '46_722', '47_722',
+  '40_730', '41_730', '42_730', '43_730', '44_730', '45_730', '46_730', '47_730', '48_730',
+  '48_723', '48_724', '48_725', '48_726', '48_727', '48_728', '48_729',
 ]
