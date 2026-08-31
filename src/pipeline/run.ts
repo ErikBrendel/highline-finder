@@ -8,9 +8,11 @@ import { loadRoads } from './roads.js'
 import { WaterMask } from '../shared/water.js'
 import { readRegion, writeRegion } from './regionCache.js'
 import {
-  aggregateDrops,
   dropField,
   loadCoarse,
+  cellsPerSourceTile,
+  TILE_M,
+  tilePasses,
   tilesWithRoofAnchors,
   tilesWorthLoading,
 } from './coarse.js'
@@ -203,20 +205,20 @@ const unpackSpots = (packed: ReturnType<typeof emptySpots>): Spot[] =>
   packed.e.map((e, i) => ({ e, n: packed.n[i]!, count: packed.count[i]!, score: packed.score[i]! }))
 
 function exportMask(drop: Grid, p: Params): MaskCells {
-  const cells = aggregateDrops(drop, p.maskExportRes)
   const out: MaskCells = {
-    res: p.maskExportRes,
+    res: TILE_M,
     sourceRes: p.maskRes,
     minDrop: p.maskMinDrop,
+    minCoverage: p.maskMinCoverage,
     lat: [],
     lon: [],
-    drop: [],
+    passing: [],
   }
-  for (const c of cells) {
-    const { lat, lon } = toWgs84(c.e, c.n)
+  for (const t of tilePasses(drop, p.maskMinDrop)) {
+    const { lat, lon } = toWgs84(t.e, t.n)
     out.lat.push(r6(lat))
     out.lon.push(r6(lon))
-    out.drop.push(c.drop)
+    out.passing.push(t.passing)
   }
   return out
 }
@@ -835,13 +837,30 @@ async function main() {
     const anchorKb = (await writeAnchorDump(ANCHORS_OUT, dump)) / 1024
 
     const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+    /**
+     * One entry per source tile across the whole run, not per region.
+     *
+     * Chunks load a 1 km halo, so every tile on a seam is measured by both its neighbours and
+     * concatenating the regions draws it twice. The higher count wins: a region seeing only part of
+     * a tile counts only the cells it saw, which is the conservative reading `tilesWorthLoading`
+     * deliberately takes for the fetching decision but the wrong one to *report*, since some other
+     * region did see the whole tile.
+     */
+    const byTile = new Map<string, number>()
+    for (const m of maskCells) {
+      for (let i = 0; i < m.lat.length; i++) {
+        const key = `${m.lat[i]}_${m.lon[i]}`
+        byTile.set(key, Math.max(byTile.get(key) ?? 0, m.passing[i]!))
+      }
+    }
     const mask: MaskCells = {
-      res: p.maskExportRes,
+      res: TILE_M,
       sourceRes: p.maskRes,
       minDrop: p.maskMinDrop,
-      lat: maskCells.flatMap((m) => m.lat),
-      lon: maskCells.flatMap((m) => m.lon),
-      drop: maskCells.flatMap((m) => m.drop),
+      minCoverage: p.maskMinCoverage,
+      lat: [...byTile.keys()].map((k) => Number(k.split('_')[0])),
+      lon: [...byTile.keys()].map((k) => Number(k.split('_')[1])),
+      passing: [...byTile.values()],
     }
     const tiles: TileUsage = {
       size: 1000,
@@ -862,10 +881,12 @@ async function main() {
 
     const maskText = JSON.stringify(mask)
     await writeFile(MASK_OUT, maskText)
-    const skipped = mask.drop.filter((d) => d < p.maskMinDrop).length
+    const needed = cellsPerSourceTile(p.maskRes) * p.maskMinCoverage
+    const skipped = mask.passing.filter((c) => c < needed).length
     say(
-      `mask: ${mask.drop.length} cells @${p.maskExportRes}m, ${skipped} below the ${p.maskMinDrop}m ` +
-        `threshold (${((100 * skipped) / Math.max(1, mask.drop.length)).toFixed(0)}% of the area) ` +
+      `mask: ${mask.passing.length} source tiles, ${skipped} under the ` +
+        `${(100 * p.maskMinCoverage).toFixed(1)}% coverage the ${p.maskMinDrop}m threshold asks for ` +
+        `(${((100 * skipped) / Math.max(1, mask.passing.length)).toFixed(0)}% of the area) ` +
         `(${(maskText.length / 1024).toFixed(0)} KB)`,
     )
 

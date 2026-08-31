@@ -110,7 +110,7 @@ describe('planLine', () => {
     expect(roofed.candidate.a.aFrame).toBe(0)
     // Nothing left to raise A with, so the difference the frame used to hide is now offlevel.
     expect(roofed.candidate.offLevel).toBeCloseTo(1.2, 1)
-    expect(roofed.candidate.kind).toBe('mixed')
+    expect(roofed.candidate.kind).toBe('urban')
     expect(roofed.violations).toEqual([])
   })
 

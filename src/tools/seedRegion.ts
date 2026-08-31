@@ -2,6 +2,7 @@ import { readRegion, writeRegion } from '../pipeline/regionCache.js'
 import { workAreas } from '../pipeline/regions.js'
 import { DEFAULT_AOIS, DEFAULT_CHUNKS, DEFAULT_PARAMS } from '../pipeline/params.js'
 import { chunkArea, parseChunk } from '../pipeline/chunks.js'
+import { TILE_M } from '../pipeline/coarse.js'
 import { LINE_KINDS } from '../shared/types.js'
 
 /**
@@ -56,7 +57,15 @@ async function main() {
         anchorsKept: 0,
         generatedAt: '',
       },
-      mask: { res: p.maskExportRes, sourceRes: p.maskRes, minDrop: p.maskMinDrop, lat: [], lon: [], drop: [] },
+      mask: {
+        res: TILE_M,
+        sourceRes: p.maskRes,
+        minDrop: p.maskMinDrop,
+        minCoverage: p.maskMinCoverage,
+        lat: [],
+        lon: [],
+        passing: [],
+      },
       tiles: { size: 1000, lat: [], lon: [], terrain: [], surface: [], anchors: [], roofCells: [], roadKills: [] },
       anchors: { lat: [], lon: [], ground: [], drop: [], open: [] },
       spots: Object.fromEntries(LINE_KINDS.map((k) => [k, empty()])),

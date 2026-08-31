@@ -39,8 +39,7 @@ type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roa
 /** What each anchor class actually means for the trip, which the word alone does not say. */
 const KIND_HELP: Record<LineKind, string> = {
   natural: 'Both ends on the ground. Walk in and rig.',
-  mixed: 'One end on a building, one on the ground.',
-  urban: 'Both ends on roofs. Needs access to both buildings and permission to rig off them.',
+  urban: 'At least one end on a roof. Needs access to the building and permission to rig off it.',
 }
 
 /**
@@ -74,22 +73,26 @@ function DebugLegend({
 
   if (layer === 'coarse') {
     if (!mask) return null
-    const below = mask.drop.filter((d) => d < mask.minDrop).length
+    const total = (mask.res / mask.sourceRes) ** 2
+    const pct = (v: number) => `${(v * 100).toFixed(v < 0.1 ? 1 : 0)} %`
+    const needed = mask.minCoverage
+    const below = mask.passing.filter((c) => c / total < needed).length
     return (
       <div className="legendbox">
         <h3>Coarse pre-pass</h3>
-        {key(DEBUG_COLORS.maskBelow, `falls under ${mask.minDrop} m — judged not worth a look`)}
-        {key(DEBUG_COLORS.maskAbove, 'falls further — kept, fading as it gets steeper')}
+        {key(DEBUG_COLORS.maskBelow, `under ${pct(needed)} of the tile — never fetched`)}
+        {key(DEBUG_COLORS.maskAbove, 'over it — fetched, fading as the margin grows')}
         <div className="stat">
-          {below.toLocaleString()} of {mask.drop.length.toLocaleString()} cells below the threshold
+          {below.toLocaleString()} of {mask.passing.length.toLocaleString()} tiles under the
+          threshold
         </div>
         <div className="about">
-          The greatest fall within {mask.sourceRes * 2} m of each point, measured on a{' '}
-          {mask.sourceRes} m grid that costs almost nothing to fetch, and drawn here in{' '}
-          {mask.res} m squares that each take the steepest reading inside them. Source data arrives
-          in 1 km tiles, so this verdict is acted on a tile at a time: compare it with the terrain
-          view, whose squares are eight times wider, to see that gap. It measures bare earth, which
-          is its other blind spot &mdash; the buildings view counts what that skips.
+          One square per source tile, shaded by how much of it can fall {mask.minDrop} m within{' '}
+          {mask.sourceRes * 2} m &mdash; measured on a {mask.sourceRes} m grid that costs almost
+          nothing to fetch, and counted out of the {total.toLocaleString()} cells a whole tile
+          holds. A tile is fetched at {pct(needed)}, and the tile is the unit: a single good
+          hillside does not carry the square kilometre it sits in. It measures bare earth, which is
+          its blind spot &mdash; the buildings view counts what that skips.
         </div>
       </div>
     )
@@ -287,12 +290,15 @@ export function App() {
    */
   const [debugLayer, setDebugLayer] = useState<DebugLayer>('none')
   /**
-   * The two footprints, off by default. They say where the search looked and where it was allowed
-   * to stand on a roof -- context for reading the map, not part of the answer, and clutter over
-   * ground you are actually studying.
+   * Where the search looked, off by default. Context for reading the map, not part of the answer,
+   * and clutter over ground you are actually studying.
+   *
+   * The other footprint -- where the search was allowed to stand on a roof -- has no switch of its
+   * own. It is only ever the answer to "why are there no urban lines here", so it follows the urban
+   * filter: asking for urban lines is the one moment the rectangles they can exist in are worth
+   * drawing, and a second switch to say so was a step nobody made the connection through.
    */
   const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
-  const [showUrban, setShowUrban] = useState(initial.showUrban ?? false)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
@@ -874,8 +880,7 @@ export function App() {
       showLines: changed(showLines, true),
       showHotspots: changed(showHotspots, true),
       showAreas: changed(showAreas, false),
-      showUrban: changed(showUrban, false),
-      // All three on is the default, so only a narrowed selection is worth a parameter.
+      // Every class on is the default, so only a narrowed selection is worth a parameter.
       kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
       filters: movedFilters({
         minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
@@ -883,7 +888,7 @@ export function App() {
     })
   }, [
     bbox, selectedId, selected, custom, rig, sagPct, basemapMix, data,
-    showLines, showHotspots, showAreas, showUrban, kinds,
+    showLines, showHotspots, showAreas, kinds,
     minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
   ])
 
@@ -1005,11 +1010,6 @@ export function App() {
             <button data-active={showAreas} onClick={() => setShowAreas(!showAreas)}>
               {data.meta.regions.length} areas
             </button>
-            {!!data.meta.urbanAreas.length && (
-              <button data-active={showUrban} onClick={() => setShowUrban(!showUrban)}>
-                {data.meta.urbanAreas.length} urban
-              </button>
-            )}
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>
@@ -1059,9 +1059,7 @@ export function App() {
               </div>
               <div className="note">
                 By what the two ends stand on, not by what is around them &mdash; a ground line
-                threading between two houses is still natural. Getting onto a roof and being allowed
-                to rig off it is a different trip from walking into a forest, which is the
-                distinction worth filtering on.
+                threading between two houses is still natural.
               </div>
 
               <h2 style={{ marginTop: 14 }}>Filters</h2>
@@ -1113,7 +1111,7 @@ export function App() {
             mask={debugLayer === 'coarse' ? mask : null}
             regions={debugLayer === 'regions' ? data.meta.regions : null}
             showAreas={showAreas}
-            showUrban={showUrban}
+            showUrban={kinds.has('urban')}
             tiles={tileLayer ? tiles : null}
             tileLayer={tileLayer ?? 'terrain'}
             initialBbox={initial.bbox}

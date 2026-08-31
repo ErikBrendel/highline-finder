@@ -179,7 +179,6 @@ export const DEFAULT_PARAMS: Params = {
   // matters more than statewide reach.
   maskMinRoofs: 1,
   maskMinRoofDrop: 25,
-  maskExportRes: 128,
   // The web app re-derives clearances from this profile rather than the raster, so its resolution
   // bounds how accurately sag can be re-evaluated client side. 120 keeps a 500 m line at ~4 m
   // sampling, against the 2 m the pipeline itself walks.
@@ -234,11 +233,11 @@ export const DEFAULT_AOIS: Aoi[] = []
  * of tiles, so the other 82 % is that case.
  *
  * The trade is the usual one-sided one: a rooftop line outside these rectangles is not missed, it
- * is never looked for. It costs a lot -- 45 % of the lines found before this rule existed were
- * urban or mixed -- so add a rectangle wherever that matters. The scan reports how many anchors it
- * skipped for this, so the cost is never silent.
+ * is never looked for. It costs a lot -- 45 % of the lines found before this rule existed had a
+ * roof at one end or both -- so add a rectangle wherever that matters. The scan reports how many
+ * anchors it skipped for this, so the cost is never silent.
  *
- * The north-west quarter of Eberswalde is here because its rooftop and mixed lines are the urban
+ * The north-west quarter of Eberswalde is here because its rooftop lines are the urban
  * half of this project's results, found over ground that was searched deliberately rather than
  * swept. Narrowed to the town itself rather than the whole area of interest: the rest is the
  * Niederfinow side, where the lines worth having come off the terrain.

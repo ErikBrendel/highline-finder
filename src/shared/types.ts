@@ -173,8 +173,6 @@ export interface Params {
    * Deliberately far above `minDropDepth`, which is what a line actually needs. See params.ts.
    */
   maskMinRoofDrop: number
-  /** Cell size the mask is aggregated to for the debug overlay, in metres. */
-  maskExportRes: number
   /** Samples kept in the serialised profile, to bound output size. */
   profilePoints: number
 }
@@ -182,11 +180,17 @@ export interface Params {
 /**
  * What a line's two anchors stand on, which is the axis results are split along.
  *
+ * Two buckets and not three. A roof at one end was its own class for a while, on the theory that
+ * half a building is half the problem; it is not. Either end being a roof means finding an owner,
+ * asking for the roof and rigging off a structure, and the natural end saves none of that. Splitting
+ * them scattered the urban work across two filters and left neither showing what there was to look
+ * at, which is the opposite of what the axis is for.
+ *
  * Serialisation order as well as the type: an endpoint carries its kind as an index into this,
  * where a string per endpoint would cost more than the endpoint does. See shared/anchoring.ts for
  * why the classification is about the anchors and not about the surroundings.
  */
-export const LINE_KINDS = ['natural', 'mixed', 'urban'] as const
+export const LINE_KINDS = ['natural', 'urban'] as const
 
 export type LineKind = (typeof LINE_KINDS)[number]
 
@@ -494,19 +498,24 @@ export interface Hotspots extends ByKind<HotspotArrays> {
 }
 
 /**
- * The coarse pre-pass, aggregated for display. Shows which ground was rejected before any
- * full-resolution data was fetched, and how close each part came to the threshold.
+ * The coarse pre-pass, per source tile. Shows which ground was rejected before any full-resolution
+ * data was fetched, and how close each tile came to being kept.
+ *
+ * One entry per 1 km tile because that is the unit the decision is taken in, and the number carried
+ * is the one the rule read -- see `tilePasses` for what the alternative cost.
  */
 export interface MaskCells {
-  /** Cell size of these aggregated cells, in metres. */
+  /** Tile side in metres. */
   res: number
-  /** Resolution the drop was actually measured at. */
+  /** Resolution the drop was measured at, so `(res / sourceRes) ** 2` is the denominator. */
   sourceRes: number
   minDrop: number
+  /** Fraction of a tile that has to qualify for it to be fetched. */
+  minCoverage: number
   lat: number[]
   lon: number[]
-  /** Greatest coarse fall found in the cell. Below minDrop means the cell was skipped. */
-  drop: number[]
+  /** Cells in the tile that fall at least `minDrop`. */
+  passing: number[]
 }
 
 /**

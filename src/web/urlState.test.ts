@@ -18,7 +18,6 @@ const full: UrlState = {
   showLines: false,
   showHotspots: false,
   showAreas: true,
-  showUrban: true,
   kinds: ['natural', 'urban'],
   filters: { minScore: 40, maxCanopy: 25 },
 }
@@ -175,21 +174,13 @@ describe('the area outlines', () => {
   const params = (s: UrlState) => new URLSearchParams(toSearch(s))
 
   it('stay out of a link until switched on', () => {
-    const plain = params({ ...full, showAreas: false, showUrban: null })
-    expect(plain.has('areas')).toBe(false)
-    expect(plain.has('urban')).toBe(false)
+    expect(params({ ...full, showAreas: false }).has('areas')).toBe(false)
     expect(params({ ...full, showAreas: true }).get('areas')).toBe('1')
-    expect(params({ ...full, showUrban: true }).get('urban')).toBe('1')
   })
 
   it('come back on from a link that carries them', () => {
-    expect(parseUrl('?areas=1&urban=1')).toMatchObject({ showAreas: true, showUrban: true })
-    expect(parseUrl('?areas=0&urban=0')).toMatchObject({ showAreas: false, showUrban: false })
-    expect(parseUrl('')).toMatchObject({ showAreas: null, showUrban: null })
-  })
-
-  it('are independent of each other', () => {
-    expect(params({ ...full, showAreas: true, showUrban: false }).has('urban')).toBe(false)
-    expect(parseUrl('?urban=1').showAreas).toBeNull()
+    expect(parseUrl('?areas=1')).toMatchObject({ showAreas: true })
+    expect(parseUrl('?areas=0')).toMatchObject({ showAreas: false })
+    expect(parseUrl('')).toMatchObject({ showAreas: null })
   })
 })

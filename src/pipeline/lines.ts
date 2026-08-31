@@ -580,7 +580,7 @@ export function scorePairs(
     }
     feasible.push(c)
     // Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
-    // rigged from here", and for a mixed line that is a mixed line at either end of it.
+    // rigged from here", and a line with one end on a roof is an urban line at either end of it.
     endpoints.push(
       { e: c.a.e, n: c.a.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
       { e: c.b.e, n: c.b.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },

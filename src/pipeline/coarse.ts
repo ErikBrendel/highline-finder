@@ -195,13 +195,26 @@ export function tilesWithRoofAnchors(
   return out
 }
 
+/**
+ * The unit every fetching decision is taken in.
+ *
+ * The survey publishes in 1 km tiles, so a coarse pass at 16 m can conclude whatever it likes about
+ * a hillside and still only act a whole tile at a time. Both the rule below and the overlay that
+ * reports on it count on this lattice, so what the map shows is the number the rule read.
+ */
+export const TILE_M = 1000
+
+const tileOf = (e: number, n: number) => `${Math.floor(e / TILE_M)}_${Math.floor(n / TILE_M)}`
+
+/** The fixed denominator a tile's coverage is judged against. See tilesWorthLoading. */
+export const cellsPerSourceTile = (res: number) => (TILE_M / res) ** 2
+
 export function tilesWorthLoading(
   drop: Grid,
   minDrop: number,
   minCoverage: number,
   reach: number,
 ): Set<string> {
-  const tileOf = (e: number, n: number) => `${Math.floor(e / 1000)}_${Math.floor(n / 1000)}`
   const passes = new Map<string, number>()
   const passing: [number, number][] = []
 
@@ -233,7 +246,7 @@ export function tilesWorthLoading(
    * denominator, so it is rejected rather than flattered. That is the conservative direction and
    * only reaches tiles at the very edge of a window, which chunks load a halo beyond anyway.
    */
-  const cellsPerTile = (1000 / drop.res) ** 2
+  const cellsPerTile = cellsPerSourceTile(drop.res)
 
   const out = new Set<string>()
   for (const [e, n] of passing) {
@@ -248,33 +261,53 @@ export function tilesWorthLoading(
 }
 
 /**
- * Aggregates a drop field to coarser cells for the map overlay, keeping the *greatest* drop in each.
+ * The pre-pass's own verdict per source tile, for the map overlay: how many coarse cells qualified.
  *
- * Max rather than mean so the overlay never claims ground was rejected more confidently than it was:
- * a cell shown below the threshold really had nothing above it anywhere inside.
+ * The overlay used to be the drop field itself, aggregated to 128 m squares each holding the
+ * steepest reading inside it. That was 819,000 squares over the ground covered so far -- four
+ * million coordinate conversions and 19 MB to fetch, which is what hung the browser -- and it
+ * answered a question the pipeline never asks. What decides a fetch is not how steep a spot is but
+ * how *much* of a tile qualifies, against `maskMinCoverage`, and a max over 64 cells cannot be
+ * turned back into that: one qualifying cell in 64 shows as a qualifying square, so any coverage
+ * read off the old overlay was inflated by up to 64x against the very threshold it invited you to
+ * compare it with.
+ *
+ * Counting the cells instead gives one square per source tile carrying the exact number the rule
+ * read, which is both three hundred times less to draw and the actual answer.
+ *
+ * Tiles the window barely reaches get no verdict at all. A coarse grid is snapped outwards to its
+ * own resolution, so a 10 km window overhangs by up to a cell and clips an eleventh row of tiles it
+ * has seen 0.4 % of; the survey's coverage ends raggedly for real at the state border. Both would
+ * be reported as rejected, since the denominator is a whole tile either way, and a fringe of black
+ * squares around everything drawn is a claim made out of a sliver. Half the tile is the line: the
+ * fetching rule still judges partial tiles the hard way -- see above, that is deliberate -- this
+ * only declines to *draw* a verdict there.
  */
-export function aggregateDrops(
+export function tilePasses(
   drop: Grid,
-  res: number,
-): { e: number; n: number; drop: number }[] {
-  const step = Math.max(1, Math.round(res / drop.res))
-  const out: { e: number; n: number; drop: number }[] = []
-  for (let y = 0; y < drop.h; y += step) {
-    for (let x = 0; x < drop.w; x += step) {
-      let best = NaN
-      for (let j = y; j < Math.min(drop.h, y + step); j++) {
-        for (let i = x; i < Math.min(drop.w, x + step); i++) {
-          const v = drop.data[j * drop.w + i]!
-          if (!Number.isNaN(v) && (Number.isNaN(best) || v > best)) best = v
-        }
-      }
-      if (Number.isNaN(best)) continue
-      out.push({
-        e: drop.e0 + (x + step / 2) * drop.res,
-        n: drop.n1 - (y + step / 2) * drop.res,
-        drop: Math.round(best * 10) / 10,
-      })
+  minDrop: number,
+): { e: number; n: number; passing: number }[] {
+  const passing = new Map<string, number>()
+  const measured = new Map<string, number>()
+  for (let y = 0; y < drop.h; y++) {
+    for (let x = 0; x < drop.w; x++) {
+      const v = drop.data[y * drop.w + x]!
+      if (Number.isNaN(v)) continue
+      const key = tileOf(drop.e0 + (x + 0.5) * drop.res, drop.n1 - (y + 0.5) * drop.res)
+      measured.set(key, (measured.get(key) ?? 0) + 1)
+      // Same sense as tilesWorthLoading: a hole is not a passing cell.
+      if (v >= minDrop) passing.set(key, (passing.get(key) ?? 0) + 1)
     }
   }
-  return out
+  const enough = cellsPerSourceTile(drop.res) / 2
+  return [...measured]
+    .filter(([, cells]) => cells >= enough)
+    .map(([key]) => {
+      const [te, tn] = key.split('_').map(Number) as [number, number]
+      return {
+        e: te * TILE_M + TILE_M / 2,
+        n: tn * TILE_M + TILE_M / 2,
+        passing: passing.get(key) ?? 0,
+      }
+    })
 }

@@ -119,8 +119,7 @@ interface Props {
 /** The anchor class in terms of the two ends, rather than the one word the filter uses. */
 const KIND_TEXT: Record<LineKind, string> = {
   natural: 'ground to ground',
-  mixed: 'roof to ground',
-  urban: 'roof to roof',
+  urban: 'at least one end on a roof',
 }
 
 /**

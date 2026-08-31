@@ -173,14 +173,10 @@ describe.skipIf(!present)('generated candidates.json', () => {
     // Not exactly zero: `aFrame` is the difference of an already-rounded attachment height and an
     // unrounded ground height, so a genuine zero can land a centimetre either side of it.
     const flat = (v: number) => expect(Math.abs(v)).toBeLessThanOrEqual(0.01)
-    // Only urban and mixed lines can have a roof end, so this is also a check that the split is
-    // real: if everything were filed as natural the assertions below would be vacuous.
-    expect(data.lines.urban.length + data.lines.mixed.length).toBeGreaterThan(0)
+    // Only urban lines can have a roof end, so this is also a check that the split is real: if
+    // everything were filed as natural the assertion below would be vacuous.
+    expect(data.lines.urban.length).toBeGreaterThan(0)
     for (const c of data.lines.urban) {
-      flat(c.a.aFrame)
-      flat(c.b.aFrame)
-    }
-    for (const c of data.lines.mixed) {
       flat(Math.min(Math.abs(c.a.aFrame), Math.abs(c.b.aFrame)))
     }
   })

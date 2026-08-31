@@ -13,10 +13,10 @@ describe('rigRange', () => {
 })
 
 describe('lineKind', () => {
-  it('is decided by both ends together', () => {
+  it('calls a line urban as soon as either end is on a roof', () => {
     expect(lineKind(false, false)).toBe('natural')
-    expect(lineKind(true, false)).toBe('mixed')
-    expect(lineKind(false, true)).toBe('mixed')
+    expect(lineKind(true, false)).toBe('urban')
+    expect(lineKind(false, true)).toBe('urban')
     expect(lineKind(true, true)).toBe('urban')
   })
 })

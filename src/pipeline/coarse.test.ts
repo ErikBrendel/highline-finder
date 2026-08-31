@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { dropField, tilesWithRoofAnchors, tilesWorthLoading } from './coarse.js'
+import {
+  cellsPerSourceTile,
+  dropField,
+  tilePasses,
+  tilesWithRoofAnchors,
+  tilesWorthLoading,
+} from './coarse.js'
 import { DEFAULT_PARAMS } from './params.js'
 import { Grid } from '../shared/grid.js'
 
@@ -47,6 +53,28 @@ describe('tilesWorthLoading', () => {
   it('keeps everything when the threshold is zero', () => {
     const g = strip(() => 0)
     expect(tilesWorthLoading(dropField(g, 32), 0, 0, 500).size).toBeGreaterThan(0)
+  })
+})
+
+describe('tilePasses', () => {
+  it('counts what the fetching rule counts, tile for tile', () => {
+    const g = strip((e) => Math.max(0, (e - 402000) / 2))
+    const drop = dropField(g, 32)
+    const needed = cellsPerSourceTile(drop.res) * 0.02
+    const kept = tilesWorthLoading(drop, 10, 0.02, 0)
+    for (const t of tilePasses(drop, 10)) {
+      const name = `33${t.e / 1000 - 0.5}-${(t.n - 500) / 1000}`
+      expect(kept.has(name)).toBe(t.passing >= needed)
+    }
+  })
+
+  it('says nothing about a tile it has barely seen', () => {
+    // A grid snapped outwards to its own resolution overhangs its window by up to a cell, which
+    // clips a row and a column of tiles it has seen a fraction of a per cent of.
+    const flat = strip(() => 0)
+    const g = Grid.filled(flat.w + 1, flat.h + 1, flat.e0, flat.n1 + flat.res, flat.res)
+    g.data.fill(50)
+    expect(tilePasses(dropField(g, 32), 10)).toHaveLength(3)
   })
 })
 

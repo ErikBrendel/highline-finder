@@ -207,7 +207,7 @@ describe('roof anchors', () => {
     const [west, east] = rimsOf(g)
     const roofed = { ...west!, anchorMin: west!.ground, anchorMax: west!.ground }
     const c = findLines([roofed, east!], g, g, p, westRoof).candidates[0]!
-    expect(c.kind).toBe('mixed')
+    expect(c.kind).toBe('urban')
     expect(c.a.aFrame).toBe(0)
     // The east rim is open ground and the two rims are level, so it takes the height it likes.
     expect(c.b.aFrame).toBe(0)
@@ -216,9 +216,9 @@ describe('roof anchors', () => {
 
   it('keeps the classification when refinement moves an anchor', () => {
     const start = evaluateLine({ e: 40, n: 200 }, { e: 260, n: 200 }, g, g, p, westRoof).line!
-    expect(start.kind).toBe('mixed')
+    expect(start.kind).toBe('urban')
     const moved = refine([start], g, g, p, westRoof).candidates[0]!
-    expect(moved.kind).toBe('mixed')
+    expect(moved.kind).toBe('urban')
     expect(moved.a.aFrame).toBe(0)
   })
 })

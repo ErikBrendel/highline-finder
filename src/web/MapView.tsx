@@ -424,13 +424,17 @@ function searchedRings(regions: Region[]): [number, number][][] {
   )
 }
 
+/** Cells a tile is judged out of, which is fixed rather than however many were measured. */
+const maskDenominator = (m: MaskCells) => (m.res / m.sourceRes) ** 2
+
 function maskGeoJson(m: MaskCells | null): GeoJSON.FeatureCollection {
   if (!m) return { type: 'FeatureCollection', features: [] }
+  const total = maskDenominator(m)
   return {
     type: 'FeatureCollection',
     features: m.lat.map((lat, i) => ({
       type: 'Feature',
-      properties: { drop: m.drop[i]! },
+      properties: { share: m.passing[i]! / total },
       geometry: { type: 'Polygon', coordinates: [squareRing(lat, m.lon[i]!, m.res)] },
     })),
   }
@@ -567,8 +571,9 @@ interface Props {
   tileLayer: TileLayer
   /** The regions whose vintage to draw, or null when that view is off. */
   regions: Region[] | null
-  /** Whether to outline the ground that was searched, and the ground a roof counted in. */
+  /** Whether to outline the ground that was searched. */
   showAreas: boolean
+  /** Whether to outline the ground a roof counted in. Follows the urban filter, not a switch. */
   showUrban: boolean
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
@@ -763,9 +768,9 @@ export function MapView({
         type: 'fill',
         source: 'mask',
         paint: {
-          // Excluded ground is greyed out; ground that passed but only just keeps a faint tint, so
+          // Excluded tiles are greyed out; tiles that passed but only just keep a faint tint, so
           // it is obvious how much slack the threshold actually has where it matters.
-          'fill-color': ['case', ['<', ['get', 'drop'], ['literal', 0]], '#0b1220', '#38bdf8'],
+          'fill-color': ['case', ['<', ['get', 'share'], ['literal', 0]], '#0b1220', '#38bdf8'],
           'fill-opacity': 0,
         },
       })
@@ -1124,14 +1129,19 @@ export function MapView({
     if (!m || !ready) return
     const src = m.getSource('mask') as maplibregl.GeoJSONSource | undefined
     src?.setData(maskGeoJson(mask))
-    const t = mask?.minDrop ?? 0
+    // The threshold the tile was actually judged against, so the boundary on the map is the
+    // boundary the pipeline drew rather than a nearby-looking one.
+    const t = mask?.minCoverage ?? 0
     m.setPaintProperty('mask', 'fill-color', [
-      'case', ['<', ['get', 'drop'], t], DEBUG_COLORS.maskBelow, DEBUG_COLORS.maskAbove,
+      'case', ['<', ['get', 'share'], t], DEBUG_COLORS.maskBelow, DEBUG_COLORS.maskAbove,
     ])
+    // Fading out by four times the threshold rather than by a share of the tile: what is worth
+    // seeing is which kept tiles only just cleared it, and at a 1 % threshold everything above a
+    // few per cent is equally safe.
     m.setPaintProperty('mask', 'fill-opacity', mask
       ? ['case',
-          ['<', ['get', 'drop'], t], 0.62,
-          ['interpolate', ['linear'], ['get', 'drop'], t, 0.16, t * 4, 0]]
+          ['<', ['get', 'share'], t], 0.62,
+          ['interpolate', ['linear'], ['get', 'share'], t, 0.16, t * 4, 0]]
       : 0)
     m.setPaintProperty('maskEdge', 'line-opacity', mask ? 0.35 : 0)
   }, [mask, ready])

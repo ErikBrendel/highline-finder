@@ -40,10 +40,13 @@ export function rigRange(onRoof: boolean, p: Params): { min: number; max: number
  * allowed to rig off it -- a different approach, a different permission and different gear from
  * walking into a forest. Classifying by what happens to be nearby would put those two in the same
  * bucket and answer a question nobody asked.
+ *
+ * One roof is enough for that, which is why there is no third class between them: a line with a
+ * roof at one end still needs the owner, the access and the permission, and having the far end on
+ * open ground buys none of it back.
  */
 export function lineKind(aOnRoof: boolean, bOnRoof: boolean): LineKind {
-  if (aOnRoof && bOnRoof) return 'urban'
-  return aOnRoof || bOnRoof ? 'mixed' : 'natural'
+  return aOnRoof || bOnRoof ? 'urban' : 'natural'
 }
 
 /**
