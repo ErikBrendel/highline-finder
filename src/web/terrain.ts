@@ -47,6 +47,23 @@ const LOD1 = 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml'
 /** Window size in metres. 256 keeps a request near 256 KB per layer and reuses well while dragging. */
 export const WINDOW = 256
 
+/**
+ * How far around a draggable anchor to fetch beyond what measuring the line reads.
+ *
+ * Not padding for the line, which asks only for its own corridor. This is for the anchor itself:
+ * without ground under it there is no attachment height and so no line at all, and the panel falls
+ * back to a spinner over an empty chart. A pointer drag needs that ground a frame before it arrives
+ * there, and a fetch is a round trip, so a hand moving faster than the network stutters between a
+ * measured line and nothing.
+ *
+ * Sixty-four metres is about a quarter of a window: enough that ordinary dragging stays inside what
+ * is already held, small enough that an anchor costs a window or two rather than the nine a full
+ * window's margin used to take. Fling the pointer across the map and it will still catch up a
+ * moment later, which is the honest trade -- the alternative is fetching ground for every direction
+ * the anchor did not go.
+ */
+export const DRAG_LOOKAHEAD = 64
+
 type Layer = keyof typeof LAYERS
 
 interface Window {

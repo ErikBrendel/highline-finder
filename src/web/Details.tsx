@@ -280,11 +280,13 @@ export function Details({
           {c && profile?.length ? (
             <>
               <ProfileChart c={c} profile={profile} cover={cover} params={params} />
-              {/* Over the chart rather than instead of it. Most of a line measured is worth looking
-                  at while the rest arrives, and the gaps in it are drawn where they are -- what
-                  this adds is which kind of gap they are, since ground still coming and ground the
-                  survey does not have look exactly alike. */}
-              {fetching && (
+              {/* Over the chart rather than instead of it, and only where the chart has a hole to
+                  explain. Elevation is in flight for all sorts of reasons -- another line, the
+                  optimiser, the map -- and a badge over a complete profile says the thing being
+                  looked at is unfinished when it is not. What this adds is which kind of gap the
+                  gaps are, since ground still coming and ground the survey does not have look
+                  exactly alike. */}
+              {fetching && unmeasured > 0 && (
                 <div className="chartbusy">
                   <i className="spinner" />
                   <span>loading elevation&hellip;</span>

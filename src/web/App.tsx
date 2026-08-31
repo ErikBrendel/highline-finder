@@ -23,8 +23,8 @@ import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import {
-  ensureTerrain, fetchingWindows, groundSampler, onBuilding, onWindowActivity, roofs,
-  surfaceSampler,
+  DRAG_LOOKAHEAD, ensureTerrain, fetchingWindows, groundSampler, onBuilding, onWindowActivity,
+  roofs, surfaceSampler,
 } from './terrain.js'
 import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
 
@@ -530,13 +530,21 @@ export function App() {
   useEffect(() => {
     if (!customUtm || !data) return
     let stale = false
-    // Only what measuring this line reads. Dragging supplies itself: this effect runs on every move,
-    // so ground the line has reached is ground it has fetched, and there is nothing to gain from
-    // guessing where it is going next. The optimiser is the one thing that cannot work that way --
-    // see wanderMargin.
+    // This effect runs on every move, so the line supplies itself as it goes. The optimiser is the
+    // one thing that cannot work that way -- see wanderMargin.
     const span = Math.hypot(customUtm.b.e - customUtm.a.e, customUtm.b.n - customUtm.a.n)
-    ensureTerrain(customUtm.a, customUtm.b, measuredHalfWidth(span, data.meta.params))
-      .then((arrived) => {
+    const { a, b } = customUtm
+    // The corridor, plus a small halo at each anchor. The corridor is what the measurement reads;
+    // the halo is what stops a drag stuttering, since an anchor whose own ground has not landed has
+    // no attachment height and produces no line at all rather than a partial one. See
+    // DRAG_LOOKAHEAD.
+    Promise.all([
+      ensureTerrain(a, b, measuredHalfWidth(span, data.meta.params)),
+      ensureTerrain(a, a, DRAG_LOOKAHEAD),
+      ensureTerrain(b, b, DRAG_LOOKAHEAD),
+    ])
+      .then((results) => {
+        const arrived = results.some(Boolean)
         if (stale) return
         setTerrainFailed(null)
         if (arrived) setTerrainVersion((v) => v + 1)
