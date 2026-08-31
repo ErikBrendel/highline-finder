@@ -163,25 +163,38 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
 }
 
 /**
- * Windows covering the corridor between two points, plus a margin for dragging.
+ * Windows covering the corridor between two points, fattened by `margin` metres.
  *
  * A band along the line, not its bounding box. The box is the same thing for an axis-aligned line
  * and quadratically worse for a diagonal one -- at the planner's 4 km span cap that is the
  * difference between roughly 60 windows and 320, each of them two requests, for area the line never
- * crosses. Walking the segment in half-window steps and taking the neighbours of each step covers
- * the same line with no gap: consecutive steps land at most half a window apart, so their
- * neighbourhoods always overlap.
+ * crosses.
+ *
+ * The margin is in metres and is used as metres. It used to be rounded up to whole windows and
+ * applied as a ring of neighbours, which meant any margin at all -- one metre or two hundred --
+ * asked for the full three-by-three block around every step: a corridor 768 m wide for a line that
+ * needs 20. Fetching a window is two requests against someone else's server, so the ones over
+ * ground the line never approaches are pure waste, and they are also what the loading overlay draws,
+ * which made the viewer look like it was reading half the county to measure one span.
+ *
+ * Steps are spaced no further apart than the margin itself, so consecutive boxes always overlap and
+ * their union is the whole corridor rather than a string of beads. Capped at half a window, which is
+ * what keeps a diagonal from clipping the corner of a window between two samples.
  */
 export function windowsFor(a: Pos, b: Pos, margin = WINDOW): [number, number][] {
-  const steps = Math.ceil(Math.hypot(b.e - a.e, b.n - a.n) / (WINDOW / 2))
-  const reach = Math.ceil(margin / WINDOW)
+  const span = Math.hypot(b.e - a.e, b.n - a.n)
+  const steps = Math.ceil(span / Math.max(1, Math.min(margin, WINDOW / 2)))
   const out = new Map<string, [number, number]>()
   for (let i = 0; i <= steps; i++) {
     const t = steps === 0 ? 0 : i / steps
-    const cx = Math.floor((a.e + (b.e - a.e) * t) / WINDOW)
-    const cy = Math.floor((a.n + (b.n - a.n) * t) / WINDOW)
-    for (let dx = -reach; dx <= reach; dx++) {
-      for (let dy = -reach; dy <= reach; dy++) out.set(`${cx + dx}_${cy + dy}`, [cx + dx, cy + dy])
+    const e = a.e + (b.e - a.e) * t
+    const n = a.n + (b.n - a.n) * t
+    const x1 = Math.floor((e + margin) / WINDOW)
+    const y1 = Math.floor((n + margin) / WINDOW)
+    for (let cx = Math.floor((e - margin) / WINDOW); cx <= x1; cx++) {
+      for (let cy = Math.floor((n - margin) / WINDOW); cy <= y1; cy++) {
+        out.set(`${cx}_${cy}`, [cx, cy])
+      }
     }
   }
   return [...out.values()]
@@ -193,9 +206,14 @@ export function windowsFor(a: Pos, b: Pos, margin = WINDOW): [number, number][] 
  * Resolves to true only if something new arrived, so callers can re-measure on a real change
  * instead of on every call. Dragging an anchor asks for terrain many times a second and almost
  * always already has it; without this the answer would be indistinguishable from a fresh load.
+ *
+ * The default margin is a whole window, which is the planner's need rather than the measurement's:
+ * an anchor being dragged is about to be somewhere it is not yet, and having its surroundings
+ * already in hand is the difference between a smooth drag and a request per pixel. A caller that is
+ * only measuring a line that will not move should say what it actually reaches.
  */
-export async function ensureTerrain(a: Pos, b: Pos): Promise<boolean> {
-  const missing = windowsFor(a, b).filter(([tx, ty]) => !loaded.has(keyOf(tx, ty)))
+export async function ensureTerrain(a: Pos, b: Pos, margin = WINDOW): Promise<boolean> {
+  const missing = windowsFor(a, b, margin).filter(([tx, ty]) => !loaded.has(keyOf(tx, ty)))
   if (!missing.length) return false
   await Promise.all(
     missing.map(([tx, ty]) => {

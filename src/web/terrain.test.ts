@@ -27,6 +27,34 @@ describe('windowsFor', () => {
     const a = { e: 400_100, n: 5_785_100 }
     expect(windowsFor(a, a)).toHaveLength(9)
   })
+
+  it('spends the margin in metres rather than rounding it up to whole windows', () => {
+    const a = { e: 400_100, n: 5_785_100 }
+    const b = { e: 400_600, n: 5_785_400 }
+    // A 20 m band round a 580 m line touches four windows here. Rounded up to a window it was a
+    // ring of neighbours round every step, which is what made the overlay light up ground the line
+    // comes nowhere near.
+    expect(windowsFor(a, b, 20).length).toBeLessThan(windowsFor(a, b).length / 2)
+    // Monotone in the margin, with no step at a window boundary: asking for less never costs more.
+    const sizes = [1, 20, 60, 150, 256].map((m) => windowsFor(a, b, m).length)
+    expect(sizes).toEqual([...sizes].sort((x, y) => x - y))
+  })
+
+  it('still covers the whole band it was asked for, not just the centreline', () => {
+    const a = { e: 400_100, n: 5_785_100 }
+    const b = { e: 402_700, n: 5_786_400 }
+    const margin = 30
+    const keys = new Set(windowsFor(a, b, margin).map(([tx, ty]) => `${tx}_${ty}`))
+    const len = Math.hypot(b.e - a.e, b.n - a.n)
+    const [dx, dy] = [(b.e - a.e) / len, (b.n - a.n) / len]
+    for (let i = 0; i <= 2000; i++) {
+      const t = i / 2000
+      const [e, n] = [a.e + (b.e - a.e) * t, a.n + (b.n - a.n) * t]
+      for (const off of [-margin, 0, margin]) {
+        expect(keys).toContain(windowOf(e - dy * off, n + dx * off))
+      }
+    }
+  })
 })
 
 describe('standingGround', () => {

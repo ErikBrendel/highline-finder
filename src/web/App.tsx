@@ -15,7 +15,9 @@ import type {
   TileUsage,
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
-import { VIEWER_PROFILE, buildProfile, packProfile, unpackProfile } from '../shared/profile.js'
+import {
+  VIEWER_PROFILE, buildProfile, packProfile, sideHalfWidthAt, unpackProfile,
+} from '../shared/profile.js'
 import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
@@ -769,7 +771,12 @@ export function App() {
     const b = { e: selected.b.e, n: selected.b.n }
     let stale = false
     setProfileFailed(null)
-    Promise.all([ensureTerrain(a, b), ensureCover(a, b)])
+    // Only as wide as the profile reads. The band it samples across is widest at midspan, where it
+    // is `sideClearanceRatio` of the span -- 20 m on the longest line in the dataset, against the
+    // 256 m a draggable anchor asks for. A selected line does not move, so the rest was fetched to
+    // be looked at and thrown away.
+    const reach = sideHalfWidthAt(0.5, selected.length, data.meta.params) + 1
+    Promise.all([ensureTerrain(a, b, reach), ensureCover(a, b)])
       .then(() => {
         if (stale) return
         const fine = { ...data.meta.params, ...VIEWER_PROFILE }
