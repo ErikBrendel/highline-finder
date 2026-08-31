@@ -553,12 +553,7 @@ export function maxFeasibleSag(
  * the metrics cannot be recomputed and are left at the values they were generated with. The browser
  * fetches a profile for whichever line is opened and rescores that one properly.
  */
-export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candidate | null {
-  if (!c.profile) return sagRatio <= c.maxSagRatio + 1e-9 ? c : null
-
-  const m = metricsAt(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio, p, c.crossings)
-  if (!m) return null
-
+function withMetrics(c: Candidate, m: Metrics, sagRatio: number, p: Params): Candidate {
   const { score, parts } = scoreOf(c.length, c.offLevel, m, p)
   return {
     ...c,
@@ -569,5 +564,42 @@ export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candida
     canopyBlockedFraction: Math.round(m.canopyBlockedFraction * 1000) / 1000,
     score: Math.round(score * 10) / 10,
     scoreParts: parts,
+  }
+}
+
+export function rescoreAtSag(c: Candidate, sagRatio: number, p: Params): Candidate | null {
+  if (!c.profile) return sagRatio <= c.maxSagRatio + 1e-9 ? c : null
+
+  const m = metricsAt(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio, p, c.crossings)
+  return m ? withMetrics(c, m, sagRatio, p) : null
+}
+
+/**
+ * The same measurement, for a line being looked at rather than filtered.
+ *
+ * The difference is the validity gate. `rescoreAtSag` answers "is this still a candidate", so a
+ * line that fails one drops out and null is the right answer. This answers "what is this line",
+ * where null is never right: what a viewer needs from a line that no longer clears the ground is
+ * the figures saying so, which is exactly what it throws away.
+ *
+ * It matters because the viewer measures more finely than the search did -- a metre against four --
+ * and the search's own margin can be a couple of centimetres. The line at
+ * 434780.5_5805692.5__434572.5_5805869.5 clears the ground it crosses by 1.04 m where 1.00 m is
+ * required over open water, and rebuilt at a metre it comes out fractionally under. Gated, that
+ * returned null, the panel fell back to a candidate carrying no profile at all, and the chart sat
+ * on "loading elevation" for ever with nothing in flight to explain it -- while dragging an anchor
+ * a centimetre drew the profile instantly, because the planner has never applied the gate.
+ */
+export function rescoreForDisplay(
+  c: Candidate,
+  sagRatio: number,
+  p: Params,
+): { candidate: Candidate; violations: string[] } | null {
+  if (!c.profile) return null
+  const m = rawMetricsAt(c.profile, c.length, c.a.anchor, c.b.anchor, sagRatio, p, c.crossings)
+  if (!m) return null
+  return {
+    candidate: withMetrics(c, m, sagRatio, p),
+    violations: violationsOf(m, c.length, c.offLevel, p, c.crossings ?? []),
   }
 }

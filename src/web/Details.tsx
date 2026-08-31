@@ -109,6 +109,15 @@ interface Props {
   failed: string | null
   /** Whether elevation is still arriving, which is what makes a gap in the chart temporary. */
   fetching: boolean
+  /**
+   * Hard constraints the *re-measured* line fails, for a line out of the dataset. Null before the
+   * finer profile has been built, and empty once it has and the line still clears everything.
+   *
+   * It can be non-empty for a line the search accepted, and that is not a contradiction: the search
+   * measured it every four metres and this measures it every one, so a margin of a couple of
+   * centimetres can go either way. The panel says which measurement it is showing.
+   */
+  violations: string[] | null
   optimizing: boolean
   /** Reach the button is offering for the next run, or null for the careful default. */
   offer: number | null
@@ -138,8 +147,8 @@ const MIN_WIDTH = 360
 const KEEP_VISIBLE = 40
 
 export function Details({
-  c, profile, cover, params, roadState, onRoof, planned, at, failed, fetching, optimizing,
-  offer, onOptimize,
+  c, profile, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
+  optimizing, offer, onOptimize,
   rig, onRig, onClose,
 }: Props) {
   const [width, setWidth] = useState(preferredWidth)
@@ -446,6 +455,23 @@ export function Details({
               : 'The road data that ships with this app did not load, so nothing below accounts ' +
                 'for roads or railways under this line. This is a broken deployment rather than ' +
                 'something you did.'}
+          </div>
+        </div>
+      )}
+
+      {/* A dataset line, re-measured. The search accepted it at its own resolution; this is what a
+          metre apart makes of it, which is occasionally not the same answer. */}
+      {!isPlanned && violations && violations.length > 0 && (
+        <div className="violations">
+          <b>Measured again at 1 m, this line would not qualify:</b>
+          <ul>
+            {violations.map((v) => (
+              <li key={v}>{v}</li>
+            ))}
+          </ul>
+          <div>
+            The search sampled it every four metres and accepted it. Neither figure is wrong; the
+            finer one is the one to walk in on.
           </div>
         </div>
       )}

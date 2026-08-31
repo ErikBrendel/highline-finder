@@ -14,7 +14,7 @@ import type {
   StoredProfile,
   TileUsage,
 } from '../shared/types.js'
-import { rescoreAtSag } from '../shared/scoring.js'
+import { rescoreAtSag, rescoreForDisplay } from '../shared/scoring.js'
 import {
   VIEWER_PROFILE, buildProfile, measuredHalfWidth, packProfile, unpackProfile,
 } from '../shared/profile.js'
@@ -872,15 +872,17 @@ export function App() {
   }, [data, selected, terrainVersion])
 
   /** The selected line with its stored profile, or the fetched one, or neither yet. */
-  const detailed = useMemo(() => {
-    if (!selected || !data || sagPct === null) return selected
-    if (selected.profile) return selected
+  const remeasured = useMemo(() => {
+    if (!selected || !data || sagPct === null || selected.profile) return null
     const profile = fetchedProfile?.id === selected.id ? fetchedProfile.profile : null
-    if (!profile) return selected
-    // Now that a profile exists, the figures can be recomputed at the chosen sag rather than
-    // staying at the one they were generated with.
-    return rescoreAtSag({ ...selected, profile }, sagPct / 100, data.meta.params) ?? selected
+    if (!profile) return null
+    // Now that a profile exists, the figures are recomputed at the chosen sag rather than staying at
+    // the one they were generated with -- and for display rather than for filtering, so a line the
+    // finer measurement disqualifies is described instead of vanishing. See rescoreForDisplay.
+    return rescoreForDisplay({ ...selected, profile }, sagPct / 100, data.meta.params)
   }, [selected, data, sagPct, fetchedProfile])
+
+  const detailed = remeasured?.candidate ?? selected
 
   const shownProfile = useMemo(() => {
     if (!detailed?.profile || sagPct === null || !data) return null
@@ -1245,6 +1247,7 @@ export function App() {
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
               failed={selectedId === PLANNED_ID ? terrainFailed : profileFailed}
+              violations={remeasured?.violations ?? null}
               fetching={fetchingElevation}
               rig={rig}
               onRig={setRig}

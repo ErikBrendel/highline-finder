@@ -5,6 +5,7 @@ import {
   metricsAt,
   penaltyOf,
   rawMetricsAt,
+  rescoreForDisplay,
   rejectionOf,
   rescoreAtSag,
   scoreOf,
@@ -488,5 +489,47 @@ describe('a profile with stations the survey never covered', () => {
       expect(wide.clearanceMin).toBeCloseTo(metrics(blanked(120, 170)).clearanceMin, 6)
       expect(wide.exposure).toBeCloseTo(metrics(blanked(120, 170)).exposure, 6)
     }
+  })
+})
+
+
+describe('rescoring a dataset line for display', () => {
+  /**
+   * A line that clears the ground by less than it is held to, which is what a finer re-measurement
+   * of a marginal candidate produces. 434780.5_5805692.5__434572.5_5805869.5 in the shipped dataset
+   * clears by 1.04 m where open water requires 1.00 -- four centimetres of margin, and the viewer
+   * measures every metre where the search measured every four.
+   */
+  const tight = (): Candidate => {
+    const span = flatSpan(50, 20, 200, 2).map((sm) =>
+      sm.d > 90 && sm.d < 110 ? { ...sm, ground: 69, groundMax: 69, surface: 69, surfaceMax: 69 } : sm)
+    return {
+      id: 'tight', kind: 'natural',
+      a: { lat: 0, lon: 0, e: 0, n: 0, ground: 50, anchor: 70, aFrame: 0 },
+      b: { lat: 0, lon: 0, e: 200, n: 0, ground: 50, anchor: 70, aFrame: 0 },
+      length: 200, bearing: 90, sag: 10, offLevel: 0, offLevelRatio: 0,
+      clearanceMin: 1, exposure: 20, canopyClearanceMin: 1, canopyBlockedFraction: 0,
+      score: 50, scoreParts: { exposure: 0, length: 0, canopy: 0, margin: 0, level: 0 },
+      maxSagRatio: 0.05, crossings: [], profile: packProfile(span, p),
+    } as unknown as Candidate
+  }
+
+  it('drops out of the filtered list, which is what the list is for', () => {
+    expect(rescoreAtSag(tight(), 0.05, p)).toBeNull()
+  })
+
+  it('still comes back with its profile and its figures, so the panel can draw it', () => {
+    const out = rescoreForDisplay(tight(), 0.05, p)
+    expect(out).not.toBeNull()
+    // The whole bug: this used to be null, the panel fell back to a candidate carrying no profile,
+    // and the chart waited on elevation that was never coming.
+    expect(out!.candidate.profile).toBeTruthy()
+    expect(Number.isFinite(out!.candidate.clearanceMin)).toBe(true)
+    expect(out!.violations.length).toBeGreaterThan(0)
+  })
+
+  it('says nothing is wrong with a line that clears everything', () => {
+    const fine = { ...tight(), profile: packProfile(flatSpan(50, 20, 200, 2), p) }
+    expect(rescoreForDisplay(fine, 0.05, p)!.violations).toEqual([])
   })
 })
