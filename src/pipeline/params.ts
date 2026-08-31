@@ -247,93 +247,61 @@ export const URBAN_AREAS: Aoi[] = [
 ]
 
 /**
- * Every chunk of a rectangle of the lattice, north row first.
+ * Every chunk that touches Berlin or Brandenburg, as the easting runs of each row.
  *
- * The coverage started as a handful of chunks around whatever had been found by hand and has grown
- * by rings ever since, so it is now mostly solid rectangles -- and a solid rectangle written out as
- * a hundred and seventy strings is a shape nobody can check by eye. Twice now a ring has been added
- * by working out the perimeter with a script and then verifying with another script that the block
- * really was solid, which is a sign the file was storing the wrong thing. Stating the rectangle
- * makes it true by construction and leaves only the genuine oddities to name.
+ * Five hundred and sixty squares, and a list of five hundred and sixty names is not a thing anyone
+ * can check. Written as runs it is thirty-one lines that can be read against a map: the state is
+ * convex enough that all but three rows are a single unbroken span, and each of the three breaks is
+ * somewhere a neighbour leans in -- Mecklenburg between columns 43 and 47 up at row 738, and the
+ * two northern rows either side of it.
+ *
+ * Derived rather than chosen. The rows were computed from the state outline in
+ * `web/public/boundaries.json` by sampling each chunk on a 24 x 24 grid and keeping it if any
+ * sample fell inside, which is the honest reading of "touches": a chunk holding a single square
+ * kilometre of Brandenburg still owns that ground and no other chunk will look at it. The cost is
+ * the border overhang -- 560 chunks is 35,840 km2 of lattice for about 30,400 km2 of state, so a
+ * sixth of the work is outside. The survey answers for the parts that are, and the pre-pass throws
+ * away the rest for the price of a coarse grid.
  */
-const rows = (e0: number, e1: number, n0: number, n1: number): string[] => {
-  const out: string[] = []
-  for (let n = n1; n >= n0; n--) for (let e = e0; e <= e1; e++) out.push(`${e}_${n}`)
-  return out
-}
-
-export const DEFAULT_CHUNKS: string[] = [
-  /**
-   * One band, nine rows deep and the width of everything found so far.
-   *
-   * It began as the Gollenberg at Otto Lilienthal -- 44_726, the valley whose lines the coverage
-   * rule lost and got back -- and grew by rings: one at 1 % coverage, then a second, a third, and a
-   * fourth that closed the west into a block. This fills what was left between that block and
-   * Eberswalde, and with it the band is solid.
-   *
-   * Nothing is named inside it any more, and that is the point. Vehlen, Rathenow, Linthe,
-   * Sperenberg, Tropical and the Mueggelberge were all hand-drawn areas of interest once, each
-   * chosen because somebody already knew about it; every one of them is now an unremarkable square
-   * of a band that was filled for its own sake. Ground claimed for one reason turning out to be
-   * claimed for the next is what the lattice is for, and this is what that looks like when it is
-   * finished.
-   *
-   * The Mueggelberge corner is in Berlin, which the city model does not cover, so those chunks are
-   * natural-only whatever the urban rectangles say. Their lines always were.
-   */
-  ...rows(39, 57, 722, 730),
-
-  /**
-   * The band's two ragged ends, where it runs out of state rather than out of lattice.
-   *
-   * Not a rectangle, because a border is not one. On the west the Elbe leans away between rows 724
-   * and 726, so column 38 is in the band above and below that and not across it; on the east the
-   * Oder does the same in the other direction and the band reaches column 60 for exactly one row.
-   * Listing them is the honest version -- squaring the band off to E38-60 would claim eighteen
-   * chunks of Saxony-Anhalt, Poland and Mecklenburg that hold no Brandenburg ground at all, and the
-   * survey would answer every tile request for them with a 404.
-   */
-  '38_722', '38_723', '38_727', '38_728', '38_729', '38_730',
-  '58_722', '59_722',
-  '58_723', '59_723', '60_723',
-  '58_724',
-  '58_725',
-  '58_726', '59_726',
-  '58_727', '59_727',
-  '58_728', '59_728',
-  '58_729',
-
-  /**
-   * Eberswalde and Niederfinow, which used to be an area of interest and are now a block.
-   *
-   * The last of the hand-drawn rectangles to go. It covered 243 km2; this covers the lattice it sat
-   * inside, so a great deal of ground comes along that nobody had drawn a box around -- which is
-   * the whole argument for a fixed grid over rectangles somebody chose. Its north-west quarter is
-   * the one place `URBAN_AREAS` lets a line stand on a roof, and those lines are the urban half of
-   * this project's results.
-   */
-  ...rows(38, 55, 731, 734),
-
-  /**
-   * The four rows' own ragged ends, west and east.
-   *
-   * The north-west corner is a staircase rather than an edge: the Elbe leaves Brandenburg going
-   * north-west, so each row reaches a column further out than the one below it. The east is the
-   * Oder doing something similar and much smaller, with 56_732 missing from the run because the
-   * river bulges west there and the chunk holds no Brandenburg ground at all.
-   */
-  '36_732', '37_732',
-  '35_733', '36_733', '37_733',
-  '34_734', '35_734', '36_734', '37_734',
-  '56_731', '56_733', '56_734', '57_734',
-
-  /**
-   * The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E.
-   *
-   * On its own down in the south-east, and the relief there is largely mining spoil rather than
-   * anything the ice left. The densest ground in the dataset by a wide margin -- 8 % of scanned
-   * points pass the drop test against the usual 0.3 to 3 -- which is what the raised heap is for.
-   */
-  '58_717', '59_717', '58_718', '59_718',
+const STATE_ROWS: [number, ...[number, number][]][] = [
+  [711, [46, 47], [49, 54]],
+  [712, [46, 54]],
+  [713, [46, 59]],
+  [714, [45, 60]],
+  [715, [45, 60]],
+  [716, [46, 59]],
+  [717, [46, 59]],
+  [718, [45, 59]],
+  [719, [43, 60]],
+  [720, [40, 60]],
+  [721, [39, 60]],
+  [722, [38, 59]],
+  [723, [38, 60]],
+  [724, [39, 58]],
+  [725, [39, 58]],
+  [726, [39, 59]],
+  [727, [38, 59]],
+  [728, [38, 59]],
+  [729, [38, 58]],
+  [730, [38, 57]],
+  [731, [38, 56]],
+  [732, [36, 55]],
+  [733, [35, 56]],
+  [734, [34, 57]],
+  [735, [31, 57]],
+  [736, [31, 57]],
+  [737, [33, 57]],
+  [738, [34, 42], [48, 57]],
+  [739, [37, 40], [50, 56]],
+  [740, [51, 56]],
+  [741, [52, 53]],
 ]
+
+export const DEFAULT_CHUNKS: string[] = STATE_ROWS.flatMap(([n, ...spans]) =>
+  spans.flatMap(([e0, e1]) => {
+    const out: string[] = []
+    for (let e = e0; e <= e1; e++) out.push(`${e}_${n}`)
+    return out
+  }),
+)
 
