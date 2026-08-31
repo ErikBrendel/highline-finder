@@ -264,15 +264,24 @@ const rows = (e0: number, e1: number, n0: number, n1: number): string[] => {
 
 export const DEFAULT_CHUNKS: string[] = [
   /**
-   * The western block, grown outwards from the Gollenberg at Otto Lilienthal.
+   * One band, nine rows deep and the width of everything found so far.
    *
-   * 44_726 is the valley whose lines the coverage rule lost and got back, and every ring since has
-   * been one more square of ground the previous one was only guessing about: the ring at 1 %
-   * coverage, then a second, a third, and a fourth that closed it into this. Vehlen and Rathenow
-   * were in here before any of it, which is what the lattice is for -- ground claimed for one
-   * reason turns out to be claimed for the next.
+   * It began as the Gollenberg at Otto Lilienthal -- 44_726, the valley whose lines the coverage
+   * rule lost and got back -- and grew by rings: one at 1 % coverage, then a second, a third, and a
+   * fourth that closed the west into a block. This fills what was left between that block and
+   * Eberswalde, and with it the band is solid.
+   *
+   * Nothing is named inside it any more, and that is the point. Vehlen, Rathenow, Linthe,
+   * Sperenberg, Tropical and the Mueggelberge were all hand-drawn areas of interest once, each
+   * chosen because somebody already knew about it; every one of them is now an unremarkable square
+   * of a band that was filled for its own sake. Ground claimed for one reason turning out to be
+   * claimed for the next is what the lattice is for, and this is what that looks like when it is
+   * finished.
+   *
+   * The Mueggelberge corner is in Berlin, which the city model does not cover, so those chunks are
+   * natural-only whatever the urban rectangles say. Their lines always were.
    */
-  ...rows(39, 48, 722, 730),
+  ...rows(39, 57, 722, 730),
 
   /**
    * Eberswalde and Niederfinow, which used to be an area of interest and are now a block.
@@ -284,24 +293,6 @@ export const DEFAULT_CHUNKS: string[] = [
    * this project's results.
    */
   ...rows(49, 55, 731, 734),
-
-  /** The rows south of it, taking the coverage down to meet the western block. */
-  ...rows(49, 57, 727, 730),
-
-  /**
-   * The original areas of interest that no block has reached yet.
-   *
-   * Scattered rather than square, because that is where the interesting ground was found before
-   * there was a lattice to find it with. Tropical and Mueggelberge each straddle a lattice corner
-   * and so cost four chunks for one small rectangle; that is the price of a fixed grid, and the
-   * same trade Eberswalde made and won. Linthe and Sperenberg are not listed: the western block
-   * swallowed them.
-   *
-   * Mueggelberge is in Berlin, which the city model does not cover, so its chunks are natural-only
-   * whatever the urban rectangles say. Its lines always were.
-   */
-  '50_722', '51_722', '50_723', '51_723',   // Tropical
-  '50_725', '51_725', '50_726', '51_726',   // Mueggelberge
 
   /**
    * The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E.
