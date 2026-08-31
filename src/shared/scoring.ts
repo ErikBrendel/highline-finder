@@ -75,6 +75,20 @@ export interface Metrics {
    */
   clearanceMargin: number
   /**
+   * Where that margin was found, along the span, and what was required of it there.
+   *
+   * Carried because the margin on its own is a number nobody can act on. What a sample is held to
+   * varies -- a metre over open water, three over anything else -- so "0.65 m short" says nothing
+   * about whether the problem is the lake in the middle or the bank at the end, and the reader will
+   * assume it is whatever looks tightest on the chart. For the line at
+   * 434780.5_5805692.5__434572.5_5805869.5 those are different places and different answers: it
+   * clears the water by 1.02 m and passes, and fails on land ten metres from its far anchor.
+   *
+   * NaN where nothing was measured, which is the same case that leaves the minima at infinity.
+   */
+  clearanceMarginAt: number
+  clearanceMarginNeeded: number
+  /**
    * Deepest air gap anywhere. Measured on the *centreline*, unlike the clearance: this answers how
    * high the line is, and what a walker is over is what is directly beneath them.
    */
@@ -181,6 +195,8 @@ export function rawMetricsAt(
   const needs = sp.needed
   let clearanceMin = Infinity
   let clearanceMargin = Infinity
+  let clearanceMarginAt = NaN
+  let clearanceMarginNeeded = NaN
   let exposure = -Infinity
   let canopyClearanceMin = Infinity
   let blocked = 0
@@ -222,7 +238,11 @@ export function rawMetricsAt(
     const clear = line - band[i]!
     if (clear < clearanceMin) clearanceMin = clear
     const need = needs?.[i] ?? p.minClearance
-    if (clear - need < clearanceMargin) clearanceMargin = clear - need
+    if (clear - need < clearanceMargin) {
+      clearanceMargin = clear - need
+      clearanceMarginAt = d
+      clearanceMarginNeeded = need
+    }
     const canopyClear = line - (sp.surface[i] ?? ground)
     if (canopyClear < canopyClearanceMin) canopyClearanceMin = canopyClear
     if (canopyClear < 0) blocked++
@@ -287,6 +307,8 @@ export function rawMetricsAt(
   return {
     clearanceMin,
     clearanceMargin,
+    clearanceMarginAt,
+    clearanceMarginNeeded,
     exposure,
     canopyClearanceMin,
     canopyBlockedFraction: blocked / samples,
@@ -360,15 +382,20 @@ export function violationsOf(
      * requirement of 1.24 m that applies nowhere -- printed unrounded, as
      * "under the 1.240000000000009 m minimum", which is how it was noticed.
      *
-     * The margin is a single sample's fact and needs no arithmetic, so that is what is reported.
-     * What the line does clear is in the panel's own figures a few lines below.
+     * The margin is a single sample's fact and needs no arithmetic, so that is what is reported --
+     * with where it was found and what was owed there, because the shortfall alone sends the reader
+     * to whatever looks tightest on the chart, which is a different place as often as not.
      */
+    const over = m.clearanceMarginNeeded === p.waterClearance ? 'water' : 'ground'
+    const where = Number.isFinite(m.clearanceMarginAt)
+      ? ` at ${m.clearanceMarginAt.toFixed(0)} m, where it owes ${m.clearanceMarginNeeded} m over ${over}`
+      : ''
     out.push(
       m.clearanceMin < 0
         ? // A negative clearance is not a small one: the line is inside the hill, and saying so is
           // the whole answer.
           'intersects the ground'
-        : `comes ${(-m.clearanceMargin).toFixed(2)} m short of the clearance it needs`,
+        : `comes ${(-m.clearanceMargin).toFixed(2)} m short${where}`,
     )
   }
   if (m.exposure < p.minExposure) {

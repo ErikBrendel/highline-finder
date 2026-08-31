@@ -123,7 +123,8 @@ describe('anchor zone', () => {
 
 describe('scoreOf', () => {
   const base: Metrics = {
-    clearanceMin: 5, clearanceMargin: 2, exposure: 20, canopyClearanceMin: 2,
+    clearanceMin: 5, clearanceMargin: 2, clearanceMarginAt: 100, clearanceMarginNeeded: 3,
+    exposure: 20, canopyClearanceMin: 2,
     canopyBlockedFraction: 0, clearanceDeficit: 0, anchorZoneDeficit: 0, crossingDeficit: 0,
     worstCrossing: -1, worstClearance: Infinity,
   }
@@ -193,9 +194,35 @@ describe('penaltyOf', () => {
 
 describe('violationsOf', () => {
   const at = (clearanceMin: number): Metrics => ({
-    clearanceMin, clearanceMargin: clearanceMin - p.minClearance, exposure: 40,
+    clearanceMin, clearanceMargin: clearanceMin - p.minClearance,
+    clearanceMarginAt: 100, clearanceMarginNeeded: p.minClearance, exposure: 40,
     canopyClearanceMin: 5, canopyBlockedFraction: 0, clearanceDeficit: 0, anchorZoneDeficit: 0,
     crossingDeficit: 0, worstCrossing: -1, worstClearance: Infinity,
+  })
+
+  it('sends the reader to the sample that failed, not the one that looks worst', () => {
+    /**
+     * A span over a lake with a bank at the far end. The tightest gap is over the water and passes:
+     * a metre is all it owes there. The failure is on land ten metres from the anchor, owing three
+     * and clearing 2.35, and a message quoting only the shortfall had the reader looking at the
+     * lake -- which is what 434780.5_5805692.5__434572.5_5805869.5 does in the shipped dataset.
+     */
+    const overLake: Metrics = {
+      ...at(1.02), clearanceMargin: -0.65, clearanceMarginAt: 263, clearanceMarginNeeded: 3,
+    }
+    const said = violationsOf(overLake, 273.1, 0, p).join(' ')
+    expect(said).toMatch(/0\.65 m short at 263 m, where it owes 3 m over ground/)
+    // The 1.02 m over the water is not quoted, because it is not the problem.
+    expect(said).not.toMatch(/1\.02/)
+  })
+
+  it('names water as water, since a metre is the whole rule there', () => {
+    const overWater: Metrics = {
+      ...at(0.8), clearanceMargin: -0.2, clearanceMarginAt: 140, clearanceMarginNeeded: p.waterClearance,
+    }
+    expect(violationsOf(overWater, 273.1, 0, p).join(' ')).toMatch(
+      /0\.20 m short at 140 m, where it owes 1 m over water/,
+    )
   })
 
   it('never prints a figure at float precision', () => {
@@ -221,7 +248,7 @@ describe('violationsOf', () => {
     // short, and that figure belongs to one station rather than being the difference of two minima
     // taken at different ones.
     expect(violationsOf(at(1.4), 200, 0, p).join(' ')).toMatch(
-      /comes 1\.60 m short of the clearance it needs/,
+      /comes 1\.60 m short at 100 m, where it owes 3 m over ground/,
     )
   })
 
@@ -408,6 +435,8 @@ describe('rawMetricsAt', () => {
     const inner1 = length - p.anchorZone
     let clearanceMin = Infinity
     let clearanceMargin = Infinity
+    let clearanceMarginAt = NaN
+    let clearanceMarginNeeded = NaN
     let exposure = -Infinity
     let canopyClearanceMin = Infinity
     let blocked = 0
@@ -426,7 +455,11 @@ describe('rawMetricsAt', () => {
         continue
       }
       if (clear < clearanceMin) clearanceMin = clear
-      if (clear - s.needed < clearanceMargin) clearanceMargin = clear - s.needed
+      if (clear - s.needed < clearanceMargin) {
+        clearanceMargin = clear - s.needed
+        clearanceMarginAt = s.d
+        clearanceMarginNeeded = s.needed
+      }
       const canopy = s.line - s.surface
       if (canopy < canopyClearanceMin) canopyClearanceMin = canopy
       if (canopy < 0) blocked++
@@ -437,6 +470,8 @@ describe('rawMetricsAt', () => {
     return {
       clearanceMin,
       clearanceMargin,
+      clearanceMarginAt,
+      clearanceMarginNeeded,
       exposure,
       canopyClearanceMin,
       canopyBlockedFraction: blocked / n,

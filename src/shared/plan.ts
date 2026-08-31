@@ -87,6 +87,8 @@ function standOn(a: Pos, b: Pos, gA: number, gB: number, ground: Sampler): [numb
 const NOTHING_MEASURED: Metrics = {
   clearanceMin: NaN,
   clearanceMargin: NaN,
+  clearanceMarginAt: NaN,
+  clearanceMarginNeeded: NaN,
   exposure: NaN,
   canopyClearanceMin: NaN,
   canopyBlockedFraction: NaN,
