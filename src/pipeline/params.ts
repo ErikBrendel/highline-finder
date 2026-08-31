@@ -246,89 +246,70 @@ export const URBAN_AREAS: Aoi[] = [
   { south: 52.816791, west: 13.715984, north: 52.869081, east: 13.850062 },
 ]
 
+/**
+ * Every chunk of a rectangle of the lattice, north row first.
+ *
+ * The coverage started as a handful of chunks around whatever had been found by hand and has grown
+ * by rings ever since, so it is now mostly solid rectangles -- and a solid rectangle written out as
+ * a hundred and seventy strings is a shape nobody can check by eye. Twice now a ring has been added
+ * by working out the perimeter with a script and then verifying with another script that the block
+ * really was solid, which is a sign the file was storing the wrong thing. Stating the rectangle
+ * makes it true by construction and leaves only the genuine oddities to name.
+ */
+const rows = (e0: number, e1: number, n0: number, n1: number): string[] => {
+  const out: string[] = []
+  for (let n = n1; n >= n0; n--) for (let e = e0; e <= e1; e++) out.push(`${e}_${n}`)
+  return out
+}
+
 export const DEFAULT_CHUNKS: string[] = [
   /**
-   * The seven original areas of interest, as the chunks that cover them.
+   * The western block, grown outwards from the Gollenberg at Otto Lilienthal.
    *
-   * Scattered rather than a block, because that is where the interesting ground was found before
+   * 44_726 is the valley whose lines the coverage rule lost and got back, and every ring since has
+   * been one more square of ground the previous one was only guessing about: the ring at 1 %
+   * coverage, then a second, a third, and a fourth that closed it into this. Vehlen and Rathenow
+   * were in here before any of it, which is what the lattice is for -- ground claimed for one
+   * reason turns out to be claimed for the next.
+   */
+  ...rows(39, 48, 722, 730),
+
+  /**
+   * Eberswalde and Niederfinow, which used to be an area of interest and are now a block.
+   *
+   * The last of the hand-drawn rectangles to go. It covered 243 km2; this covers the lattice it sat
+   * inside, so a great deal of ground comes along that nobody had drawn a box around -- which is
+   * the whole argument for a fixed grid over rectangles somebody chose. Its north-west quarter is
+   * the one place `URBAN_AREAS` lets a line stand on a roof, and those lines are the urban half of
+   * this project's results.
+   */
+  ...rows(49, 55, 731, 734),
+
+  /** The rows south of it, taking the coverage down to meet the western block. */
+  ...rows(49, 57, 727, 730),
+
+  /**
+   * The original areas of interest that no block has reached yet.
+   *
+   * Scattered rather than square, because that is where the interesting ground was found before
    * there was a lattice to find it with. Tropical and Mueggelberge each straddle a lattice corner
    * and so cost four chunks for one small rectangle; that is the price of a fixed grid, and the
-   * same trade Eberswalde made and won.
+   * same trade Eberswalde made and won. Linthe and Sperenberg are not listed: the western block
+   * swallowed them.
    *
    * Mueggelberge is in Berlin, which the city model does not cover, so its chunks are natural-only
    * whatever the urban rectangles say. Its lines always were.
    */
   '50_722', '51_722', '50_723', '51_723',   // Tropical
-  '43_722',                                 // Linthe
-  '48_722',                                 // Sperenberg
   '50_725', '51_725', '50_726', '51_726',   // Mueggelberge
-  '39_726', '40_726',                       // Vehlen
-  '43_726', '44_726',                       // Otto Lilienthal
-  // The ring around it, opened up by the coverage rule reaching small hills at 1%.
-  '42_725', '43_725', '44_725', '45_725',
-  '42_726', '45_726',
-  '42_727', '43_727', '44_727', '45_727',
-  // And the ring outside that one, taking the block to six by five.
-  '41_724', '42_724', '43_724', '44_724', '45_724', '46_724',
-  '41_725', '46_725',
-  '41_726', '46_726',
-  '41_727', '46_727',
-  '41_728', '42_728', '43_728', '44_728', '45_728', '46_728',
-  // A third ring, columns 40-47 across rows 723-729. 40_726 is not repeated here: it came in with
-  // Vehlen, and a chunk listed twice would be searched once and then counted twice, which the
-  // pooled dedup would hide for the lines and not for the hotspot cells.
-  '40_723', '41_723', '42_723', '43_723', '44_723', '45_723', '46_723', '47_723',
-  '40_724', '47_724',
-  '40_725', '47_725',
-  '47_726',
-  '40_727', '47_727',
-  '40_728', '47_728',
-  '40_729', '41_729', '42_729', '43_729', '44_729', '45_729', '46_729', '47_729',
 
-  // The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E, where the relief is largely
-  // mining spoil rather than anything the ice left.
+  /**
+   * The Lausitz, around Spremberg: 51.81-51.89 N, 14.51-14.61 E.
+   *
+   * On its own down in the south-east, and the relief there is largely mining spoil rather than
+   * anything the ice left. The densest ground in the dataset by a wide margin -- 8 % of scanned
+   * points pass the drop test against the usual 0.3 to 3 -- which is what the raised heap is for.
+   */
   '58_717', '59_717', '58_718', '59_718',
-
-  // Row 727, along the southern edge, matching the width of the three rows above it.
-  '49_727', '50_727', '51_727', '52_727', '53_727', '54_727', '55_727', '56_727', '57_727',
-  '52_728', '53_728', '52_729', '53_729',
-  '51_728', '51_729',
-  '50_728', '50_729',
-  '49_728', '49_729',
-  '54_728', '54_729',
-  '55_728', '55_729',
-  '56_728', '56_729',
-  '57_728', '57_729',
-  // Row 730, the strip Eberswalde's southern edge was cut back from.
-  '49_730', '50_730', '51_730', '52_730', '53_730', '54_730', '55_730', '56_730', '57_730',
-  /**
-   * Eberswalde and Niederfinow, which used to be an area of interest and are now eight chunks.
-   *
-   * The last of the hand-drawn rectangles to go. It covered 243 km2; these cover the 512 km2 of
-   * lattice it sat inside, so 269 km2 of ground comes along that nobody had drawn a box around --
-   * which is the whole argument for a fixed grid over rectangles somebody chose.
-   */
-  '51_731', '52_731', '53_731', '54_731',
-  '51_732', '52_732', '53_732', '54_732',
-  // Squaring off the western edge of those two rows against the three below, which start at 49.
-  '49_731', '50_731',
-  '49_732', '50_732',
-  // And a column east of Eberswalde, towards the Oder.
-  '55_731', '55_732',
-  // Rows 733 and 734, north of Eberswalde, matching the width of the rows below them.
-  '49_733', '50_733', '51_733', '52_733', '53_733', '54_733', '55_733',
-  '49_734', '50_734', '51_734', '52_734', '53_734', '54_734', '55_734',
-  /**
-   * A fourth ring around the western group, closing it into a solid E39-48 x N722-730 block.
-   *
-   * The group grew outwards from the Gollenberg at Otto Lilienthal -- 44_726, the valley whose
-   * lines the coverage rule lost and got back -- so each ring is one more square of ground the
-   * previous one was only guessing about. Three of these were already here: 39_726 came in with
-   * the Rathenow area of interest, and 43_722 and 48_722 with the southern row, which is what a
-   * lattice does for you -- ground claimed for one reason turns out to be claimed for the next.
-   */
-  '39_722', '39_723', '39_724', '39_725', '39_727', '39_728', '39_729', '39_730',
-  '40_722', '41_722', '42_722', '44_722', '45_722', '46_722', '47_722',
-  '40_730', '41_730', '42_730', '43_730', '44_730', '45_730', '46_730', '47_730', '48_730',
-  '48_723', '48_724', '48_725', '48_726', '48_727', '48_728', '48_729',
 ]
+
