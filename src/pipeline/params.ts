@@ -284,6 +284,26 @@ export const DEFAULT_CHUNKS: string[] = [
   ...rows(39, 57, 722, 730),
 
   /**
+   * The band's two ragged ends, where it runs out of state rather than out of lattice.
+   *
+   * Not a rectangle, because a border is not one. On the west the Elbe leans away between rows 724
+   * and 726, so column 38 is in the band above and below that and not across it; on the east the
+   * Oder does the same in the other direction and the band reaches column 60 for exactly one row.
+   * Listing them is the honest version -- squaring the band off to E38-60 would claim eighteen
+   * chunks of Saxony-Anhalt, Poland and Mecklenburg that hold no Brandenburg ground at all, and the
+   * survey would answer every tile request for them with a 404.
+   */
+  '38_722', '38_723', '38_727', '38_728', '38_729', '38_730',
+  '58_722', '59_722',
+  '58_723', '59_723', '60_723',
+  '58_724',
+  '58_725',
+  '58_726', '59_726',
+  '58_727', '59_727',
+  '58_728', '59_728',
+  '58_729',
+
+  /**
    * Eberswalde and Niederfinow, which used to be an area of interest and are now a block.
    *
    * The last of the hand-drawn rectangles to go. It covered 243 km2; this covers the lattice it sat
