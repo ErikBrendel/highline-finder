@@ -7,7 +7,10 @@ import {
   PLANNED_REFINE_RADIUS,
   PLANNED_REFINE_RINGS,
   PLANNED_REFINE_FINEST,
+  wanderMargin,
 } from './optimize.js'
+import { windowsFor } from './terrain.js'
+import { measuredHalfWidth } from '../shared/profile.js'
 import { Grid } from '../shared/grid.js'
 import { planLine } from '../shared/plan.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
@@ -212,5 +215,39 @@ describe('walking out of an obstruction', () => {
     expect(after.candidate.score).toBeGreaterThan(before.candidate.score)
     // North, out from under the tall end of the wall.
     expect(cur.a.n).toBeGreaterThan(start.a.n)
+  })
+})
+
+
+describe('wanderMargin', () => {
+  /**
+   * The property the whole up-front fetch rests on. The scan cannot ask for terrain, so anything it
+   * may evaluate has to be inside what was fetched before it started -- otherwise the run does not
+   * stall, it quietly decides the line cannot be improved.
+   */
+  it('covers every line the run could evaluate, to the edges of the band each one reads', () => {
+    const a = { e: 400_100, n: 5_785_100 }
+    const b = { e: 400_620, n: 5_785_380 }
+    const span = Math.hypot(b.e - a.e, b.n - a.n)
+    for (const reach of [1, 2, 8, 32]) {
+      const held = new Set(
+        windowsFor(a, b, wanderMargin(span, reach, p)).map(([x, y]) => `${x}_${y}`),
+      )
+      const radius = PLANNED_REFINE_RADIUS * reach
+      // Both anchors at every extreme of their discs, which is where the corridor is widest.
+      for (let i = 0; i < 32; i++) {
+        for (let j = 0; j < 32; j++) {
+          const at = (o: typeof a, k: number) => ({
+            e: o.e + radius * Math.cos((k / 32) * 2 * Math.PI),
+            n: o.n + radius * Math.sin((k / 32) * 2 * Math.PI),
+          })
+          const [a2, b2] = [at(a, i), at(b, j)]
+          const len = Math.hypot(b2.e - a2.e, b2.n - a2.n)
+          for (const w of windowsFor(a2, b2, measuredHalfWidth(len, p))) {
+            expect(held).toContain(`${w[0]}_${w[1]}`)
+          }
+        }
+      }
+    }
   })
 })

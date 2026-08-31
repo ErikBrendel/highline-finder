@@ -16,7 +16,7 @@ import type {
 } from '../shared/types.js'
 import { rescoreAtSag } from '../shared/scoring.js'
 import {
-  VIEWER_PROFILE, buildProfile, packProfile, sideHalfWidthAt, unpackProfile,
+  VIEWER_PROFILE, buildProfile, measuredHalfWidth, packProfile, unpackProfile,
 } from '../shared/profile.js'
 import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer } from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
@@ -30,7 +30,7 @@ import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
-import { optimizeFrame, startingSpacing } from './optimize.js'
+import { optimizeFrame, startingSpacing, wanderMargin } from './optimize.js'
 import { emitProbes } from './probeOverlay.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
@@ -517,9 +517,14 @@ export function App() {
   // measurement: an effect that writes what another effect reads is how this file previously
   // managed to feed itself.
   useEffect(() => {
-    if (!customUtm) return
+    if (!customUtm || !data) return
     let stale = false
-    ensureTerrain(customUtm.a, customUtm.b)
+    // Only what measuring this line reads. Dragging supplies itself: this effect runs on every move,
+    // so ground the line has reached is ground it has fetched, and there is nothing to gain from
+    // guessing where it is going next. The optimiser is the one thing that cannot work that way --
+    // see wanderMargin.
+    const span = Math.hypot(customUtm.b.e - customUtm.a.e, customUtm.b.n - customUtm.a.n)
+    ensureTerrain(customUtm.a, customUtm.b, measuredHalfWidth(span, data.meta.params))
       .then((arrived) => {
         if (stale) return
         setTerrainFailed(null)
@@ -532,7 +537,7 @@ export function App() {
     return () => {
       stale = true
     }
-  }, [customUtm])
+  }, [customUtm, data])
 
   /**
    * The layers a planned line is measured against, beyond the two elevation rasters.
@@ -742,7 +747,21 @@ export function App() {
       timer = setTimeout(tick, 100)
     }
 
-    timer = setTimeout(tick, 0)
+    // Fetched before the first step rather than chased as the anchors move. The scan is synchronous
+    // and cannot ask for anything, so ground it has not got reads as NaN and looks exactly like
+    // ground that is no good -- which ends the run and reports the line cannot be improved. See
+    // wanderMargin. Paid once per click, and only for the reach that click asked for.
+    const span = Math.hypot(origin.b.e - origin.a.e, origin.b.n - origin.a.n)
+    ensureTerrain(origin.a, origin.b, wanderMargin(span, reach, data.meta.params))
+      .then(() => {
+        if (!stopped) timer = setTimeout(tick, 0)
+      })
+      .catch((e: unknown) => {
+        report('fetching elevation for the optimiser to walk over', e)
+        if (stopped) return
+        setTerrainFailed(failureText(e))
+        endRun()
+      })
     return () => {
       stopped = true
       clearTimeout(timer)
@@ -771,12 +790,10 @@ export function App() {
     const b = { e: selected.b.e, n: selected.b.n }
     let stale = false
     setProfileFailed(null)
-    // Only as wide as the profile reads. The band it samples across is widest at midspan, where it
-    // is `sideClearanceRatio` of the span -- 20 m on the longest line in the dataset, against the
-    // 256 m a draggable anchor asks for. A selected line does not move, so the rest was fetched to
-    // be looked at and thrown away.
-    const reach = sideHalfWidthAt(0.5, selected.length, data.meta.params) + 1
-    Promise.all([ensureTerrain(a, b, reach), ensureCover(a, b)])
+    // Only as wide as the profile reads. A selected line does not move, so anything beyond the band
+    // it samples would be fetched to be looked at and thrown away.
+    const band = measuredHalfWidth(selected.length, data.meta.params)
+    Promise.all([ensureTerrain(a, b, band), ensureCover(a, b)])
       .then(() => {
         if (stale) return
         const fine = { ...data.meta.params, ...VIEWER_PROFILE }

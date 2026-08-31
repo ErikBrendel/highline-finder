@@ -2,6 +2,7 @@ import type { Pos, Sampler } from '../shared/grid.js'
 import { planLine, type RigHeights } from '../shared/plan.js'
 import type { Scene } from '../shared/scene.js'
 import type { Params } from '../shared/types.js'
+import { measuredHalfWidth } from '../shared/profile.js'
 
 /**
  * Interactive counterpart to the pipeline's refinement pass.
@@ -202,6 +203,28 @@ export interface Advance {
 
 /** The lattice a run begins on. Only this scales with reach; the finest never does. */
 export const startingSpacing = (reach: number) => PLANNED_REFINE_START * reach
+
+/**
+ * How much ground either side of the line a run needs in hand before it starts.
+ *
+ * The scan is synchronous and reads elevation through a sampler that answers NaN for ground that
+ * has not been fetched. A NaN makes `rank` fail, a failed rank is skipped exactly like a bad
+ * position, and a step with nothing better to move to ends the run -- so an unfetched neighbourhood
+ * does not stall the walk, it silently walls it in and reports that the line cannot be improved.
+ * That is the one failure here worth designing against, because it looks like an answer.
+ *
+ * So the whole space the run may visit is fetched up front rather than chased. Each anchor stays
+ * within `PLANNED_REFINE_RADIUS * reach` of where it started, and the segment between any two such
+ * points lies inside the original segment fattened by that radius -- the region is convex, and both
+ * ends are in it. Add what measuring a line reads sideways, at the longest the line can become.
+ *
+ * It is paid once, on the click that starts a run, and it is not padding: it is the set of positions
+ * the run is about to evaluate.
+ */
+export function wanderMargin(span: number, reach: number, p: Params): number {
+  const radius = PLANNED_REFINE_RADIUS * reach
+  return radius + measuredHalfWidth(span + 2 * radius, p)
+}
 
 /**
  * One animation frame's worth of descent.

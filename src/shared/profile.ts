@@ -36,6 +36,19 @@ export function sideHalfWidthAt(t: number, length: number, p: Params): number {
 }
 
 /**
+ * How far either side of the centreline measuring a line of this length reads.
+ *
+ * The band is widest at midspan, so this is its half-width there. A metre on top because the samples
+ * are read from the cell containing them and a band ending exactly on a boundary would otherwise
+ * depend on rounding.
+ *
+ * Callers use it to decide how much elevation to fetch: everything the measurement touches lies
+ * within this distance of the line, and nothing outside it is ever read.
+ */
+export const measuredHalfWidth = (length: number, p: Params): number =>
+  sideHalfWidthAt(0.5, length, p) + 1
+
+/**
  * The highest reading anywhere across the band at one station.
  *
  * Lateral samples are spaced a metre apart -- the resolution of the terrain raster -- until that
