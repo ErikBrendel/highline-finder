@@ -76,14 +76,21 @@ async function tileGml(tile: string): Promise<string> {
  * their tile in.
  *
  * No extra traffic: this is the same request per tile that raising already made, moved earlier.
- * Eight at a time, since they are small requests against one server and a region is hundreds of
- * tiles.
+ *
+ * Thirty-two at a time. These are 5-50 KB files, so the cost is round-trip latency rather than
+ * bandwidth and lane count buys almost linearly: measured on 60 uncached tiles, 94 ms each at eight
+ * lanes, 48 at sixteen, 23 at thirty-two. That is 49 minutes against 12 for the 31,291 tiles of a
+ * statewide pass, at a request rate of about 40 a second and a few megabytes in total -- far gentler
+ * on the survey's server than the sixteen lanes of 30 MB tiles the surface model already uses.
+ *
+ * Unlike the surface model this is paid for *every* tile whatever the ground is like, since the
+ * whole point is to ask about buildings before the terrain rule has judged anything.
  */
 export async function tileBuildings(tiles: string[]): Promise<Map<string, LevelFace[]>> {
   const queue = [...tiles]
   const out = new Map<string, LevelFace[]>()
   await Promise.all(
-    Array.from({ length: Math.min(8, queue.length) }, async () => {
+    Array.from({ length: Math.min(32, queue.length) }, async () => {
       for (let tile = queue.pop(); tile; tile = queue.pop()) {
         const faces = levelFaces(await tileGml(tile))
         if (faces.length) out.set(tile, faces)
