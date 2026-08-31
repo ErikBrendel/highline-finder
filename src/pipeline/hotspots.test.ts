@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { clusterSpots, gridSpots, isWalkable, spotOf, type Endpoint, type Spot } from './hotspots.js'
+import {
+  clusterSpots,
+  gridSpots,
+  isWalkable,
+  spotOf,
+  stretchOverCells,
+  type Endpoint,
+  type Spot,
+} from './hotspots.js'
 
 // Kind plays no part in clustering -- run.ts partitions on it before calling in -- so one is enough.
-const at = (e: number, n: number, score = 50, blocked = 0): Endpoint =>
-  ({ e, n, kind: 'natural', score, blocked })
+const at = (
+  e: number, n: number, score = 50, blocked = 0, more: Partial<Endpoint> = {},
+): Endpoint => ({
+  e, n, kind: 'natural', score, blocked, length: 100, exposure: 10, offLevel: 0, ...more,
+})
+
+/** The bounds an endpoint built by `at` with no overrides reduces to. */
+const bounds = { lengthMin: 100, lengthMax: 100, exposureMax: 10, canopyMin: 0, offLevelMin: 0 }
 
 /** A weighted point, as the grid produces them. */
-const cell = (e: number, n: number, score = 50, count = 1): Spot => ({ e, n, score, count })
+const cell = (e: number, n: number, score = 50, count = 1): Spot =>
+  ({ e, n, score, count, ...bounds })
 
 describe('isWalkable', () => {
   it('takes a good line that clips some canopy', () => {
@@ -26,7 +41,7 @@ describe('isWalkable', () => {
 describe('gridSpots', () => {
   it('keeps one point per cell, on the best endpoint, counting them all', () => {
     const spots = gridSpots([at(1002, 1000, 40), at(1018, 1012, 70), at(1005, 1005, 55)].map(spotOf), 25)
-    expect(spots).toEqual([{ e: 1018, n: 1012, score: 70, count: 3 }])
+    expect(spots).toEqual([{ e: 1018, n: 1012, score: 70, count: 3, ...bounds }])
   })
 
   it('keeps points in different cells apart', () => {
@@ -47,9 +62,40 @@ describe('gridSpots', () => {
     }
   })
 
+  it('stretches each bound over every endpoint in the cell', () => {
+    const [spot] = gridSpots([
+      at(1002, 1000, 40, 0.1, { length: 300, exposure: 8, offLevel: 0.02 }),
+      at(1005, 1005, 70, 0.0, { length: 120, exposure: 25, offLevel: 0.01 }),
+    ].map(spotOf), 25)
+    // A minimum on the slider reads the largest value here, a maximum the smallest -- so the two
+    // bounds a filter can never ask about are simply not kept.
+    expect(spot).toMatchObject({
+      lengthMin: 120, lengthMax: 300, exposureMax: 25, canopyMin: 0, offLevelMin: 0.01,
+    })
+  })
+
   it('breaks a tie on position, not on which point arrived first', () => {
     const tied = [at(1010, 1000, 70), at(1002, 1000, 70)].map(spotOf)
     expect(gridSpots(tied, 25)).toEqual(gridSpots([...tied].reverse(), 25))
+  })
+})
+
+describe('stretchOverCells', () => {
+  const cells = () => gridSpots([spotOf(at(1002, 1000, 60))], 25)
+
+  it('widens a cell to cover a line that refinement improved', () => {
+    const grid = cells()
+    stretchOverCells(grid, [spotOf(at(1004, 1001, 64, 0, { length: 400, exposure: 30 }))], 25)
+    // Count untouched: the improved line is the same line, not another one. Score moves, because
+    // it is that line's own reading and the filter compares against it.
+    expect(grid[0]).toMatchObject({ count: 1, score: 64, lengthMax: 400, exposureMax: 30 })
+  })
+
+  it('will not invent a cell for ground no endpoint reached', () => {
+    const grid = cells()
+    stretchOverCells(grid, [spotOf(at(1200, 1000, 90, 0, { length: 400 }))], 25)
+    expect(grid).toHaveLength(1)
+    expect(grid[0]!.lengthMax).toBe(100)
   })
 })
 
@@ -66,7 +112,7 @@ describe('clusterSpots', () => {
 
   it('puts each spot on the best-scoring cell near it, and sums what they stand for', () => {
     const spots = clusterSpots([cell(0, 0, 40, 9), cell(20, 0, 70, 4), cell(10, 10, 55, 2)], 50)
-    expect(spots).toEqual([{ e: 20, n: 0, score: 70, count: 15 }])
+    expect(spots).toEqual([{ e: 20, n: 0, score: 70, count: 15, ...bounds }])
   })
 
   it('finds neighbours across grid cell boundaries', () => {

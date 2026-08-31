@@ -579,14 +579,27 @@ export function scorePairs(
       continue
     }
     feasible.push(c)
-    // Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
-    // rigged from here", and a line with one end on a roof is an urban line at either end of it.
-    endpoints.push(
-      { e: c.a.e, n: c.a.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
-      { e: c.b.e, n: c.b.n, kind: c.kind, score: c.score, blocked: c.canopyBlockedFraction },
-    )
+    endpoints.push(...endpointsOf(c))
   }
   return { feasible, endpoints, rejects, roadKills }
+}
+
+/**
+ * The two spot-layer endpoints a line contributes.
+ *
+ * Both ends carry the *line's* kind, not their own: the hotspot layer answers "what could be
+ * rigged from here", and a line with one end on a roof is an urban line at either end of it.
+ */
+export function endpointsOf(c: Candidate): [Endpoint, Endpoint] {
+  const of = {
+    kind: c.kind,
+    score: c.score,
+    blocked: c.canopyBlockedFraction,
+    length: c.length,
+    exposure: c.exposure,
+    offLevel: c.offLevelRatio,
+  }
+  return [{ e: c.a.e, n: c.a.n, ...of }, { e: c.b.e, n: c.b.n, ...of }]
 }
 
 /**

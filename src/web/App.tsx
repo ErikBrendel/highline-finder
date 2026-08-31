@@ -5,6 +5,7 @@ import type {
   AnchorDump,
   Candidate,
   Dataset,
+  DrawnSpots,
   HotspotArrays,
   Hotspots,
   LineKind,
@@ -464,25 +465,44 @@ export function App() {
   }, [])
 
   /**
-   * The selected kinds' spots as one layer.
+   * The selected kinds' spots, narrowed to those a line could still pass the filters at.
    *
-   * The three are clustered independently in the pipeline, so a place where both a natural and an
-   * urban line work is a spot in two of them. Concatenating can therefore put two spots within a
-   * cluster radius of each other -- which is the honest picture: the heatmap is showing two
-   * different answers that happen to share a hillside, and it burns brighter where both hold.
+   * The kinds are clustered independently in the pipeline, so a place where both a natural and an
+   * urban line work is a spot in both. Concatenating can therefore put two spots within a cluster
+   * radius of each other -- which is the honest picture: the heatmap is showing two different
+   * answers that happen to share a hillside, and it burns brighter where both hold.
+   *
+   * Each filter is tested against the matching bound the spot carries, one at a time. A spot with a
+   * 400 m line and a separate very exposed 90 m one survives a filter asking for both at once, and
+   * that is accepted: the alternative is shipping the lines themselves, which is what the layer
+   * exists to avoid. Wrong in the generous direction only -- a spot is never hidden while a line
+   * there still matches.
+   *
+   * The sag slider is the one filter this cannot follow. It re-evaluates every line against a
+   * different sag before the others are applied, and the bounds here were measured at the sag the
+   * dataset was generated with.
    */
-  const shownHotspots = useMemo((): HotspotArrays | null => {
+  const shownHotspots = useMemo((): DrawnSpots | null => {
     if (!hotspots) return null
+    const passes = (h: HotspotArrays, i: number) =>
+      h.score[i]! >= minScore &&
+      h.lengthMax[i]! >= minLength &&
+      h.lengthMin[i]! <= maxLength &&
+      h.exposureMax[i]! >= minExposure &&
+      h.canopyMin[i]! * 100 <= maxCanopy &&
+      h.offLevelMin[i]! * 100 <= maxOffLevel
     // flatMap rather than push(...spread): the spots are already in the thousands, and spreading an
     // array of that size as arguments is what already broke the endpoint pooling in the pipeline.
-    const chosen = LINE_KINDS.filter((k) => kinds.has(k))
-    return {
-      lat: chosen.flatMap((k) => hotspots[k].lat),
-      lon: chosen.flatMap((k) => hotspots[k].lon),
-      count: chosen.flatMap((k) => hotspots[k].count),
-      score: chosen.flatMap((k) => hotspots[k].score),
-    }
-  }, [hotspots, kinds])
+    const kept = LINE_KINDS.filter((k) => kinds.has(k)).map((k) => {
+      const h = hotspots[k]
+      return { h, at: h.lat.map((_, i) => i).filter((i) => passes(h, i)) }
+    })
+    const column = (name: keyof DrawnSpots) =>
+      kept.flatMap(({ h, at }) => at.map((i) => h[name][i]!))
+    return { lat: column('lat'), lon: column('lon'), count: column('count'), score: column('score') }
+  }, [
+    hotspots, kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
+  ])
 
   const customUtm = useMemo(() => {
     if (!custom.a || !custom.b) return null

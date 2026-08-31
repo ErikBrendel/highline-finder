@@ -490,7 +490,27 @@ export interface HotspotArrays {
   lon: number[]
   count: number[]
   score: number[]
+  /**
+   * How far each filterable attribute reaches across the lines a spot stands for -- see `Spot`,
+   * whose bounds these are, for why there is one per filter rather than two.
+   *
+   * What the viewer does with them is deliberately loose: a spot survives if every filter could be
+   * satisfied by *some* line here, tested one filter at a time. Two filters that no single line
+   * satisfies together will still leave the spot on the map. Answering that exactly would mean
+   * shipping the lines themselves, and the layer exists precisely so that the map does not have to.
+   */
+  lengthMin: number[]
+  lengthMax: number[]
+  exposureMax: number[]
+  canopyMin: number[]
+  offLevelMin: number[]
 }
+
+/**
+ * What the map actually draws a spot from. The bounds exist to decide *whether* to draw it, and
+ * carrying them past that decision would put five dead columns into every layer update.
+ */
+export type DrawnSpots = Pick<HotspotArrays, 'lat' | 'lon' | 'count' | 'score'>
 
 export interface Hotspots extends ByKind<HotspotArrays> {
   /** Clustering radius in metres. */

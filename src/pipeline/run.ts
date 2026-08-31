@@ -17,7 +17,7 @@ import {
   tilesWorthLoading,
 } from './coarse.js'
 import { packAnchors, packSectors, scanAnchors } from './openness.js'
-import { dedupe, locate, pairsOf, thinCrossings } from './lines.js'
+import { dedupe, endpointsOf, locate, pairsOf, thinCrossings } from './lines.js'
 import {
   HOTSPOT_RADIUS,
   SPOT_RES,
@@ -25,6 +25,8 @@ import {
   gridSpots,
   isWalkable,
   spotOf,
+  stretchOverCells,
+  type Endpoint,
   type Spot,
 } from './hotspots.js'
 import type { Grid, Pos } from '../shared/grid.js'
@@ -108,7 +110,7 @@ interface AreaResult {
    * kind because the three layers are clustered independently, and columnar because even reduced
    * this is the largest thing in the file.
    */
-  spots: ByKind<{ e: number[]; n: number[]; count: number[]; score: number[] }>
+  spots: ByKind<PackedSpots>
   /** Feasible line endpoints, and how many of those were clear enough to reach the grid. */
   endpointsFeasible: number
   endpointsWalkable: number
@@ -129,10 +131,17 @@ function byKind<T>(make: () => T): ByKind<T> {
   return Object.fromEntries(LINE_KINDS.map((k) => [k, make()])) as ByKind<T>
 }
 
-const emptyHotspots = (): HotspotArrays => ({ lat: [], lon: [], count: [], score: [] })
+const emptyHotspots = (): HotspotArrays => ({
+  lat: [], lon: [], count: [], score: [],
+  lengthMin: [], lengthMax: [], exposureMax: [], canopyMin: [], offLevelMin: [],
+})
 
 /** Rounded to a metre-ish, which is all any coordinate in an exported file needs. */
 const r6 = (v: number) => Math.round(v * 1e6) / 1e6
+
+const r1 = (v: number) => Math.round(v * 10) / 10
+/** For the two attributes carried as fractions, whose sliders are in per cent. */
+const r4 = (v: number) => Math.round(v * 1e4) / 1e4
 
 const kmTile = (e: number, n: number) => `${Math.floor(e / 1000)}_${Math.floor(n / 1000)}`
 
@@ -188,21 +197,44 @@ function dumpAnchors(anchors: Anchor[]): AreaResult['anchors'] {
   return dump
 }
 
-const emptySpots = () => ({ e: [] as number[], n: [] as number[], count: [] as number[], score: [] as number[] })
+/**
+ * Every field of a Spot, named once so the region file cannot drift from the type.
+ *
+ * Columnar because a region holds tens of thousands of these and one object per cell in JSON costs
+ * the field names over and over. Listed rather than derived from a value, since the point is that
+ * adding a field to `Spot` and forgetting it here would silently write a column of undefined.
+ */
+const SPOT_COLUMNS = [
+  'e', 'n', 'count', 'score',
+  'lengthMin', 'lengthMax', 'exposureMax', 'canopyMin', 'offLevelMin',
+] as const
 
-const packSpots = (spots: Spot[]) => {
+type PackedSpots = Record<(typeof SPOT_COLUMNS)[number], number[]>
+
+const emptySpots = (): PackedSpots =>
+  Object.fromEntries(SPOT_COLUMNS.map((c) => [c, []])) as unknown as PackedSpots
+
+const packSpots = (spots: Spot[]): PackedSpots => {
   const packed = emptySpots()
-  for (const s of spots) {
-    packed.e.push(s.e)
-    packed.n.push(s.n)
-    packed.count.push(s.count)
-    packed.score.push(s.score)
-  }
+  for (const s of spots) for (const c of SPOT_COLUMNS) packed[c].push(s[c])
   return packed
 }
 
-const unpackSpots = (packed: ReturnType<typeof emptySpots>): Spot[] =>
-  packed.e.map((e, i) => ({ e, n: packed.n[i]!, count: packed.count[i]!, score: packed.score[i]! }))
+/**
+ * Whether a region file's spots carry every column a Spot has.
+ *
+ * A region is kept until it is explicitly rebuilt, so the cache holds records written against
+ * older shapes -- and a column added since is simply absent, which unpacks to undefined and
+ * spreads NaN through every bound it is merged into. Checked rather than assumed because the
+ * failure is silent: the layer would still draw, with filters that quietly matched nothing.
+ */
+const hasEveryColumn = (packed: PackedSpots) =>
+  SPOT_COLUMNS.every((c) => Array.isArray(packed[c]))
+
+const unpackSpots = (packed: PackedSpots): Spot[] =>
+  packed.e.map(
+    (_, i) => Object.fromEntries(SPOT_COLUMNS.map((c) => [c, packed[c][i]!])) as unknown as Spot,
+  )
 
 function exportMask(drop: Grid, p: Params): MaskCells {
   const out: MaskCells = {
@@ -546,9 +578,15 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
      * carrying the raw points any further. See hotspots.ts.
      */
     const walkable = r.endpoints.filter(isWalkable)
+    // Refinement runs after the endpoints above were recorded and comes back with better lines, so
+    // the cells they landed in are stretched to cover what those lines actually became. See
+    // stretchOverCells for the inconsistency this removes.
+    const refined = ref.candidates.flatMap(endpointsOf).filter(isWalkable)
     const spots = byKind(emptySpots)
     for (const kind of LINE_KINDS) {
-      const cells = gridSpots(walkable.filter((e) => e.kind === kind).map(spotOf), SPOT_RES)
+      const ofKind = (e: Endpoint) => e.kind === kind
+      const cells = gridSpots(walkable.filter(ofKind).map(spotOf), SPOT_RES)
+      stretchOverCells(cells, refined.filter(ofKind).map(spotOf), SPOT_RES)
       spots[kind] = packSpots(cells)
     }
     record('endpoint grid', {
@@ -614,23 +652,30 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
  * `--all` rebuilds the lot, which is what to reach for after a change to the search itself -- the
  * cache no longer notices those on its own. See regionCache.ts.
  *
+ * `--hotspots` searches nothing at all and rewrites only hotspots.json, from the cells the region
+ * caches already hold. For iterating on the spot layer -- its thresholds, its radius, what it
+ * carries -- without touching the line list or the anchor dump. It cannot conjure a figure the
+ * caches never recorded: a column added to a spot arrives only by searching the region again.
+ *
  *   npm run pipeline                                    keep everything, search what has no cache
  *   npm run pipeline -- 52.13 13.36 52.14 13.39         that area of interest
  *   npm run pipeline -- --chunk 53_729 --chunk 52_729   those chunks
  *   npm run pipeline -- --all                           everything
+ *   npm run pipeline -- --hotspots                      re-cluster, write hotspots.json alone
  */
 interface Asked {
   all: boolean
   rects: Aoi[]
   /** Work-area ids, so the check against a chunk area is an identity test and not a parse. */
   chunks: Set<string>
+  hotspotsOnly: boolean
 }
 
 function askedFor(args: string[]): Asked {
   const chunks = new Set<string>()
   const rest: string[] = []
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--all') continue
+    if (args[i] === '--all' || args[i] === '--hotspots') continue
     if (args[i] === '--chunk') {
       const name = args[++i]
       if (!name) throw new Error('--chunk needs a name, like --chunk 53_729')
@@ -648,7 +693,11 @@ function askedFor(args: string[]): Asked {
   } else if (argv.length) {
     throw new Error(`not four numbers per rectangle: ${rest.join(' ')}`)
   }
-  return { all: args.includes('--all'), rects, chunks }
+  const hotspotsOnly = args.includes('--hotspots')
+  if (hotspotsOnly && (args.includes('--all') || chunks.size || rects.length)) {
+    throw new Error('--hotspots searches nothing, so naming ground to rebuild contradicts it')
+  }
+  return { all: args.includes('--all'), rects, chunks, hotspotsOnly }
 }
 
 async function main() {
@@ -666,10 +715,11 @@ async function main() {
   const areas = [...drawn, ...chunks]
   const asked = askedFor(process.argv.slice(2))
   const wanted = (area: WorkArea) =>
-    asked.all ||
+    !asked.hotspotsOnly &&
+    (asked.all ||
     (area.kind === 'chunk'
       ? asked.chunks.has(area.id)
-      : recomputes(area, asked.rects.length ? asked.rects : null))
+      : recomputes(area, asked.rects.length ? asked.rects : null)))
 
   /**
    * Ground claimed by both mechanisms is searched twice. The lines dedup, since the anchor lattice
@@ -720,6 +770,60 @@ async function main() {
     candidatesAfterDedup: 0,
     refinedCount: 0,
     refineGain: 0,
+  }
+
+  /**
+   * Clusters the pooled cells and writes hotspots.json.
+   *
+   * Its own step because `--hotspots` runs it and nothing else. The layer is derived purely from
+   * what the region caches already hold, so rebuilding it needs no search and no downloads -- but
+   * only within what those caches recorded: a cache written before a column existed cannot grow
+   * one, and getting it needs the region searching again.
+   *
+   * Clustered across all regions at once, so a spot straddling two of them is one spot -- but once
+   * per kind, so the layer splits the same way the lines do. One clustering per kind rather than
+   * one tagged set, because a place where both a natural and an urban line work really is two
+   * answers: a spot only appears in a layer if that kind of line can actually be rigged there,
+   * which is what makes switching the filter mean something.
+   */
+  const emitHotspots = async (timed: typeof stage, say: (line: string) => void) => {
+    const hotspots: Hotspots = { radius: HOTSPOT_RADIUS, ...byKind<HotspotArrays>(emptyHotspots) }
+    const cells = LINE_KINDS.reduce((n, k) => n + spotCells[k].length, 0)
+    const spotCounts = await timed('hotspot clustering', () =>
+      LINE_KINDS.map((kind) => {
+        // Merged through the same grid the regions were reduced on, so two regions that overlap a
+        // cell contribute to one cell rather than to two spots on top of each other.
+        const spots = clusterSpots(gridSpots(spotCells[kind], SPOT_RES), HOTSPOT_RADIUS)
+        spots.sort((a, b) => b.count - a.count)
+        for (const s of spots) {
+          const { lat, lon } = toWgs84(s.e, s.n)
+          hotspots[kind].lat.push(r6(lat))
+          hotspots[kind].lon.push(r6(lon))
+          hotspots[kind].count.push(s.count)
+          hotspots[kind].score.push(r1(s.score))
+          // Rounded like everything else that gets exported. A tenth of a metre either way cannot
+          // move a slider off a spot it would otherwise have kept.
+          hotspots[kind].lengthMin.push(r1(s.lengthMin))
+          hotspots[kind].lengthMax.push(r1(s.lengthMax))
+          hotspots[kind].exposureMax.push(r1(s.exposureMax))
+          hotspots[kind].canopyMin.push(r4(s.canopyMin))
+          hotspots[kind].offLevelMin.push(r4(s.offLevelMin))
+        }
+        return spots.length
+      }),
+    (out) => ({
+      from: [cells, `${SPOT_RES}m cells`],
+      to: [out.reduce((n, spots) => n + spots, 0), 'spots'],
+    }))
+    const hotspotsText = JSON.stringify(hotspots)
+    await writeFile(HOTSPOTS_OUT, hotspotsText)
+    const hotKb = (hotspotsText.length / 1024).toFixed(0)
+    say(
+      `hotspots: ${endpointsFeasible} feasible endpoints, ${endpointsWalkable} clear of canopy ` +
+        `-> ${cells} cells @${SPOT_RES}m ` +
+        `-> ${LINE_KINDS.map((k, i) => `${spotCounts[i]} ${k}`).join(', ')} spots ` +
+        `@${HOTSPOT_RADIUS}m (${hotKb} KB)`,
+    )
   }
 
   /**
@@ -836,7 +940,6 @@ async function main() {
     // each other rather than a candidate list describing chunks the anchor dump has never heard of.
     const anchorKb = (await writeAnchorDump(ANCHORS_OUT, dump)) / 1024
 
-    const r6 = (v: number) => Math.round(v * 1e6) / 1e6
     /**
      * One entry per source tile across the whole run, not per region.
      *
@@ -890,44 +993,7 @@ async function main() {
         `(${(maskText.length / 1024).toFixed(0)} KB)`,
     )
 
-    /**
-     * Clustered across all regions at once, so a spot straddling two of them is one spot -- but once
-     * per kind, so the layer splits the same way the lines do.
-     *
-     * Three independent clusterings rather than one tagged set, because a place where both a natural
-     * and an urban line work really is two answers: a spot only appears in a layer if that kind of
-     * line can actually be rigged there, which is what makes switching the filter mean something.
-     */
-    const hotspots: Hotspots = { radius: HOTSPOT_RADIUS, ...byKind<HotspotArrays>(emptyHotspots) }
-    const cells = LINE_KINDS.reduce((n, k) => n + spotCells[k].length, 0)
-    const spotCounts = await timed('hotspot clustering', () =>
-      LINE_KINDS.map((kind) => {
-        // Merged through the same grid the regions were reduced on, so two regions that overlap a
-        // cell contribute to one cell rather than to two spots on top of each other.
-        const spots = clusterSpots(gridSpots(spotCells[kind], SPOT_RES), HOTSPOT_RADIUS)
-        spots.sort((a, b) => b.count - a.count)
-        for (const s of spots) {
-          const { lat, lon } = toWgs84(s.e, s.n)
-          hotspots[kind].lat.push(r6(lat))
-          hotspots[kind].lon.push(r6(lon))
-          hotspots[kind].count.push(s.count)
-          hotspots[kind].score.push(Math.round(s.score * 10) / 10)
-        }
-        return spots.length
-      }),
-    (out) => ({
-      from: [cells, `${SPOT_RES}m cells`],
-      to: [out.reduce((n, spots) => n + spots, 0), 'spots'],
-    }))
-    const hotspotsText = JSON.stringify(hotspots)
-    await writeFile(HOTSPOTS_OUT, hotspotsText)
-    const hotKb = (hotspotsText.length / 1024).toFixed(0)
-    say(
-      `hotspots: ${endpointsFeasible} feasible endpoints, ${endpointsWalkable} clear of canopy ` +
-        `-> ${cells} cells @${SPOT_RES}m ` +
-        `-> ${LINE_KINDS.map((k, i) => `${spotCounts[i]} ${k}`).join(', ')} spots ` +
-        `@${HOTSPOT_RADIUS}m (${hotKb} KB)`,
-    )
+    await emitHotspots(timed, say)
     say(
       `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> ` +
         `candidates.json (${(datasetText.length / 1024).toFixed(0)} KB), ` +
@@ -960,12 +1026,17 @@ async function main() {
   const ordered = [...areas].sort((a, b) => Number(needsWork(a)) - Number(needsWork(b)))
 
   let reused = 0
+  /** Regions whose cache predates the bounds the spot layer now carries. See `hasEveryColumn`. */
+  const staleSpots: string[] = []
   for (const [index, area] of ordered.entries()) {
     const label = `region ${index + 1}/${areas.length}`
     const hit = await readRegion<AreaResult>(area.id)
     // Kept unless this run was told to rebuild it. A region with no cache is searched whatever the
     // selection says, since a dataset with a hole in it is worse than one that took longer.
     const serve = hit && !wanted(area)
+    if (!hit && asked.hotspotsOnly) {
+      throw new Error(`--hotspots searches nothing and ${area.id} has no cache to read`)
+    }
     let found: AreaResult
     let vintage = new Date().toISOString()
     if (serve) {
@@ -989,19 +1060,25 @@ async function main() {
 
     const { region } = found
     regions.push(region)
-    // Appended one at a time rather than spread: a 141 km2 area produces 3.2 million endpoints,
-    // and passing those as arguments exceeds the call stack.
-    for (let i = 0; i < found.anchors.lat.length; i++) {
-      dumpAnchors.lat.push(found.anchors.lat[i]!)
-      dumpAnchors.lon.push(found.anchors.lon[i]!)
-      dumpAnchors.ground.push(found.anchors.ground[i]!)
-      dumpAnchors.drop.push(found.anchors.drop[i]!)
-      dumpAnchors.open.push(found.anchors.open[i]!)
+    // Skipped wholesale when only the spot layer is being rebuilt: this is the anchor dump and the
+    // pooled line list, which that run writes neither of, and holding a statewide pass worth of
+    // both to throw them away is most of the memory the run would use.
+    if (!asked.hotspotsOnly) {
+      // Appended one at a time rather than spread: a 141 km2 area produces 3.2 million endpoints,
+      // and passing those as arguments exceeds the call stack.
+      for (let i = 0; i < found.anchors.lat.length; i++) {
+        dumpAnchors.lat.push(found.anchors.lat[i]!)
+        dumpAnchors.lon.push(found.anchors.lon[i]!)
+        dumpAnchors.ground.push(found.anchors.ground[i]!)
+        dumpAnchors.drop.push(found.anchors.drop[i]!)
+        dumpAnchors.open.push(found.anchors.open[i]!)
+      }
+      for (const c of found.candidates) refinedAll.push(c)
     }
-    for (const kind of LINE_KINDS) spotCells[kind].push(...unpackSpots(found.spots[kind]))
+    if (LINE_KINDS.some((k) => !hasEveryColumn(found.spots[k]))) staleSpots.push(area.id)
+    else for (const kind of LINE_KINDS) spotCells[kind].push(...unpackSpots(found.spots[kind]))
     endpointsFeasible += found.endpointsFeasible
     endpointsWalkable += found.endpointsWalkable
-    for (const c of found.candidates) refinedAll.push(c)
     maskCells.push(found.mask)
     tileUse.push(found.tiles)
     totals.anchorsScanned += region.anchorsScanned
@@ -1019,6 +1096,16 @@ async function main() {
     // the same files once per region for no change at all.
     if (!serve) await emit(false)
   }
+  if (staleSpots.length) {
+    // Left out rather than merged in. A region file from before these columns existed has nothing
+    // to say about length or exposure, and folding it in as zeroes or NaN would put spots on the
+    // map that every filter either always keeps or always drops.
+    console.log(
+      `\n!! ${staleSpots.length} of ${areas.length} region(s) predate the spot bounds and are ` +
+        `missing from the hotspot layer.\n   Search them again to get them back -- ` +
+        `${staleSpots.slice(0, 3).join(', ')}${staleSpots.length > 3 ? ', ...' : ''}`,
+    )
+  }
   if (reused) {
     // Said plainly every time, because nothing else will say it: results are kept until asked to
     // go, so a run that changed the search and forgot `--all` gets yesterday's answer in silence.
@@ -1027,6 +1114,12 @@ async function main() {
       `\n${reused} of ${areas.length} region(s) kept as they were, oldest ${oldest.slice(0, 10)}. ` +
         `Re-run with --all to rebuild them.`,
     )
+  }
+
+  if (asked.hotspotsOnly) {
+    await emitHotspots(stage, console.log)
+    renderReport((Date.now() - started) / 1000)
+    return
   }
 
   const finalCandidates = await emit(true)

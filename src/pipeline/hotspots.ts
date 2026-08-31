@@ -41,11 +41,15 @@ import type { LineKind } from '../shared/types.js'
 export interface Endpoint {
   e: number
   n: number
-  /** The kind of the line this endpoint belongs to, which is what the three spot layers split on. */
+  /** The kind of the line this endpoint belongs to, which is what the two spot layers split on. */
   kind: LineKind
   score: number
   /** Fraction of the span's interior that intersects canopy. */
   blocked: number
+  length: number
+  exposure: number
+  /** Off-level as a fraction of the span, which is the unit the filter is expressed in. */
+  offLevel: number
 }
 
 /**
@@ -59,7 +63,79 @@ export interface Spot {
   e: number
   n: number
   count: number
+  /**
+   * Best score among the endpoints this stands for -- and the only one of the extents below that
+   * doubles as the spot's own reading, since the layer is drawn by it.
+   */
   score: number
+  /**
+   * How far each filterable attribute reaches across the endpoints here, so the viewer can ask
+   * whether a filter could still be satisfied somewhere in this spot without holding the lines.
+   *
+   * One bound each, not two, and which one is decided by the filter that reads it: a minimum on the
+   * slider needs the largest value here, a maximum needs the smallest. The other half of each range
+   * has no reader and would be file size spent on nothing. Length carries both because its filter
+   * is a band with a thumb at each end.
+   *
+   * Every one of these is a min or a max, so merging two spots is merging the bounds -- associative
+   * and commutative, which is the same property `gridSpots` already depends on to let a statewide
+   * aggregate be computed a chunk at a time.
+   */
+  lengthMin: number
+  lengthMax: number
+  exposureMax: number
+  canopyMin: number
+  offLevelMin: number
+}
+
+/** Widens `into` so its bounds also cover `from`. Nothing else about the spot changes. */
+function stretch(into: Spot, from: Spot): void {
+  into.lengthMin = Math.min(into.lengthMin, from.lengthMin)
+  into.lengthMax = Math.max(into.lengthMax, from.lengthMax)
+  into.exposureMax = Math.max(into.exposureMax, from.exposureMax)
+  into.canopyMin = Math.min(into.canopyMin, from.canopyMin)
+  into.offLevelMin = Math.min(into.offLevelMin, from.offLevelMin)
+}
+
+/**
+ * Folds `from` into `into`: one more spot's worth of endpoints, over the same piece of ground.
+ *
+ * Position and score are left alone. Both callers have already decided which of the two is the
+ * representative -- `gridSpots` by comparing, `clusterSpots` by visiting in order -- and this only
+ * has to make the totals and the extents cover both.
+ */
+function absorb(into: Spot, from: Spot): void {
+  into.count += from.count
+  stretch(into, from)
+}
+
+/**
+ * Stretches existing cells to cover lines that were improved after their endpoints were recorded.
+ *
+ * Endpoints are taken from the feasible set, which is what the layer counts. Refinement then walks
+ * the kept lines a few metres uphill and they come back measurably better -- a line whose cell says
+ * 62.9 scoring 64.2 was routine. Left alone, the line list and the spot layer disagree exactly at
+ * the threshold: a filter at 64 shows the line and hides the spot it stands on, which is the one
+ * inconsistency this whole feature exists to remove.
+ *
+ * Only cells that already exist are touched, and their counts are not: an improved line is the same
+ * line, not another one, and refinement can carry an anchor across a cell boundary into ground no
+ * endpoint reached. Creating a cell there would put a spot on the map standing for nothing.
+ *
+ * Score moves here where `absorb` leaves it alone, and the difference is what the two are merging.
+ * Absorbing brings in a *different* endpoint, so taking its score would decouple the reading from
+ * the point it belongs to -- the cell would claim a score measured somewhere else. Here it is the
+ * same line remeasured a few metres away, well inside the cell, so the improved figure is simply
+ * the truer one. It is also the figure the score filter compares against, which is the whole point.
+ */
+export function stretchOverCells(cells: Spot[], better: Iterable<Spot>, res: number): void {
+  const at = new Map(cells.map((c) => [cellKey(c.e, c.n, res), c]))
+  for (const b of better) {
+    const cell = at.get(cellKey(b.e, b.n, res))
+    if (!cell) continue
+    stretch(cell, b)
+    cell.score = Math.max(cell.score, b.score)
+  }
 }
 
 /**
@@ -88,6 +164,10 @@ export const HOTSPOT_RADIUS = 50
  */
 export const SPOT_RES = HOTSPOT_RADIUS / 2
 
+/** The lattice both the grid and the stretch above key on, pinned to the projection. */
+const cellKey = (e: number, n: number, res: number) =>
+  `${Math.floor(e / res)}_${Math.floor(n / res)}`
+
 /** Whether a line is good enough to mark the ground around it as worth going to look at. */
 export function isWalkable(p: Endpoint): boolean {
   return p.blocked <= HOTSPOT_MAX_BLOCKED && p.score >= HOTSPOT_MIN_SCORE
@@ -100,7 +180,17 @@ export function isWalkable(p: Endpoint): boolean {
  */
 const bestFirst = (a: Spot, b: Spot) => b.score - a.score || a.e - b.e || a.n - b.n
 
-export const spotOf = (p: Endpoint): Spot => ({ e: p.e, n: p.n, count: 1, score: p.score })
+export const spotOf = (p: Endpoint): Spot => ({
+  e: p.e,
+  n: p.n,
+  count: 1,
+  score: p.score,
+  lengthMin: p.length,
+  lengthMax: p.length,
+  exposureMax: p.exposure,
+  canopyMin: p.blocked,
+  offLevelMin: p.offLevel,
+})
 
 /**
  * Reduces weighted points to one per `res` metre cell, keeping the best point in each.
@@ -116,13 +206,13 @@ export const spotOf = (p: Endpoint): Spot => ({ e: p.e, n: p.n, count: 1, score:
 export function gridSpots(points: Iterable<Spot>, res: number): Spot[] {
   const cells = new Map<string, Spot>()
   for (const p of points) {
-    const key = `${Math.floor(p.e / res)}_${Math.floor(p.n / res)}`
+    const key = cellKey(p.e, p.n, res)
     const at = cells.get(key)
     if (!at) {
       cells.set(key, { ...p })
       continue
     }
-    at.count += p.count
+    absorb(at, p)
     if (bestFirst(p, at) < 0) {
       at.e = p.e
       at.n = p.n
@@ -158,7 +248,7 @@ export function clusterSpots(cells: Spot[], radius: number): Spot[] {
     }
 
     if (hit) {
-      hit.count += p.count
+      absorb(hit, p)
       continue
     }
     const spot: Spot = { ...p }
