@@ -91,6 +91,15 @@ export function onWindowActivity(fn: (e: WindowEvent) => void): () => void {
 
 const emit = (e: WindowEvent) => listeners.forEach((fn) => fn(e))
 
+/**
+ * Whether any elevation window is still on its way.
+ *
+ * The one place that knows, so nothing else has to keep a parallel count. The panel asks it to
+ * decide whether a gap in a profile is ground still arriving or ground the survey does not have --
+ * the chart looks identical either way and they are opposite answers.
+ */
+export const fetchingWindows = () => inFlight.size > 0
+
 function url(layer: Layer, e0: number, n0: number): string {
   const { service, coverage } = LAYERS[layer]
   return (

@@ -68,6 +68,22 @@ export function planLine(
   rig: RigHeights | null = null,
   /** The city model and the road network. Empty measures bare elevation, as the tests do. */
   scene: Scene = {},
+  /**
+   * Whether to measure a line the elevation service has only partly covered.
+   *
+   * Off by default, and the optimiser depends on that: it reads this function's null as "not a
+   * line" and skips the position, which is how an anchor is kept out of ground nothing is known
+   * about. Turning it on there would let a walk wander into a gap and score it as clear air.
+   *
+   * The panel turns it on, because a chart of most of a line beats a spinner over all of it while a
+   * dragged anchor crosses into ground still being fetched. What came back partial is not reported
+   * separately: the profile carries a NaN at every station that was not measured, which is the same
+   * fact and the one thing that draws the chart. Every figure on a partial line describes only the
+   * ground that was seen, and describes it optimistically -- a clearance minimum cannot see into a
+   * stretch it never read, and the hill that would have set it may be exactly there. Anything
+   * showing those numbers has to say so.
+   */
+  { tolerateGaps = false }: { tolerateGaps?: boolean } = {},
 ): PlannedLine | null {
   const gA = ground.sample(a.e, a.n)
   const gB = ground.sample(b.e, b.n)
@@ -92,7 +108,11 @@ export function planLine(
   if (!h) return null
 
   const profile = buildProfile(a, b, h.hA, h.hB, length, ground, surface, p, scene)
-  if (profile.some((s) => Number.isNaN(s.ground))) return null
+  const unmeasured = profile.reduce((n, s) => n + (Number.isNaN(s.ground) ? 1 : 0), 0)
+  // Every station missing is not a partial line, it is no line. The anchors are already known to
+  // stand on measured ground, so this only happens for a length under one sample.
+  if (unmeasured === profile.length) return null
+  if (unmeasured && !tolerateGaps) return null
 
   const stored = packProfile(profile, p)
   const crossings = scene.roads?.crossings(a, b, p, { ground, surface }) ?? []

@@ -22,7 +22,10 @@ import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLay
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
-import { ensureTerrain, groundSampler, onBuilding, roofs, surfaceSampler } from './terrain.js'
+import {
+  ensureTerrain, fetchingWindows, groundSampler, onBuilding, onWindowActivity, roofs,
+  surfaceSampler,
+} from './terrain.js'
 import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
 
 import { Details } from './Details.js'
@@ -301,6 +304,14 @@ export function App() {
    * filter: asking for urban lines is the one moment the rectangles they can exist in are worth
    * drawing, and a second switch to say so was a step nobody made the connection through.
    */
+  /**
+   * Whether elevation is still arriving, so a gap in the profile can be told apart from a hole the
+   * survey does not fill. Driven by the events terrain.ts already emits for the map overlay rather
+   * than by a second count kept alongside the fetches.
+   */
+  const [fetchingElevation, setFetchingElevation] = useState(false)
+  useEffect(() => onWindowActivity(() => setFetchingElevation(fetchingWindows())), [])
+
   const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
   // null means "as level and as high as the ground allows", the same choice the search makes.
@@ -577,6 +588,10 @@ export function App() {
       { ...data.meta.params, ...VIEWER_PROFILE },
       rig,
       scene,
+      // A dragged anchor crosses into ground still being fetched constantly, and a chart of most of
+      // the line beats a spinner over all of it. What is missing comes back as a count and the panel
+      // says so -- see PlannedLine.unmeasured.
+      { tolerateGaps: true },
     )
   }, [data, customUtm, sagPct, terrainVersion, rig, scene])
 
@@ -801,12 +816,12 @@ export function App() {
           a, b, selected.a.anchor, selected.b.anchor, selected.length,
           groundSampler, surfaceSampler, fine, { water },
         )
-        // A hole in the terrain means the chart would be drawn with gaps, so it is not drawn -- but
-        // returning silently here is what left a spinner running forever with no request in flight
-        // to explain it, which is a bug report nobody can act on.
+        // Holes are drawn as holes rather than thrown away with the rest of the line. Only a
+        // profile with nothing in it at all is a failure: that means the service has no cover here,
+        // which is a different sentence and one the panel can act on.
         const holes = built.filter((sample) => Number.isNaN(sample.ground)).length
-        if (holes) {
-          const why = `elevation is missing at ${holes} of ${built.length} points along this line`
+        if (holes === built.length) {
+          const why = `elevation is missing along the whole of this line`
           report('building a profile for the selected line', new Error(why))
           setProfileFailed(why)
           return
@@ -1196,6 +1211,7 @@ export function App() {
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
               failed={selectedId === PLANNED_ID ? terrainFailed : profileFailed}
+              fetching={fetchingElevation}
               rig={rig}
               onRig={setRig}
               onClose={() => setSelectedId(null)}

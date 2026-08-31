@@ -3,6 +3,7 @@ import { PLANNED_RIG_MAX, planLine } from './plan.js'
 import { Grid } from './grid.js'
 import type { Pos } from './grid.js'
 import type { Scene } from './scene.js'
+import type { Sampler } from './grid.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
 const p = DEFAULT_PARAMS
@@ -135,5 +136,41 @@ describe('planLine', () => {
     const loose = planLine(a, b, ground, surface, 0.09, p)!
     expect(loose.candidate.clearanceMin).toBeLessThan(tight.candidate.clearanceMin)
     expect(loose.candidate.sag).toBeGreaterThan(tight.candidate.sag)
+  })
+})
+
+
+describe('planLine over ground the service has not covered', () => {
+  /** Flat terrain with a hole punched through the middle of the span. */
+  const from = (h: (e: number) => number): Sampler => ({ sample: h, nearest: h })
+  const flat = (e: number) => (e > 120 && e < 180 ? NaN : 50)
+  const holed = (): Sampler => from(flat)
+
+  const ends = [{ e: 100, n: 100 }, { e: 200, n: 100 }] as const
+
+  it('refuses by default, which is what keeps the optimiser out of a gap', () => {
+    const g = holed()
+    expect(planLine(ends[0], ends[1], g, g, 0.05, p)).toBeNull()
+  })
+
+  it('measures the rest when asked, and leaves the gap visible in the profile', () => {
+    const g = holed()
+    const out = planLine(ends[0], ends[1], g, g, 0.05, p, null, {}, { tolerateGaps: true })
+    expect(out).not.toBeNull()
+    const holes = out!.candidate.profile!.ground.filter((v) => Number.isNaN(v)).length
+    expect(holes).toBeGreaterThan(0)
+    expect(holes).toBeLessThan(out!.candidate.profile!.ground.length)
+  })
+
+  it('reports figures from the measured ground rather than counting a gap as clear air', () => {
+    const g = holed()
+    // The same span with a wall standing in the part that is measured. If the gap were treated as
+    // ground at zero, or skipped without dropping its weight, the wall would stop setting these.
+    const walled = from((e: number) =>
+      e > 120 && e < 180 ? NaN : e > 105 && e < 115 ? 95 : 50)
+    const open = planLine(ends[0], ends[1], g, g, 0.05, p, null, {}, { tolerateGaps: true })!
+    const blocked = planLine(ends[0], ends[1], walled, walled, 0.05, p, null, {}, { tolerateGaps: true })!
+    expect(blocked.candidate.clearanceMin).toBeLessThan(open.candidate.clearanceMin)
+    expect(blocked.candidate.score).toBeLessThan(open.candidate.score)
   })
 })

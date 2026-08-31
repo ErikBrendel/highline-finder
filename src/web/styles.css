@@ -392,6 +392,7 @@ header .spacer { flex: 1; }
 .details .cols { display: flex; flex-direction: column; gap: 8px; }
 .details .chart { min-width: 0; }
 
+
 .stats {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto;
@@ -432,6 +433,25 @@ header .spacer { flex: 1; }
 .filter label span.derived { color: var(--muted); font-weight: 400; }
 
 /* Keeps the chart's footprint while it has nothing to draw, so the panel does not jump. */
+/* Over the chart, not in place of it: a partial profile stays readable while the rest arrives. */
+.details .chart { position: relative; }
+.chartbusy {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(15, 17, 21, 0.85);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
 .chartwait {
   aspect-ratio: 900 / 200;
   display: flex;

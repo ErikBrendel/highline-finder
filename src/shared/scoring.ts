@@ -193,6 +193,18 @@ export function rawMetricsAt(
   for (let i = 0; i <= last; i++) {
     const t = last > 0 ? i / last : 0
     const ground = sp.ground[i]!
+    /**
+     * A station with no elevation is skipped whole, weights and all.
+     *
+     * The pipeline never produces one -- it refuses a line it could not measure -- but the viewer
+     * now draws a partially measured line rather than nothing, and that profile arrives here. Left
+     * to fall through, a NaN quietly did the worst possible thing: every comparison against it is
+     * false, so it never lowered `clearanceMin` and never counted as blocked, while still adding to
+     * `samples` and to `weight` with a deficit of zero. An unsurveyed gap therefore read as a
+     * stretch of perfectly clear air and *raised* the score. Skipping means the figures describe
+     * the ground actually seen, and the caller counts what was not.
+     */
+    if (Number.isNaN(ground)) continue
     const line = r2(lineHeightAt(hA, hB, sag, t))
     if (line - ground > exposure) exposure = line - ground
     const d = r2(t * length)

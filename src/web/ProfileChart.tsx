@@ -160,9 +160,57 @@ function TrafficIcon({ tier }: { tier: RoadTier }) {
   )
 }
 
+/**
+ * The stretches the elevation service has not covered, and a profile with them bridged over.
+ *
+ * A partly measured line is drawn rather than withheld -- see planLine's `tolerateGaps` -- and it
+ * arrives with NaN at every station that was not read. A NaN reaching a path coordinate does not
+ * make a gap, it makes the entire `d` attribute invalid and the series vanishes, so the values are
+ * bridged from the measured stations either side and the stretch is then covered by an opaque band.
+ *
+ * Interpolated ground is therefore never seen and never read: it exists so the paths on either side
+ * of a gap stay one drawable shape, and everything that would show it -- the fills, the hover
+ * readout, the two markers -- is either painted over or asks `measured` first. It is a drawing
+ * convenience and not a measurement, which is why it stops here rather than going anywhere near
+ * `rawMetricsAt`, where the same NaN is skipped outright.
+ */
+const BRIDGED: (keyof ProfileSample)[] = ['ground', 'surface', 'groundMax', 'surfaceMax']
+
+export function bridgeGaps(profile: ProfileSample[]): {
+  samples: ProfileSample[]
+  gaps: [number, number][]
+  measured: boolean[]
+} {
+  const measured = profile.map((s) => !Number.isNaN(s.ground))
+  if (measured.every(Boolean)) return { samples: profile, gaps: [], measured }
+
+  const samples = profile.map((s) => ({ ...s }))
+  const gaps: [number, number][] = []
+  for (let i = 0; i < samples.length; i++) {
+    if (measured[i]) continue
+    let end = i
+    while (end + 1 < samples.length && !measured[end + 1]) end++
+    // Held flat from whichever side has ground, so a gap at an end of the span does not slope off
+    // to nowhere. A gap with measured ground on both sides is a straight ramp between them.
+    const before = i > 0 ? samples[i - 1]! : null
+    const after = end + 1 < samples.length ? samples[end + 1]! : null
+    for (let j = i; j <= end; j++) {
+      const t = before && after ? (j - i + 1) / (end - i + 2) : before ? 1 : 0
+      for (const key of BRIDGED) {
+        const lo = (before ?? after)![key]
+        const hi = (after ?? before)![key]
+        ;(samples[j]! as unknown as Record<string, number>)[key] = lo + (hi - lo) * t
+      }
+    }
+    gaps.push([samples[i]!.d, samples[end]!.d])
+    i = end
+  }
+  return { samples, gaps, measured }
+}
+
 export function ProfileChart({ c, profile, cover, params }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-  const p = profile
+  const { samples: p, gaps, measured } = bridgeGaps(profile)
   const crossings = c.crossings ?? []
 
   /**
@@ -299,8 +347,12 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   // Mark the two numbers the score actually turns on. Exposure is a centreline measurement -- how
   // high the line is over what is directly beneath it -- and clearance is a band one, so the
   // tightest marker has to be drawn against the envelope or it would contradict the panel's figure.
-  const deepest = p.reduce((a, s) => (s.line - s.ground > a.line - a.ground ? s : a), p[0]!)
-  const inner = p.filter((s) => s.d >= 10 && s.d <= c.length - 10)
+  // Over measured ground only. Both mark a figure the panel reports, and the panel computed it from
+  // the ground it actually read -- pointing either marker at a bridged station would put a number
+  // on the chart that nothing measured.
+  const seen = p.filter((_, i) => measured[i])
+  const deepest = seen.reduce((a, s) => (s.line - s.ground > a.line - a.ground ? s : a), seen[0]!)
+  const inner = seen.filter((s) => s.d >= 10 && s.d <= c.length - 10)
   const tightest = inner.length
     ? inner.reduce((a, s) => (s.line - s.groundMax < a.line - a.groundMax ? s : a), inner[0]!)
     : deepest
@@ -320,6 +372,8 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
   }
 
   const hover = hoverIndex === null ? null : p[hoverIndex]!
+  /** Whether the station under the pointer was measured, or is bridged over a gap. */
+  const hoverKnown = hoverIndex === null || measured[hoverIndex]!
 
   /**
    * Mirrors the hovered sample onto the map.
@@ -449,6 +503,30 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
         )
       })}
 
+      {/* Over every terrain shape and under the span, which is a parabola and known regardless of
+          what is beneath it. Opaque, so the bridged ground under here is covered rather than
+          faded -- a hint of invented terrain would be read as terrain. */}
+      {gaps.map(([from, to]) => (
+        <g key={`gap-${from}`}>
+          <rect
+            x={x(from)} y={PAD.top} width={Math.max(2, x(to) - x(from))} height={ih}
+            fill="var(--panel, #12151b)" opacity="0.96"
+          />
+          <rect
+            x={x(from)} y={PAD.top} width={Math.max(2, x(to) - x(from))} height={ih}
+            fill="none" stroke="#8b93a3" strokeWidth="1" strokeDasharray="4 3" opacity="0.8"
+          />
+        </g>
+      ))}
+      {gaps.length > 0 && (
+        <text
+          x={x((gaps[0]![0] + gaps[0]![1]) / 2)} y={PAD.top + ih / 2}
+          fill="#8b93a3" fontSize="10" textAnchor="middle"
+        >
+          not surveyed
+        </text>
+      )}
+
       <path d={path('line')} stroke="var(--line)" strokeWidth="2" fill="none" />
       <circle cx={x(0)} cy={y(p[0]!.line)} r="3.5" fill="#f43f5e" />
       <circle cx={x(c.length)} cy={y(p[p.length - 1]!.line)} r="3.5" fill="#f43f5e" />
@@ -460,25 +538,39 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
             stroke="#e6e8ec" strokeWidth="1" strokeDasharray="2 2" opacity="0.7"
           />
           <circle cx={hoverX} cy={y(hover.line)} r="3" fill="#e6e8ec" />
-          <circle cx={hoverX} cy={y(hover.ground)} r="3" fill="#e6e8ec" />
+          {hoverKnown && <circle cx={hoverX} cy={y(hover.ground)} r="3" fill="#e6e8ec" />}
           <rect
             x={readoutFlipped ? hoverX - 148 : hoverX + 6} y={PAD.top + 2}
-            width="142" height={hover.halfWidth > 0 ? 48 : 34} rx="4"
+            width="142" height={!hoverKnown ? 20 : hover.halfWidth > 0 ? 48 : 34} rx="4"
             fill="rgba(15,17,21,0.92)" stroke="#2a2f3a"
           />
-          <text
-            x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 15}
-            fill="#e6e8ec" fontSize="11"
-          >
-            {(hover.line - hover.ground).toFixed(1)} m above ground
-          </text>
-          <text
-            x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 29}
-            fill="#8b93a3" fontSize="11"
-          >
-            ground at {hover.ground.toFixed(1)} m
-          </text>
-          {hover.halfWidth > 0 && (
+          {/* Bridged ground is a drawing convenience, so the readout refuses to quote it rather
+              than reporting an interpolation as a measurement. */}
+          {!hoverKnown && (
+            <text
+              x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 15}
+              fill="#8b93a3" fontSize="11"
+            >
+              ground not surveyed here
+            </text>
+          )}
+          {hoverKnown && (
+            <text
+              x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 15}
+              fill="#e6e8ec" fontSize="11"
+            >
+              {(hover.line - hover.ground).toFixed(1)} m above ground
+            </text>
+          )}
+          {hoverKnown && (
+            <text
+              x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 29}
+              fill="#8b93a3" fontSize="11"
+            >
+              ground at {hover.ground.toFixed(1)} m
+            </text>
+          )}
+          {hoverKnown && hover.halfWidth > 0 && (
             <text
               x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 43}
               fill="#8b93a3" fontSize="11"

@@ -451,3 +451,42 @@ describe('rawMetricsAt', () => {
     }
   })
 })
+
+
+describe('a profile with stations the survey never covered', () => {
+  /**
+   * The viewer now measures a partly covered line rather than refusing it, so NaN ground reaches
+   * here. Skipping a station whole is not the same as letting its comparisons fall through: every
+   * comparison against NaN is false, so it never lowered a minimum and never counted as blocked,
+   * while still adding to the weight the clearance deficit is averaged over. An unsurveyed stretch
+   * therefore read as perfectly clear air and diluted the charge for the ground that was seen.
+   */
+  const dipped = flatSpan(50, 20, 200, 2).map((sm) =>
+    sm.d > 55 && sm.d < 85 ? { ...sm, ground: 47, groundMax: 47, surface: 47, surfaceMax: 47 } : sm)
+  const blanked = (lo: number, hi: number) =>
+    packProfile(
+      dipped.map((sm) =>
+        sm.d > lo && sm.d < hi
+          ? { ...sm, ground: NaN, groundMax: NaN, surface: NaN, surfaceMax: NaN }
+          : sm),
+      p,
+    )
+  const metrics = (sp: ReturnType<typeof blanked>) => rawMetricsAt(sp, 200, 50, 50, 0.05, p)!
+
+  it('charges the ground it saw for the whole of what it saw', () => {
+    // The gap covers clear ground well away from the dip, so the dip is now a larger share of what
+    // was measured and has to be charged as one. Left to fall through, the gap kept its weight with
+    // nothing behind it and the charge came out lower instead.
+    const whole = metrics(blanked(0, 0))
+    const holed = metrics(blanked(120, 170))
+    expect(holed.clearanceDeficit).toBeGreaterThan(whole.clearanceDeficit)
+  })
+
+  it('reads the same figures however much clear ground around it is missing', () => {
+    // Widening a gap over ground that was never the worst of anything changes nothing it reports.
+    for (const wide of [metrics(blanked(120, 150)), metrics(blanked(115, 170))]) {
+      expect(wide.clearanceMin).toBeCloseTo(metrics(blanked(120, 170)).clearanceMin, 6)
+      expect(wide.exposure).toBeCloseTo(metrics(blanked(120, 170)).exposure, 6)
+    }
+  })
+})

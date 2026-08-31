@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { steppedOutline } from './ProfileChart.js'
+import { bridgeGaps, steppedOutline } from './ProfileChart.js'
 import { COVER_BUILDING, COVER_NONE } from './landcover.js'
 import type { ProfileSample } from '../shared/types.js'
 
@@ -89,5 +89,44 @@ describe('the shapes drawn between two stepped series', () => {
     }
     // The wall's own station appears three times: the foot, the roof, and the foot again.
     expect(terrain).toEqual([0, 10, 20, 20, 20, 30])
+  })
+})
+
+
+describe('bridgeGaps', () => {
+  const at = (d: number, ground: number): ProfileSample => ({
+    d, ground, surface: ground, groundMax: ground, surfaceMax: ground,
+    line: 100, halfWidth: 0, needed: 3,
+  })
+  const gap = (d: number) => at(d, NaN)
+
+  it('leaves a fully measured profile exactly as it was', () => {
+    const p = [at(0, 10), at(1, 12), at(2, 14)]
+    const out = bridgeGaps(p)
+    expect(out.samples).toBe(p)
+    expect(out.gaps).toEqual([])
+    expect(out.measured).toEqual([true, true, true])
+  })
+
+  it('ramps between the measured ground either side, and reports the span', () => {
+    const out = bridgeGaps([at(0, 10), gap(1), gap(2), at(3, 22)])
+    expect(out.samples.map((s) => s.ground)).toEqual([10, 14, 18, 22])
+    expect(out.gaps).toEqual([[1, 2]])
+    expect(out.measured).toEqual([true, false, false, true])
+  })
+
+  it('holds flat off the end of the span rather than sloping to nothing', () => {
+    expect(bridgeGaps([gap(0), gap(1), at(2, 30)]).samples.map((s) => s.ground)).toEqual([30, 30, 30])
+    expect(bridgeGaps([at(0, 30), gap(1), gap(2)]).samples.map((s) => s.ground)).toEqual([30, 30, 30])
+  })
+
+  it('never leaves a NaN anywhere a path coordinate is read from', () => {
+    const out = bridgeGaps([at(0, 10), gap(1), at(2, 20), gap(3), gap(4), at(5, 40)])
+    for (const s of out.samples) {
+      for (const k of ['ground', 'surface', 'groundMax', 'surfaceMax'] as const) {
+        expect(Number.isNaN(s[k])).toBe(false)
+      }
+    }
+    expect(out.gaps).toEqual([[1, 1], [3, 4]])
   })
 })

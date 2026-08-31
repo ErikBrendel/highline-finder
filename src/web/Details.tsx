@@ -107,6 +107,8 @@ interface Props {
   at: { a: LatLon; b: LatLon } | null
   /** Why there is no chart, or null while one may still arrive. */
   failed: string | null
+  /** Whether elevation is still arriving, which is what makes a gap in the chart temporary. */
+  fetching: boolean
   optimizing: boolean
   /** Reach the button is offering for the next run, or null for the careful default. */
   offer: number | null
@@ -136,7 +138,8 @@ const MIN_WIDTH = 360
 const KEEP_VISIBLE = 40
 
 export function Details({
-  c, profile, cover, params, roadState, onRoof, planned, at, failed, optimizing, offer, onOptimize,
+  c, profile, cover, params, roadState, onRoof, planned, at, failed, fetching, optimizing,
+  offer, onOptimize,
   rig, onRig, onClose,
 }: Props) {
   const [width, setWidth] = useState(preferredWidth)
@@ -179,6 +182,11 @@ export function Details({
 
   // Only the planned line is ever shown without a measurement; found lines carry their own.
   const isPlanned = !c || c.id === PLANNED_ID
+  /** Stations the elevation service has not covered. See planLine's `tolerateGaps`. */
+  const unmeasured = profile?.filter((s) => Number.isNaN(s.ground)).length ?? 0
+  const pctUnmeasured = profile?.length
+    ? `${Math.max(1, Math.round((100 * unmeasured) / profile.length))} %`
+    : ''
   const ends = c ? { a: c.a, b: c.b } : at
   // Length and bearing need no elevation, so they are shown before the measurement lands.
   const geom = c ?? (ends && spanGeometry(ends.a, ends.b))
@@ -270,7 +278,19 @@ export function Details({
       <div className="cols">
         <div className="chart">
           {c && profile?.length ? (
-            <ProfileChart c={c} profile={profile} cover={cover} params={params} />
+            <>
+              <ProfileChart c={c} profile={profile} cover={cover} params={params} />
+              {/* Over the chart rather than instead of it. Most of a line measured is worth looking
+                  at while the rest arrives, and the gaps in it are drawn where they are -- what
+                  this adds is which kind of gap they are, since ground still coming and ground the
+                  survey does not have look exactly alike. */}
+              {fetching && (
+                <div className="chartbusy">
+                  <i className="spinner" />
+                  <span>loading elevation&hellip;</span>
+                </div>
+              )}
+            </>
           ) : (
             <div className="chartwait">
               {failed ? (
@@ -347,6 +367,28 @@ export function Details({
             </div>
           )}
         </>
+      )}
+
+      {/* Same reason as the road banner below, and a stronger one: every figure a partial line
+          reports is measured over the ground that was read, so all of them are optimistic in the
+          same direction. The clearance minimum is the one that matters -- it cannot see into a
+          stretch it never had, and the hill that would have set it may be exactly in there. */}
+      {unmeasured > 0 && (
+        <div className="violations" data-tone={fetching ? 'wait' : 'bad'}>
+          <b>
+            {fetching
+              ? 'Still measuring this line…'
+              : `No elevation for ${pctUnmeasured} of this line`}
+          </b>
+          <div>
+            {fetching
+              ? 'The figures below cover the part that has arrived, so they can only improve as ' +
+                'the rest does. Clearance especially: the tightest point may be in the gap.'
+              : 'The survey covers Brandenburg and Berlin only, and part of this line falls ' +
+                'outside it. The figures below describe the rest, which makes every one of them ' +
+                'the best case — the tightest clearance may be in the stretch nobody measured.'}
+          </div>
+        </div>
       )}
 
       {/* Said before the verdict, because it qualifies the verdict: a line can only be called clear
