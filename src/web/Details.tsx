@@ -307,7 +307,7 @@ export function Details({
         <div className="chart">
           {c && profile?.length ? (
             <>
-              <ProfileChart c={c} profile={profile} cover={cover} params={params} />
+              <ProfileChart c={c} profile={profile} cover={cover} params={params} fetching={fetching} />
               {/* Over the chart rather than instead of it, and only where the chart has a hole to
                   explain. Elevation is in flight for all sorts of reasons -- another line, the
                   optimiser, the map -- and a badge over a complete profile says the thing being

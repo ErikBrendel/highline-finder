@@ -108,6 +108,8 @@ interface Props {
   cover: Cover | null
   /** The run's parameters, for the clearance rule the required-clearance line draws. */
   params: Params
+  /** Whether elevation is still arriving, which is what a gap in the chart means while it is. */
+  fetching: boolean
 }
 
 /**
@@ -212,7 +214,7 @@ export function bridgeGaps(profile: ProfileSample[]): {
   return { samples, gaps, measured }
 }
 
-export function ProfileChart({ c, profile, cover, params }: Props) {
+export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const { samples: p, gaps, measured } = bridgeGaps(profile)
   const crossings = c.crossings ?? []
@@ -533,12 +535,15 @@ export function ProfileChart({ c, profile, cover, params }: Props) {
           />
         </g>
       ))}
+      {/* Which of the two a gap is: ground on its way, or ground the survey does not have. They
+          look identical on the chart and are opposite answers, and while dragging it is almost
+          always the first. */}
       {gaps.length > 0 && (
         <text
           x={x((gaps[0]![0] + gaps[0]![1]) / 2)} y={PAD.top + ih / 2}
           fill="#8b93a3" fontSize="10" textAnchor="middle"
         >
-          not surveyed
+          {fetching ? 'loading…' : 'not surveyed'}
         </text>
       )}
 

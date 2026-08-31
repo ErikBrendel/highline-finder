@@ -310,7 +310,30 @@ export function App() {
    * than by a second count kept alongside the fetches.
    */
   const [fetchingElevation, setFetchingElevation] = useState(false)
-  useEffect(() => onWindowActivity(() => setFetchingElevation(fetchingWindows())), [])
+  useEffect(() => {
+    let queued = 0
+    const off = onWindowActivity((e) => {
+      setFetchingElevation(fetchingWindows())
+      if (e.state === 'loading') return
+      /**
+       * One redraw a frame, however many windows land together.
+       *
+       * Bumping per window is the point -- a line is drawn again as each piece of it arrives
+       * instead of staying blank until the last one does -- but the profile is rebuilt from
+       * scratch each time, four thousand stations of it, and a prefetch resolving thirty windows
+       * at once would rebuild it thirty times in as many milliseconds for the same picture.
+       */
+      if (queued) return
+      queued = requestAnimationFrame(() => {
+        queued = 0
+        setTerrainVersion((v) => v + 1)
+      })
+    })
+    return () => {
+      off()
+      if (queued) cancelAnimationFrame(queued)
+    }
+  }, [])
 
   const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
   const [custom, setCustom] = useState<CustomPoints>(initial.custom)
@@ -543,11 +566,11 @@ export function App() {
       ensureTerrain(a, a, DRAG_LOOKAHEAD),
       ensureTerrain(b, b, DRAG_LOOKAHEAD),
     ])
-      .then((results) => {
-        const arrived = results.some(Boolean)
-        if (stale) return
-        setTerrainFailed(null)
-        if (arrived) setTerrainVersion((v) => v + 1)
+      .then(() => {
+        // No version bump here: every window announces its own arrival, and the subscription above
+        // is what turns that into a redraw. Waiting for the whole set is exactly what kept a chart
+        // blank while most of its ground was already in hand.
+        if (!stale) setTerrainFailed(null)
       })
       .catch((e: unknown) => {
         report('fetching elevation for the planned line', e)
@@ -843,7 +866,10 @@ export function App() {
     return () => {
       stale = true
     }
-  }, [data, selected])
+    // terrainVersion rebuilds this as each window lands, so a selected line fills in piece by piece
+    // like a dragged one does. The fetch inside is a no-op once nothing is missing, so the rebuilds
+    // stop of their own accord rather than needing a guard.
+  }, [data, selected, terrainVersion])
 
   /** The selected line with its stored profile, or the fetched one, or neither yet. */
   const detailed = useMemo(() => {
