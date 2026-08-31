@@ -574,7 +574,18 @@ async function searchArea(area: WorkArea, p: Params, label: string): Promise<Are
  *   npm run pipeline                                    keep everything, search what has no cache
  *   npm run pipeline -- 52.13 13.36 52.14 13.39         that area of interest
  *   npm run pipeline -- --chunk 53_729 --chunk 52_729   those chunks
+ * `--before` names an instant and rebuilds every region computed before it, oldest first. A region
+ * is kept until it is asked for, which is what makes a statewide dataset affordable and also what
+ * lets it drift: the search has changed since the earliest of these were written, and nothing in a
+ * region file notices. Point it at the commit that last changed what the search produces and the
+ * dataset catches up with itself, worst first, so an interrupted run has fixed the most out of date
+ * ground rather than an arbitrary slice of it.
+ *
+ *   npm run pipeline                                    keep everything, search what has no cache
+ *   npm run pipeline -- 52.13 13.36 52.14 13.39         that area of interest
+ *   npm run pipeline -- --chunk 53_729 --chunk 52_729   those chunks
  *   npm run pipeline -- --all                           everything
+ *   npm run pipeline -- --before 2026-08-29             everything older than that
  *   npm run pipeline -- --hotspots                      re-cluster, write hotspots.json alone
  */
 interface Asked {
@@ -582,14 +593,26 @@ interface Asked {
   rects: Aoi[]
   /** Work-area ids, so the check against a chunk area is an identity test and not a parse. */
   chunks: Set<string>
+  /** ISO instant, or null. Regions older than this are rebuilt. */
+  before: string | null
   hotspotsOnly: boolean
 }
 
 function askedFor(args: string[]): Asked {
   const chunks = new Set<string>()
+  let before: string | null = null
   const rest: string[] = []
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--all' || args[i] === '--hotspots') continue
+    if (args[i] === '--before') {
+      const when = args[++i]
+      const at = when ? new Date(when) : new Date('')
+      if (Number.isNaN(at.getTime())) {
+        throw new Error(`--before needs a date, like --before 2026-08-29: got ${when ?? 'nothing'}`)
+      }
+      before = at.toISOString()
+      continue
+    }
     if (args[i] === '--chunk') {
       const name = args[++i]
       if (!name) throw new Error('--chunk needs a name, like --chunk 53_729')
@@ -608,10 +631,10 @@ function askedFor(args: string[]): Asked {
     throw new Error(`not four numbers per rectangle: ${rest.join(' ')}`)
   }
   const hotspotsOnly = args.includes('--hotspots')
-  if (hotspotsOnly && (args.includes('--all') || chunks.size || rects.length)) {
+  if (hotspotsOnly && (args.includes('--all') || chunks.size || rects.length || before)) {
     throw new Error('--hotspots searches nothing, so naming ground to rebuild contradicts it')
   }
-  return { all: args.includes('--all'), rects, chunks, hotspotsOnly }
+  return { all: args.includes('--all'), rects, chunks, before, hotspotsOnly }
 }
 
 async function main() {
@@ -628,12 +651,22 @@ async function main() {
   const drawn = workAreas(aois, p.maxLength)
   const areas = [...drawn, ...chunks]
   const asked = askedFor(process.argv.slice(2))
+  /**
+   * When each cached region was computed, filled in by the scan below before anything reads it.
+   *
+   * Both the `--before` selection and the order the work is done in come off this. A region with no
+   * cache is absent, which reads as older than any instant -- it has never been computed, so there
+   * is nothing about it that is up to date.
+   */
+  const vintage = new Map<string, string>()
+  const stale = (area: WorkArea) => asked.before !== null && (vintage.get(area.id) ?? '') < asked.before
   const wanted = (area: WorkArea) =>
     !asked.hotspotsOnly &&
     (asked.all ||
-    (area.kind === 'chunk'
-      ? asked.chunks.has(area.id)
-      : recomputes(area, asked.rects.length ? asked.rects : null)))
+      stale(area) ||
+      (area.kind === 'chunk'
+        ? asked.chunks.has(area.id)
+        : recomputes(area, asked.rects.length ? asked.rects : null)))
 
   /**
    * Ground claimed by both mechanisms is searched twice, which costs the time but not the answer:
@@ -936,9 +969,35 @@ async function main() {
    * merges by cell, so neither depends on the order regions arrive in.
    */
   const cached = new Set<string>()
-  for (const area of areas) if (await readRegion(area.id)) cached.add(area.id)
+  for (const area of areas) {
+    const hit = await readRegion(area.id)
+    if (!hit) continue
+    cached.add(area.id)
+    vintage.set(area.id, hit.generatedAt)
+  }
   const needsWork = (a: WorkArea) => !cached.has(a.id) || wanted(a)
-  const ordered = [...areas].sort((a, b) => Number(needsWork(a)) - Number(needsWork(b)))
+  /**
+   * Kept regions first, then the work in vintage order, oldest first.
+   *
+   * The first half is so the first write is a complete dataset -- see above. The second is for
+   * `--before`, where the whole point is that the regions are not equally out of date: doing the
+   * oldest first means an interrupted run has fixed the ground that had drifted furthest rather
+   * than whichever chunks happened to sit early in the lattice.
+   */
+  const ordered = [...areas].sort(
+    (a, b) =>
+      Number(needsWork(a)) - Number(needsWork(b)) ||
+      (vintage.get(a.id) ?? '').localeCompare(vintage.get(b.id) ?? ''),
+  )
+  if (asked.before) {
+    const due = areas.filter(stale)
+    const oldest = due.reduce((o, a) => ((vintage.get(a.id) ?? '') < o ? vintage.get(a.id)! : o), 'z')
+    console.log(
+      `\n${due.length} of ${areas.length} region(s) predate ${asked.before.slice(0, 16)}Z ` +
+        `and will be rebuilt, oldest first` +
+        (due.length ? ` -- from ${oldest.slice(0, 16)}Z` : ''),
+    )
+  }
 
   let reused = 0
   for (const [index, area] of ordered.entries()) {
