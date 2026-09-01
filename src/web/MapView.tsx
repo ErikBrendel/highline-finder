@@ -638,6 +638,9 @@ export function MapView({
   // as it was when the map was built.
   const menuRef = useRef(menu)
   menuRef.current = menu
+  /** Read in the same handlers, to tell a tap that clears something from a tap that clears nothing. */
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
   const popup = useRef<maplibregl.Popup | null>(null)
@@ -1052,12 +1055,14 @@ export function MapView({
           layers: ['lines-hit', 'custom', 'customCasing'].filter((id) => m.getLayer(id)),
         })
         if (hit.length) return setMenu(null)
+        const dismissed = !!selectedRef.current || !!menuRef.current
         onSelectRef.current(null)
-        // With a finger the same tap that clears the selection also offers the menu, since there is
-        // no second button to ask for it with. A tap while it is open dismisses it instead, so the
-        // gesture stays a toggle rather than reopening the thing it was meant to close.
-        if (touching.current && !menuRef.current) openMenu(e)
-        else setMenu(null)
+        setMenu(null)
+        // With a finger there is no second button to ask for the menu with, so a tap on bare map
+        // offers it -- but only a tap that had nothing else to do. While a line is open or the menu
+        // is already up, the tap means "close that", and answering it with a fresh menu would put
+        // something back the moment the user asked for the screen to be clear.
+        if (touching.current && !dismissed) openMenu(e)
       })
       m.on('contextmenu', openMenu)
       m.on('moveend', () => {
