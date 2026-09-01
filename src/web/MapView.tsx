@@ -17,6 +17,7 @@ import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
+import type { Fix } from './locate.js'
 import { installLoadingOverlay } from './loadingOverlay.js'
 import { installProbeOverlay } from './probeOverlay.js'
 import { installHoverMarker } from './hoverMarker.js'
@@ -259,6 +260,21 @@ function toGeoJson(cs: Candidate[]): GeoJSON.FeatureCollection {
 }
 
 const emptyCollection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
+
+/**
+ * Zoom from which individual lines are drawn.
+ *
+ * Below it they are not lines. A 400 m span is two pixels at z10, so a whole state's worth is a red
+ * smear that says only "there are lines here" -- which is the question the heatmap answers properly,
+ * and the heatmap is drawn across exactly the zooms this is not. At z11 a span is five pixels and
+ * has a direction; from there it is worth drawing one.
+ *
+ * It is also most of the work a phone does with this map: twenty-five thousand two-point features
+ * rasterised every frame to produce that smear.
+ *
+ * The hit layer carries the same floor. A line nobody can see is not one anybody meant to click.
+ */
+export const LINES_FROM = 11
 
 const rings = (of: [number, number][][]): GeoJSON.FeatureCollection => ({
   type: 'FeatureCollection',
@@ -601,6 +617,8 @@ interface Props {
   showUrban: boolean
   /** south, west, north, east from the URL; falls back to fitting every AOI. */
   initialBbox: [number, number, number, number] | null
+  /** Where the device says it is, or null when nobody is asking. */
+  fix: Fix | null
   custom: CustomPoints
   showLines: boolean
   onSelect: (id: string | null) => void
@@ -625,6 +643,7 @@ export function MapView({
   showAreas,
   showUrban,
   initialBbox,
+  fix,
   custom,
   showLines,
   onSelect,
@@ -682,6 +701,8 @@ export function MapView({
    * plain MouseEvent in others, and only the first is reliably labelled.
    */
   const touching = useRef(false)
+  /** Whether this run of following the device has already moved the camera once. */
+  const flownTo = useRef(false)
   onViewportRef.current = onViewport
 
   useEffect(() => {
@@ -997,6 +1018,7 @@ export function MapView({
         id: 'lines-hit',
         type: 'line',
         source: 'lines',
+        minzoom: LINES_FROM,
         layout: { ...SPAN_CAPS },
         paint: { 'line-color': '#000', 'line-opacity': 0, 'line-width': 14 },
       })
@@ -1004,11 +1026,32 @@ export function MapView({
         id: 'lines',
         type: 'line',
         source: 'lines',
+        minzoom: LINES_FROM,
         layout: { ...SPAN_CAPS },
         paint: {
           'line-color': SCORE_COLOR,
           'line-width': lineWidth(emphasiseLinesRef.current ? 1 : 0),
           'line-opacity': lineOpacity(emphasiseLinesRef.current ? 1 : 0),
+        },
+      })
+
+      /**
+       * Where the device is, drawn last so nothing covers it.
+       *
+       * A dot and no accuracy ring: the ring would have to be a metre-radius circle, which means a
+       * generated polygon and a redraw per zoom, and it would answer a question -- how good is this
+       * fix -- that nobody is here to ask. What the dot is for is knowing which way to pan.
+       */
+      m.addSource('here', { type: 'geojson', data: emptyCollection })
+      m.addLayer({
+        id: 'here',
+        type: 'circle',
+        source: 'here',
+        paint: {
+          'circle-radius': 7,
+          'circle-color': '#38bdf8',
+          'circle-stroke-width': 2.5,
+          'circle-stroke-color': '#f8fafc',
         },
       })
 
@@ -1302,6 +1345,34 @@ export function MapView({
     const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
     src?.setData(custom.a && custom.b ? lineFeature(custom.a, custom.b) : emptyCollection)
   }, [custom, ready])
+
+  /**
+   * The location dot, and the one camera move it is allowed.
+   *
+   * Flown to on the first fix of each time the toggle is switched on, and not again -- a watch
+   * delivers a new position every few seconds and a map that recentres on each of them cannot be
+   * panned away from. Counts as the user taking the camera, so a dataset arriving afterwards does
+   * not fit itself over the top.
+   */
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('here') as maplibregl.GeoJSONSource | undefined
+    if (!fix) {
+      flownTo.current = false
+      src?.setData(emptyCollection)
+      return
+    }
+    src?.setData({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'Point', coordinates: [fix.lon, fix.lat] },
+    })
+    if (flownTo.current) return
+    flownTo.current = true
+    userMoved.current = true
+    m.easeTo({ center: [fix.lon, fix.lat], zoom: Math.max(m.getZoom(), LINES_FROM + 2) })
+  }, [fix, ready])
 
   /** The band, for whichever line is open -- found or planned, both measured across the same lens. */
   useEffect(() => {

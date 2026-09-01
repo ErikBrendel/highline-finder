@@ -558,6 +558,26 @@ header .spacer { flex: 1; }
 .rig button:disabled { opacity: 0.4; cursor: default; }
 .anchor-marker { cursor: grab; }
 .anchor-marker:active { cursor: grabbing; }
+
+/*
+ * A finger-sized handle around a pen-sized one.
+ *
+ * The drawn circle is 22-24 px because that is what reads as an anchor against the line it ends;
+ * the thing you grab is 48, which is about a fingertip. Dragging an anchor is the app's main
+ * gesture and missing it pans the map instead, which on a phone is the difference between the
+ * feature working and the feature not existing.
+ *
+ * A pseudo-element, so nothing about the circle changes. MapLibre positions the marker element
+ * itself, so this hangs off it rather than resizing it. `touch-action: none` keeps the browser's
+ * own pan from claiming the gesture before the drag handler sees it.
+ */
+.anchor-marker, .custom-marker { touch-action: none; }
+.anchor-marker::before, .custom-marker::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+}
 .filter label span.derived { color: var(--muted); font-weight: 400; }
 
 /* Keeps the chart's footprint while it has nothing to draw, so the panel does not jump. */

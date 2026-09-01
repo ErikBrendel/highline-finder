@@ -19,7 +19,9 @@ import { rescoreAtSag, rescoreForDisplay } from '../shared/scoring.js'
 import {
   VIEWER_PROFILE, buildProfile, measuredHalfWidth, packProfile, unpackProfile,
 } from '../shared/profile.js'
-import { BASEMAPS, DEBUG_COLORS, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer } from './MapView.js'
+import {
+  BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer,
+} from './MapView.js'
 import { place, type CustomPoints, type LatLon } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
@@ -33,6 +35,8 @@ import { Details } from './Details.js'
 import { Guide, useGuide } from './Guide.js'
 import { fitHeader } from './headerFit.js'
 import { useRemembered } from './remembered.js'
+import { watchLocation, type Fix } from './locate.js'
+import { holds, touches, type Bbox } from './inView.js'
 import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -250,6 +254,15 @@ function CacheBadge() {
   )
 }
 
+/**
+ * A count, and the whole of which it is part when the two differ.
+ *
+ * Same number twice is not information, so at the opening view -- where everything switched on is
+ * also on screen -- the button reads exactly as it always did.
+ */
+const here = (shown: number, total: number) =>
+  shown === total ? total.toLocaleString() : `${shown.toLocaleString()} of ${total.toLocaleString()}`
+
 /** A button's label while what it counts is still on the wire. */
 const Spinner = ({ label }: { label: string }) => (
   <>
@@ -322,7 +335,9 @@ export function App() {
    * town away when they want a forest line, not so the app decides for them which they wanted.
    */
   const [kinds, setKinds] = useState<ReadonlySet<LineKind>>(new Set(initial.kinds ?? LINE_KINDS))
-  const [showFilters, setShowFilters] = useRemembered('highline-finder.filters-open', true)
+  // Closed by default: the control column is 288 px, which is most of a phone screen, and someone
+  // arriving has a map to look at before they have anything to filter.
+  const [showFilters, setShowFilters] = useRemembered('highline-finder.filters-open', false)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
   const [showHotspots, setShowHotspots] = useState(initial.showHotspots ?? true)
@@ -403,6 +418,24 @@ export function App() {
   const [layerError, setLayerError] = useState<string | null>(null)
   /** Whether the pointer is on the lines count, which is the cue to make them easy to spot. */
   const [emphasiseLines, setEmphasiseLines] = useState(false)
+  /**
+   * Following the device, and the last position it gave.
+   *
+   * A failure switches the toggle back off rather than latching, so pressing it again is a retry --
+   * the one thing MapLibre's own control will not do once a prompt has been refused.
+   */
+  const [locating, setLocating] = useState(false)
+  const [fix, setFix] = useState<Fix | null>(null)
+  const [locateError, setLocateError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!locating) return setFix(null)
+    setLocateError(null)
+    return watchLocation(setFix, (why) => {
+      setLocateError(why)
+      setLocating(false)
+    })
+  }, [locating])
   /** Why the selected candidate has no chart, or null while it might still get one. */
   const [profileFailed, setProfileFailed] = useState<string | null>(null)
 
@@ -774,6 +807,29 @@ export function App() {
       )
       .sort((a, b) => b.score - a.score)
   }, [lines, rescored, kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel])
+
+  /**
+   * How much of what is switched on is actually on screen.
+   *
+   * A tester who zooms to their own village sees empty ground beside a button claiming twenty-two
+   * thousand lines, and cannot tell "nothing here" from "your filters hid it". So the buttons say
+   * both figures -- but only when they differ, because at the opening view they are the same number
+   * twice and a count of everything out of everything is noise.
+   */
+  const view = bbox as Bbox | null
+  const linesHere = useMemo(
+    () => (view ? visible.filter((c) => touches(view, c.a, c.b)).length : visible.length),
+    [view, visible],
+  )
+  const spotsHere = useMemo(() => {
+    if (!shownHotspots) return 0
+    if (!view) return shownHotspots.lat.length
+    let n = 0
+    for (let i = 0; i < shownHotspots.lat.length; i++) {
+      if (holds(view, shownHotspots.lat[i]!, shownHotspots.lon[i]!)) n++
+    }
+    return n
+  }, [view, shownHotspots])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
@@ -1158,10 +1214,25 @@ export function App() {
               onFocus={() => setEmphasiseLines(true)}
               onBlur={() => setEmphasiseLines(false)}
             >
-              {lines ? `${visible.length} lines` : <Spinner label="lines" />}
+              {!lines ? (
+                <Spinner label="lines" />
+              ) : zoom < LINES_FROM ? (
+                // Below this zoom the layer draws nothing, so a count of what is "here" would be a
+                // count of things nobody can see. Say why the map is bare instead.
+                `${visible.length.toLocaleString()} lines · zoom in`
+              ) : (
+                `${here(linesHere, visible.length)} lines`
+              )}
             </button>
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
-              {shownHotspots ? `${shownHotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
+              {shownHotspots ? `${here(spotsHere, shownHotspots.lat.length)} hotspots` : 'hotspots'}
+            </button>
+            <button
+              data-active={locating}
+              onClick={() => setLocating(!locating)}
+              title="Centre the map on where you are"
+            >
+              {locating && !fix ? <Spinner label="locating" /> : 'my location'}
             </button>
             {/* anchors.json is gitignored, so this only exists where the pipeline has run.
                 Vite folds the constant away, dropping the button from the bundle entirely. */}
@@ -1190,6 +1261,7 @@ export function App() {
             </button>
           </div>
           {layerError && <div className="togglenote">{layerError}</div>}
+          {locateError && <div className="togglenote">{locateError}</div>}
           {import.meta.env.DEV && debugLayer !== 'none' && (
             <DebugLegend
               layer={debugLayer}
@@ -1307,6 +1379,7 @@ export function App() {
             tiles={tileLayer ? tiles : null}
             tileLayer={tileLayer ?? 'terrain'}
             initialBbox={initial.bbox}
+            fix={fix}
             custom={custom}
             showLines={showLines}
             onSelect={setSelectedId}
