@@ -15,17 +15,25 @@ import type { Dataset } from '../shared/types.js'
  * data, only that each works alone.
  */
 const PATH = new URL('../web/public/candidates.json', import.meta.url).pathname
-// A file from a pipeline older than the three-list split reads as absent rather than as a failure,
-// the same way a missing one does: this suite asserts on the current schema, not on whether the
-// checkout happens to hold output from before it.
-const loaded: Dataset | null = existsSync(PATH) ? JSON.parse(readFileSync(PATH, 'utf8')) : null
-const present = !!loaded?.lines?.natural
+const META_PATH = new URL('../web/public/meta.json', import.meta.url).pathname
+// Output from a pipeline older than the current schema reads as absent rather than as a failure,
+// the same way missing output does: this suite asserts on the current schema, not on whether the
+// checkout happens to hold output from before it. Both halves have to be there -- the two files are
+// written together and one without the other is a half-finished run, not a dataset.
+const read = <T,>(path: string): T | null =>
+  existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as T) : null
+const loaded = read<Pick<Dataset, 'lines'>>(PATH)
+const loadedMeta = read<Dataset['meta']>(META_PATH)
+const present = !!loaded?.lines?.natural && !!loadedMeta?.regions
 
 /**
  * Derived up here, not inside the describe: vitest still runs a skipped suite's body to collect its
  * tests, so anything that touches the file has to be safe when there is no file to touch.
  */
-const data: Dataset = loaded ?? ({ meta: { regions: [] }, lines: {} } as unknown as Dataset)
+const data: Dataset = {
+  meta: loadedMeta ?? ({ regions: [] } as unknown as Dataset['meta']),
+  lines: loaded?.lines ?? ({} as Dataset['lines']),
+}
 const { params, regions } = data.meta
 /**
  * The ground each region is answerable for.

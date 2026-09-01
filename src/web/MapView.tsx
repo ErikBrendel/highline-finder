@@ -4,7 +4,7 @@ import type {
   Aoi,
   AnchorDump,
   Candidate,
-  Dataset,
+  DatasetMeta,
   DrawnSpots,
   MaskCells,
   Params,
@@ -581,8 +581,8 @@ function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
 }
 
 interface Props {
-  /** Null until candidates.json lands. The map is built and usable before it does. */
-  data: Dataset | null
+  /** Null until meta.json lands, which the map is built and usable before. */
+  meta: DatasetMeta | null
   visible: Candidate[]
   /** Swell the found lines, while the control that counts them is under the pointer. */
   emphasiseLines: boolean
@@ -611,7 +611,7 @@ interface Props {
 }
 
 export function MapView({
-  data,
+  meta,
   visible,
   emphasiseLines,
   selected,
@@ -634,6 +634,10 @@ export function MapView({
   onViewport,
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
+  // Read inside the map's own handlers, which are registered once and would otherwise see the menu
+  // as it was when the map was built.
+  const menuRef = useRef(menu)
+  menuRef.current = menu
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
   const popup = useRef<maplibregl.Popup | null>(null)
@@ -666,6 +670,15 @@ export function MapView({
   const onViewportRef = useRef(onViewport)
   /** Whether the user has taken the camera themselves, which stops the dataset from moving it. */
   const userMoved = useRef(false)
+  /**
+   * Whether the last thing to touch the map was a finger.
+   *
+   * A phone has no right-click, so the menu that places a custom anchor was unreachable on one --
+   * which is most of where this map gets opened. Read from `pointerdown` on the canvas rather than
+   * from the click that follows, because a click event is a PointerEvent in some browsers and a
+   * plain MouseEvent in others, and only the first is reliably labelled.
+   */
+  const touching = useRef(false)
   onViewportRef.current = onViewport
 
   useEffect(() => {
@@ -1025,17 +1038,28 @@ export function MapView({
         const f = e.features?.[0]
         if (f) onSelectRef.current(String(f.properties!.cid))
       })
+      const openMenu = (e: maplibregl.MapMouseEvent) =>
+        setMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lon: e.lngLat.lng })
+
+      m.getCanvasContainer().addEventListener('pointerdown', (ev: PointerEvent) => {
+        touching.current = ev.pointerType === 'touch'
+      })
+
       m.on('click', (e) => {
         // Must include every selectable layer, or clicking one of them selects and then this
         // immediately deselects it again -- both handlers fire, and this one runs last.
         const hit = m.queryRenderedFeatures(e.point, {
           layers: ['lines-hit', 'custom', 'customCasing'].filter((id) => m.getLayer(id)),
         })
-        if (!hit.length) onSelectRef.current(null)
+        if (hit.length) return setMenu(null)
+        onSelectRef.current(null)
+        // With a finger the same tap that clears the selection also offers the menu, since there is
+        // no second button to ask for it with. A tap while it is open dismisses it instead, so the
+        // gesture stays a toggle rather than reopening the thing it was meant to close.
+        if (touching.current && !menuRef.current) openMenu(e)
+        else setMenu(null)
       })
-      m.on('contextmenu', (e) => {
-        setMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lon: e.lngLat.lng })
-      })
+      m.on('contextmenu', openMenu)
       m.on('moveend', () => {
         const b = m.getBounds()
         onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], m.getZoom())
@@ -1046,7 +1070,6 @@ export function MapView({
         if (e.originalEvent) userMoved.current = true
         setMenu(null)
       })
-      m.on('click', () => setMenu(null))
 
       m.on('mouseenter', 'lines-hit', () => { m.getCanvas().style.cursor = 'pointer' })
       m.on('mouseleave', 'lines-hit', () => { m.getCanvas().style.cursor = '' })
@@ -1113,20 +1136,20 @@ export function MapView({
    */
   useEffect(() => {
     const m = map.current
-    if (!m || !ready || !data) return
+    if (!m || !ready || !meta) return
     ;(m.getSource('aoi') as maplibregl.GeoJSONSource | undefined)?.setData(
-      rings(searchedRings(data.meta.regions)),
+      rings(searchedRings(meta.regions)),
     )
     ;(m.getSource('urban') as maplibregl.GeoJSONSource | undefined)?.setData(
-      rings(urbanRings(data.meta.urbanAreas)),
+      rings(urbanRings(meta.urbanAreas)),
     )
     if (initialBbox || userMoved.current) return
     const bounds = new maplibregl.LngLatBounds()
-    for (const a of data.meta.regions.flatMap((r) => r.aois)) {
+    for (const a of meta.regions.flatMap((r) => r.aois)) {
       bounds.extend([a.west, a.south]).extend([a.east, a.north])
     }
     if (!bounds.isEmpty()) m.fitBounds(bounds, { padding: 40, animate: false })
-  }, [data, ready, initialBbox])
+  }, [meta, ready, initialBbox])
 
   useEffect(() => {
     const m = map.current
@@ -1285,8 +1308,8 @@ export function MapView({
       : custom.a && custom.b
         ? { a: custom.a, b: custom.b }
         : null
-    src?.setData(ends && data ? bandFeature(ends.a, ends.b, data.meta.params) : emptyCollection)
-  }, [selected, custom, data, ready])
+    src?.setData(ends && meta ? bandFeature(ends.a, ends.b, meta.params) : emptyCollection)
+  }, [selected, custom, meta, ready])
 
   /**
    * The two anchor handles, for whichever line is being looked at.

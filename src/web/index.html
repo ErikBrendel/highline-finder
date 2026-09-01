@@ -12,6 +12,7 @@
       where the fetch is written. `crossorigin` is not optional: it makes the preload's CORS mode
       match what fetch() asks for, and a mismatch downloads the file twice instead of once.
     -->
+    <link rel="preload" as="fetch" crossorigin href="/meta.json" />
     <link rel="preload" as="fetch" crossorigin href="/candidates.json" />
     <link rel="preload" as="fetch" crossorigin href="/hotspots.json" />
     <title>Highline Finder</title>

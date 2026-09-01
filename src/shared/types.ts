@@ -1,6 +1,11 @@
 /**
- * Output schema of the pipeline. `candidates.json` is exactly a serialised {@link Dataset},
- * so these types are the schema contract between pipeline and web app.
+ * Output schema of the pipeline, and the schema contract between it and the web app.
+ *
+ * A {@link Dataset} is written as two files rather than one. `meta.json` is everything about the
+ * run -- the regions, the parameters, the counts, the ends of every slider -- and is small enough
+ * to land at once; `candidates.json` is the lines, and is three megabytes. Split because the panel
+ * that filters the lines is built entirely out of the first, so it can be working while the second
+ * is still arriving, and so can the planner.
  *
  * Height convention throughout: metres above sea level in DHHN2016 (the vertical datum the
  * Brandenburg rasters use), never metres above ground, unless a field says "clearance".
@@ -454,6 +459,20 @@ export interface DatasetMeta {
     refineMeanGain: number
     runtimeMs: number
   }
+  /** How many lines of each kind, so the anchor toggles can be labelled before the lines land. */
+  lineCounts: ByKind<number>
+  /**
+   * Where the dataset-fitted sliders end.
+   *
+   * Computed here rather than by scanning the loaded lines, because the panel these size is meant
+   * to work before there are any lines to scan. Each is the largest value in the dataset rounded
+   * up, with a floor so an empty or tiny dataset still gives a slider something to travel over.
+   */
+  ranges: {
+    score: number
+    length: number
+    exposure: number
+  }
 }
 
 /**
@@ -575,6 +594,7 @@ export interface TileUsage {
 }
 
 export interface Dataset {
+  /** Served as `meta.json`. */
   meta: DatasetMeta
   /**
    * Every distinct line, in three lists rather than one with a label on each entry.

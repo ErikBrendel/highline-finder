@@ -19,6 +19,15 @@ import {
 import { packAnchors, packSectors, scanAnchors } from './openness.js'
 import { dedupe, endpointsOf, locate, pairsOf, thinCrossings } from './lines.js'
 import { shipped } from './shipped.js'
+
+/**
+ * The largest value in the set, rounded up, never below `floor`.
+ *
+ * Reduced rather than spread into Math.max: at tens of thousands of lines, spreading that many
+ * arguments overflows the call stack.
+ */
+const ceilOver = (of: Candidate[], pick: (c: Candidate) => number, floor: number) =>
+  Math.ceil(of.reduce((m, c) => Math.max(m, pick(c)), floor))
 import { HOTSPOT_RADIUS, clusterSpots, isWalkable, spotOf } from './hotspots.js'
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Anchor } from './openness.js'
@@ -72,6 +81,7 @@ import type {
  */
 
 const OUT = new URL('../web/public/candidates.json', import.meta.url).pathname
+const META_OUT = new URL('../web/public/meta.json', import.meta.url).pathname
 const ANCHORS_OUT = new URL('../web/public/anchors.json', import.meta.url).pathname
 const HOTSPOTS_OUT = new URL('../web/public/hotspots.json', import.meta.url).pathname
 const MASK_OUT = new URL('../web/public/mask.json', import.meta.url).pathname
@@ -867,12 +877,26 @@ async function main() {
           refineMeanGain: Math.round(meanGain * 100) / 100,
           runtimeMs: Date.now() - started,
         },
+        lineCounts: Object.fromEntries(
+          LINE_KINDS.map((k) => [k, lines[k].length]),
+        ) as ByKind<number>,
+        // Rounded up, with a floor, so a slider always has somewhere to travel -- a dataset of one
+        // 60 m line would otherwise hand the length filter a track with no length.
+        ranges: {
+          score: ceilOver(finalCandidates, (c) => c.score, 1),
+          length: ceilOver(finalCandidates, (c) => c.length, 100),
+          exposure: ceilOver(finalCandidates, (c) => c.exposure, 10),
+        },
       },
       lines,
     }
 
     await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
-    const datasetText = JSON.stringify(dataset)
+    // Two files, because the panel built out of the metadata should not wait on three megabytes of
+    // lines to become usable. See the header of shared/types.ts.
+    const metaText = JSON.stringify(dataset.meta)
+    const datasetText = JSON.stringify({ lines: dataset.lines })
+    await writeFile(META_OUT, metaText)
     await writeFile(OUT, datasetText)
 
     const dump: AnchorDump = {
@@ -946,6 +970,7 @@ async function main() {
     say(
       `\ndone in ${((Date.now() - started) / 1000).toFixed(1)}s -> ` +
         `candidates.json (${(datasetText.length / 1024).toFixed(0)} KB), ` +
+        `meta.json (${(metaText.length / 1024).toFixed(0)} KB), ` +
         `anchors.json (${anchorKb.toFixed(0)} KB, ${dumpAnchors.lat.length} points)`,
     )
     return finalCandidates

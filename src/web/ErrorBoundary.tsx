@@ -91,18 +91,24 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
             onDismiss={caught.fatal ? null : () => this.setState({ caught: null })}
           />
         )}
-        <SoftFailures />
+        {import.meta.env.DEV && <SoftFailures />}
       </>
     )
   }
 }
 
 /**
- * Failures the app survived, kept at the corner of the screen.
+ * Failures the app survived, kept at the corner of the screen while developing.
  *
  * Deliberately unobtrusive and deliberately not dismissible-forever: these are the ones that used
  * to be invisible, and a spinner that never resolves needs its reason to still be on screen when
  * someone finally looks for it.
+ *
+ * Development only. A refused elevation window or a timed-out Overpass query is a fact about the
+ * survey servers, not about anything a visitor did or can do -- the app is designed to keep working
+ * through them, and a counter in the corner asks them to worry about a thing that is being handled.
+ * `report` still logs every one to the console, so the reason is there for whoever opens it. Vite
+ * folds the constant away, so the panel leaves the bundle entirely.
  */
 function SoftFailures() {
   const [list, setList] = useState<Failure[]>([])

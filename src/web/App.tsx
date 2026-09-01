@@ -3,8 +3,9 @@ import { LINE_KINDS } from '../shared/types.js'
 import { withSpan } from '../shared/roads.js'
 import type {
   AnchorDump,
+  ByKind,
   Candidate,
-  Dataset,
+  DatasetMeta,
   DrawnSpots,
   HotspotArrays,
   Hotspots,
@@ -248,6 +249,14 @@ function CacheBadge() {
   )
 }
 
+/** A button's label while what it counts is still on the wire. */
+const Spinner = ({ label }: { label: string }) => (
+  <>
+    <i className="spin" />
+    {label}
+  </>
+)
+
 /**
  * A label and what it shrinks to when the header runs out of room.
  *
@@ -277,7 +286,15 @@ export function App() {
   const header = useRef<HTMLElement>(null)
   // Measured once the row is in the document, and re-applied on every resize thereafter.
   useEffect(() => (header.current ? fitHeader(header.current) : undefined), [])
-  const [data, setData] = useState<Dataset | null>(null)
+  /**
+   * The run, and the lines it found, fetched separately because they are wanted at different times.
+   *
+   * meta.json is forty kilobytes and settles the filter panel, the map's outlines and every
+   * parameter the planner measures with; candidates.json is three megabytes of lines and settles
+   * only what is drawn. Waiting for the second to use the first is the whole reason for the split.
+   */
+  const [meta, setMeta] = useState<DatasetMeta | null>(null)
+  const [lines, setLines] = useState<ByKind<Candidate[]> | null>(null)
   const [error, setError] = useState<string | null>(null)
   // null until the dataset is loaded, because the floor comes from the pipeline's own sag.
   const [sagPct, setSagPct] = useState<number | null>(initial.sagPct)
@@ -388,16 +405,32 @@ export function App() {
   /** Why the selected candidate has no chart, or null while it might still get one. */
   const [profileFailed, setProfileFailed] = useState<string | null>(null)
 
+  const load = <T,>(file: string) =>
+    fetch(`${import.meta.env.BASE_URL}${file}`).then((r) =>
+      r.ok ? (r.json() as Promise<T>) : Promise.reject(new Error(`HTTP ${r.status}`)),
+    )
+
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}candidates.json`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d: Dataset) => {
+    load<DatasetMeta>('meta.json')
+      .then((m) => {
         // A file from an older pipeline would otherwise fail deep inside rendering, which reads as
         // a broken app rather than as stale output.
-        if (!d.meta?.regions?.length) throw new Error('no regions in it — re-run `npm run pipeline`')
-        setData(d)
-        const floor = d.meta.params.sagRatio * 100
+        if (!m?.regions?.length) throw new Error('no regions in it — re-run `npm run pipeline`')
+        setMeta(m)
+        const floor = m.params.sagRatio * 100
         setSagPct((cur) => Math.max(floor, cur ?? floor))
+      })
+      .catch((e: unknown) => {
+        report('loading meta.json, which describes the run', e)
+        setError(failureText(e))
+      })
+  }, [])
+
+  useEffect(() => {
+    load<{ lines: ByKind<Candidate[]> }>('candidates.json')
+      .then((d) => {
+        if (!d?.lines?.natural) throw new Error('no lines in it — re-run `npm run pipeline`')
+        setLines(d.lines)
         // A shared candidate is restored by id if the dataset still has it. If regenerating moved
         // the anchor that names it, the link's own geometry rebuilds the same line as a planned
         // one instead -- stale rather than broken.
@@ -413,7 +446,7 @@ export function App() {
         }
       })
       .catch((e: unknown) => {
-        report('loading candidates.json, which is the whole dataset', e)
+        report('loading candidates.json, which is every line found', e)
         setError(failureText(e))
       })
   }, [])
@@ -431,16 +464,16 @@ export function App() {
    */
   const candidates = useMemo(
     () =>
-      data
+      lines
         ? LINE_KINDS.flatMap((kind) =>
-            data.lines[kind].map((c) => ({
+            lines[kind].map((c) => ({
               ...c,
               kind,
               crossings: c.crossings?.map(withSpan),
             })),
           )
         : [],
-    [data],
+    [lines],
   )
 
   /**
@@ -450,12 +483,12 @@ export function App() {
    * from the dataset, so a lower sag would report an incomplete set as if it were complete.
    */
   const rescored = useMemo(() => {
-    if (!data || sagPct === null) return []
-    if (sagPct === data.meta.params.sagRatio * 100) return candidates
+    if (!meta || sagPct === null) return []
+    if (sagPct === meta.params.sagRatio * 100) return candidates
     return candidates
-      .map((c) => rescoreAtSag(c, sagPct / 100, data.meta.params))
+      .map((c) => rescoreAtSag(c, sagPct / 100, meta.params))
       .filter((c): c is Candidate => c !== null)
-  }, [data, candidates, sagPct])
+  }, [meta, candidates, sagPct])
 
   /**
    * The "where is anything possible at all" layer, loaded eagerly and shown by default: it is 6 KB,
@@ -571,7 +604,7 @@ export function App() {
   // measurement: an effect that writes what another effect reads is how this file previously
   // managed to feed itself.
   useEffect(() => {
-    if (!customUtm || !data) return
+    if (!customUtm || !meta) return
     let stale = false
     // This effect runs on every move, so the line supplies itself as it goes. The optimiser is the
     // one thing that cannot work that way -- see wanderMargin.
@@ -582,7 +615,7 @@ export function App() {
     // no attachment height and produces no line at all rather than a partial one. See
     // DRAG_LOOKAHEAD.
     Promise.all([
-      ensureTerrain(a, b, measuredHalfWidth(span, data.meta.params)),
+      ensureTerrain(a, b, measuredHalfWidth(span, meta.params)),
       ensureTerrain(a, a, DRAG_LOOKAHEAD),
       ensureTerrain(b, b, DRAG_LOOKAHEAD),
     ])
@@ -599,7 +632,7 @@ export function App() {
     return () => {
       stale = true
     }
-  }, [customUtm, data])
+  }, [customUtm, meta])
 
   /**
    * The layers a planned line is measured against, beyond the two elevation rasters.
@@ -625,7 +658,7 @@ export function App() {
    * fetch delivers a window that was genuinely missing.
    */
   const planned: PlannedLine | null = useMemo(() => {
-    if (!data || !customUtm || sagPct === null) return null
+    if (!meta || !customUtm || sagPct === null) return null
     void terrainVersion
     return planLine(
       customUtm.a,
@@ -636,7 +669,7 @@ export function App() {
       // The viewer's resolution, like the selected line's. The optimiser calls planLine too and
       // deliberately does not get this: it evaluates dozens of positions a step, and it is choosing
       // where to put an anchor rather than reporting what is under one.
-      { ...data.meta.params, ...VIEWER_PROFILE },
+      { ...meta.params, ...VIEWER_PROFILE },
       rig,
       scene,
       // A dragged anchor crosses into ground still being fetched constantly, and a chart of most of
@@ -644,7 +677,7 @@ export function App() {
       // says so -- see PlannedLine.unmeasured.
       { tolerateGaps: true },
     )
-  }, [data, customUtm, sagPct, terrainVersion, rig, scene])
+  }, [meta, customUtm, sagPct, terrainVersion, rig, scene])
 
   /**
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a
@@ -726,7 +759,7 @@ export function App() {
   }
 
   const visible = useMemo(() => {
-    if (!data) return []
+    if (!lines) return []
     return rescored
       .filter(
         (c) =>
@@ -739,7 +772,7 @@ export function App() {
           c.offLevelRatio * 100 <= maxOffLevel,
       )
       .sort((a, b) => b.score - a.score)
-  }, [data, rescored, kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel])
+  }, [lines, rescored, kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
@@ -773,7 +806,7 @@ export function App() {
   }, [offer])
 
   useEffect(() => {
-    if (!optimizing || !data || sagPct === null || !customUtm) return
+    if (!optimizing || !meta || sagPct === null || !customUtm) return
     const origin = customUtm
     let timer: ReturnType<typeof setTimeout>
     let stopped = false
@@ -797,7 +830,7 @@ export function App() {
           ground: groundSampler,
           surface: surfaceSampler,
           sagRatio: sagPct / 100,
-          params: data.meta.params,
+          params: meta.params,
           rig,
           scene,
           reach,
@@ -818,7 +851,7 @@ export function App() {
     // ground that is no good -- which ends the run and reports the line cannot be improved. See
     // wanderMargin. Paid once per click, and only for the reach that click asked for.
     const span = Math.hypot(origin.b.e - origin.a.e, origin.b.n - origin.a.n)
-    ensureTerrain(origin.a, origin.b, wanderMargin(span, reach, data.meta.params))
+    ensureTerrain(origin.a, origin.b, wanderMargin(span, reach, meta.params))
       .then(() => {
         if (!stopped) timer = setTimeout(tick, 0)
       })
@@ -836,7 +869,7 @@ export function App() {
     // a dependency -- otherwise every step would restart the run and reset that origin. `reach` is
     // set in the same click that starts the run, so it is already current when this effect runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optimizing, data, sagPct, rig])
+  }, [optimizing, meta, sagPct, rig])
 
   /**
    * A profile for the selected line, when the dataset does not carry one.
@@ -851,18 +884,18 @@ export function App() {
    * It does mean the number in the panel can differ slightly from the one the list sorted on.
    */
   useEffect(() => {
-    if (!data || !selected || selected.profile) return
+    if (!meta || !selected || selected.profile) return
     const a = { e: selected.a.e, n: selected.a.n }
     const b = { e: selected.b.e, n: selected.b.n }
     let stale = false
     setProfileFailed(null)
     // Only as wide as the profile reads. A selected line does not move, so anything beyond the band
     // it samples would be fetched to be looked at and thrown away.
-    const band = measuredHalfWidth(selected.length, data.meta.params)
+    const band = measuredHalfWidth(selected.length, meta.params)
     Promise.all([ensureTerrain(a, b, band), ensureCover(a, b)])
       .then(() => {
         if (stale) return
-        const fine = { ...data.meta.params, ...VIEWER_PROFILE }
+        const fine = { ...meta.params, ...VIEWER_PROFILE }
         const built = buildProfile(
           a, b, selected.a.anchor, selected.b.anchor, selected.length,
           groundSampler, surfaceSampler, fine, { water },
@@ -889,32 +922,32 @@ export function App() {
     // terrainVersion rebuilds this as each window lands, so a selected line fills in piece by piece
     // like a dragged one does. The fetch inside is a no-op once nothing is missing, so the rebuilds
     // stop of their own accord rather than needing a guard.
-  }, [data, selected, terrainVersion])
+  }, [meta, selected, terrainVersion])
 
   /** The selected line with its stored profile, or the fetched one, or neither yet. */
   const remeasured = useMemo(() => {
-    if (!selected || !data || sagPct === null || selected.profile) return null
+    if (!selected || !meta || sagPct === null || selected.profile) return null
     const profile = fetchedProfile?.id === selected.id ? fetchedProfile.profile : null
     if (!profile) return null
     // Now that a profile exists, the figures are recomputed at the chosen sag rather than staying at
     // the one they were generated with -- and for display rather than for filtering, so a line the
     // finer measurement disqualifies is described instead of vanishing. See rescoreForDisplay.
-    return rescoreForDisplay({ ...selected, profile }, sagPct / 100, data.meta.params)
-  }, [selected, data, sagPct, fetchedProfile])
+    return rescoreForDisplay({ ...selected, profile }, sagPct / 100, meta.params)
+  }, [selected, meta, sagPct, fetchedProfile])
 
   const detailed = remeasured?.candidate ?? selected
 
   const shownProfile = useMemo(() => {
-    if (!detailed?.profile || sagPct === null || !data) return null
+    if (!detailed?.profile || sagPct === null || !meta) return null
     return unpackProfile(
       detailed.profile,
       detailed.length,
       detailed.a.anchor,
       detailed.b.anchor,
       sagPct / 100,
-      data.meta.params,
+      meta.params,
     )
-  }, [detailed, sagPct, data])
+  }, [detailed, sagPct, meta])
 
   const shownEnds = useMemo(
     () =>
@@ -979,7 +1012,7 @@ export function App() {
     const fallback = planning ? null : selected
     // The sag default is not a constant: the dataset was generated at some sag and the control
     // cannot go below it, so that floor is the default and only a tightened sag belongs in a link.
-    const sagFloor = data ? data.meta.params.sagRatio * 100 : null
+    const sagFloor = meta ? meta.params.sagRatio * 100 : null
     return toSearch({
       bbox,
       lineId: selectedId && selectedId !== PLANNED_ID ? selectedId : null,
@@ -1002,7 +1035,7 @@ export function App() {
       }),
     })
   }, [
-    bbox, selectedId, selected, custom, rig, sagPct, basemapMix, data,
+    bbox, selectedId, selected, custom, rig, sagPct, basemapMix, meta,
     showLines, showHotspots, showAreas, kinds,
     minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
   ])
@@ -1023,23 +1056,25 @@ export function App() {
    * screen within a frame and the found lines drop in on top when they arrive. Every readout that
    * genuinely does depend on the file says so by omitting its figure rather than by blocking.
    */
-  const regions = data?.meta.regions ?? []
-  // Reduced rather than spread into Math.max: the dataset is tens of thousands of lines now, and
-  // spreading that many arguments exceeds the call stack.
-  const highest = (pick: (c: Candidate) => number, floor: number) =>
-    Math.ceil(candidates.reduce((m, c) => Math.max(m, pick(c)), floor))
-  /** Where each slider's track ends, which only the dataset can say. Null until it has. */
+  const regions = meta?.regions ?? []
+  /**
+   * Where each slider's track ends. Null until meta.json has landed, which is nearly at once.
+   *
+   * Every end comes out of the metadata rather than off the lines: the pipeline already knows the
+   * longest line it found and writes the figure down, so the panel is fitted to the dataset without
+   * having to hold it. That is what lets the filters work while the lines are still arriving.
+   */
   const bounds =
-    data && sagPct !== null
+    meta && sagPct !== null
       ? {
           sag: sagPct,
-          sagFloor: data.meta.params.sagRatio * 100,
-          maxScore: highest((c) => c.score, 1),
-          minLen: Math.floor(data.meta.params.minLength),
-          maxLen: highest((c) => c.length, 100),
-          maxExp: highest((c) => c.exposure, 10),
+          sagFloor: meta.params.sagRatio * 100,
+          maxScore: meta.ranges.score,
+          minLen: Math.floor(meta.params.minLength),
+          maxLen: meta.ranges.length,
+          maxExp: meta.ranges.exposure,
           // The pipeline already caps offlevel, so the slider only needs to reach that cap.
-          offLevelCap: Math.ceil(data.meta.params.maxOffLevelRatio * 100 * 10) / 10,
+          offLevelCap: Math.ceil(meta.params.maxOffLevelRatio * 100 * 10) / 10,
         }
       : null
 
@@ -1118,7 +1153,7 @@ export function App() {
               onFocus={() => setEmphasiseLines(true)}
               onBlur={() => setEmphasiseLines(false)}
             >
-              {data ? `${visible.length} lines` : 'lines'}
+              {lines ? `${visible.length} lines` : <Spinner label="lines" />}
             </button>
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
               {shownHotspots ? `${shownHotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
@@ -1138,9 +1173,13 @@ export function App() {
                 {DEBUG_LABELS[debugLayer]}
               </button>
             )}
-            <button data-active={showAreas} onClick={() => setShowAreas(!showAreas)}>
-              {data ? `${regions.length} areas` : 'areas'}
-            </button>
+            {/* The superchunk grid is how the search was organised, not something a visitor is
+                looking for. Vite folds the constant away, so the button leaves the bundle. */}
+            {import.meta.env.DEV && (
+              <button data-active={showAreas} onClick={() => setShowAreas(!showAreas)}>
+                {meta ? `${regions.length} areas` : 'areas'}
+              </button>
+            )}
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
             </button>
@@ -1164,7 +1203,7 @@ export function App() {
             </div>
           )}
 
-          {showFilters && data && bounds && (
+          {showFilters && meta && bounds && (
             <div className="filters">
               <h2>Rigging</h2>
               <Slider
@@ -1178,9 +1217,12 @@ export function App() {
                 onChange={setSagPct}
               />
               <div className="note">
-                {rescored.length} of {candidates.length} lines still clear the terrain at{' '}
-                {bounds.sag.toFixed(1)} %. Cannot go below {bounds.sagFloor.toFixed(1)} % &mdash; the dataset
-                was generated there, so looser lines were never evaluated.
+                {lines
+                  ? `${rescored.length} of ${candidates.length} lines still clear the terrain at ` +
+                    `${bounds.sag.toFixed(1)} %. `
+                  : 'Applies to the lines as they arrive. '}
+                Cannot go below {bounds.sagFloor.toFixed(1)} % &mdash; the dataset was generated
+                there, so looser lines were never evaluated.
               </div>
 
               <h2 style={{ marginTop: 14 }}>Anchors</h2>
@@ -1193,7 +1235,7 @@ export function App() {
                     title={KIND_HELP[kind]}
                   >
                     <b>{kind}</b>
-                    <span>{data.lines[kind].length.toLocaleString()}</span>
+                    <span>{meta.lineCounts[kind].toLocaleString()}</span>
                   </button>
                 ))}
               </div>
@@ -1246,7 +1288,7 @@ export function App() {
         </div>
 
           <MapView
-            data={data}
+            meta={meta}
             visible={visible}
             emphasiseLines={emphasiseLines}
             selected={selected}
@@ -1272,12 +1314,12 @@ export function App() {
             }}
           />
 
-          {(selected || planPending) && data && (
+          {(selected || planPending) && meta && (
             <Details
               c={detailed}
               profile={shownProfile}
               cover={cover}
-              params={data.meta.params}
+              params={meta.params}
               roadState={selectedId === PLANNED_ID ? roadState : 'ok'}
               onRoof={onRoof}
               optimizing={optimizing}
