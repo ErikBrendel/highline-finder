@@ -29,6 +29,7 @@ import {
 import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
 
 import { Details } from './Details.js'
+import { Guide, useGuide } from './Guide.js'
 import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -257,6 +258,7 @@ export function App() {
   // Read once. The URL is an input at startup and an output thereafter; treating it as live state
   // both ways is how a URL writer and a URL reader start feeding each other.
   const [initial] = useState(() => parseUrl(window.location.search))
+  const guide = useGuide()
   const [data, setData] = useState<Dataset | null>(null)
   const [error, setError] = useState<string | null>(null)
   // null until the dataset is loaded, because the floor comes from the pipeline's own sag.
@@ -1063,6 +1065,14 @@ export function App() {
               `${(data.meta.stats.runtimeMs / 1000).toFixed(1)}s`
             : 'loading the lines…'}
         </span>
+        <button
+          className="guidebtn"
+          onClick={guide.show}
+          title="What this is, where the data comes from, and how to use it"
+          aria-label="About Highline Finder"
+        >
+          i
+        </button>
       </header>
 
       <div className="layout">
@@ -1284,6 +1294,8 @@ export function App() {
           )}
         </div>
       </div>
+
+      {guide.open && <Guide onClose={guide.close} />}
     </>
   )
 }
