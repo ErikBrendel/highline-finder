@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { guideSeen, rememberGuide } from './Guide.js'
+import { guideOpen, rememberGuideOpen } from './Guide.js'
 
 /**
- * The guide opens by itself exactly once, which makes remembering the whole of the feature.
+ * Whether the guide is open outlives the page, which makes remembering the whole of the feature.
  *
  * Both directions run through storage the browser is allowed to refuse, so the failure path is
- * tested rather than assumed: a reader who cannot be remembered has to see the guide again, which
- * is annoying, where a thrown error would take the header down with it.
+ * tested rather than assumed: a reader who cannot be remembered gets the guide again, which is
+ * annoying, where a thrown error would take the header down with it.
  */
 const withStorage = (store: Storage | undefined, fn: () => void) => {
   const held = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
@@ -29,16 +29,18 @@ const fake = (): Storage => {
 
 afterEach(() => vi.restoreAllMocks())
 
-describe('guideSeen', () => {
-  it('is false until the guide has been closed, and true after', () => {
+describe('guideOpen', () => {
+  it('starts open, and comes back however it was left', () => {
     withStorage(fake(), () => {
-      expect(guideSeen()).toBe(false)
-      rememberGuide()
-      expect(guideSeen()).toBe(true)
+      expect(guideOpen()).toBe(true)
+      rememberGuideOpen(false)
+      expect(guideOpen()).toBe(false)
+      rememberGuideOpen(true)
+      expect(guideOpen()).toBe(true)
     })
   })
 
-  it('shows the guide rather than throwing when storage is refused', () => {
+  it('opens rather than throwing when storage is refused', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const refuses = {
       getItem: () => {
@@ -49,8 +51,8 @@ describe('guideSeen', () => {
       },
     } as unknown as Storage
     withStorage(refuses, () => {
-      expect(guideSeen()).toBe(false)
-      expect(() => rememberGuide()).not.toThrow()
+      expect(guideOpen()).toBe(true)
+      expect(() => rememberGuideOpen(false)).not.toThrow()
     })
   })
 })

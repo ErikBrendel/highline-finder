@@ -234,7 +234,33 @@ header .spacer { flex: 1; }
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--text); margin: 18px 0 4px;
 }
+/* Drawn bigger than the eleven-point capitals beside it, and outside their tracking, so the icon
+   reads as an icon rather than as a very small picture of one. */
+.guide .body h2 .ico {
+  font-size: 15px;
+  letter-spacing: normal;
+  margin-right: 6px;
+  vertical-align: -0.12em;
+}
 .guide .body p { margin: 0 0 8px; }
+/* The one sentence that says what the whole page is about, so it reads ahead of the sections. */
+.guide .body p.lead {
+  font-size: 13px;
+  color: var(--text);
+  margin: 8px 0 2px;
+}
+.guide .body ul { margin: 0; padding-left: 16px; }
+.guide .body li { margin-bottom: 3px; }
+/* The one thing on the page that is a caution rather than an instruction, so it is not prose. */
+.guide .warn {
+  margin-top: 16px;
+  padding: 8px 10px;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  background: rgba(234, 179, 8, 0.08);
+  border-radius: 6px;
+  color: #e6d9a8;
+}
+.guide .warn b { color: #fcd34d; }
 .guide .body b { color: var(--text); font-weight: 600; }
 
 
