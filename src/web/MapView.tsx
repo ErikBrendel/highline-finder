@@ -265,17 +265,18 @@ const emptyCollection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', 
 /**
  * Zoom from which individual lines are drawn.
  *
- * Below it they are not lines. A 400 m span is two pixels at z10, so a whole state's worth is a red
- * smear that says only "there are lines here" -- which is the question the heatmap answers properly,
- * and the heatmap is drawn across exactly the zooms this is not. At z11 a span is five pixels and
- * has a direction; from there it is worth drawing one.
+ * Below it they are not lines. A 400 m span is about a pixel at z9 and five at z11, so a whole
+ * state's worth is a red smear that says only "there are lines here" -- which is the question the
+ * heatmap answers properly. The floor is set where a line first reads as a mark on the map rather
+ * than where it reads as a line: arriving at your own district and finding the map bare is worse
+ * than a little smear, and the two layers overlapping for a few zooms costs nothing.
  *
  * It is also most of the work a phone does with this map: twenty-five thousand two-point features
  * rasterised every frame to produce that smear.
  *
  * The hit layer carries the same floor. A line nobody can see is not one anybody meant to click.
  */
-export const LINES_FROM = 11
+export const LINES_FROM = 9
 
 const rings = (of: [number, number][][]): GeoJSON.FeatureCollection => ({
   type: 'FeatureCollection',
@@ -766,6 +767,15 @@ export function MapView({
       bounds,
       // No padding when the view came from a link: the rectangle is the view, not a thing in it.
       fitBoundsOptions: { padding: initialBbox ? 0 : 40 },
+      /**
+       * A floor under the basemaps rather than a limit on the map.
+       *
+       * OpenStreetMap's tiles stop at z19 and answer 404 above it, so the stack that includes them
+       * simply went blank where someone zoomed right in to place an anchor -- which is exactly when
+       * they would. The orthophoto is a WMS and renders at any scale, but at 20 cm it is fully
+       * resolved by z19 too, so nothing below this is anything but interpolation.
+       */
+      maxZoom: 19,
     })
     map.current = m
     /**

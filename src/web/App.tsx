@@ -36,7 +36,7 @@ import { Guide, useGuide } from './Guide.js'
 import { fitHeader } from './headerFit.js'
 import { useRemembered } from './remembered.js'
 import { watchLocation, type Fix } from './locate.js'
-import { holds, touches, type Bbox } from './inView.js'
+import { touches, type Bbox } from './inView.js'
 import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -812,25 +812,19 @@ export function App() {
    * How much of what is switched on is actually on screen.
    *
    * A tester who zooms to their own village sees empty ground beside a button claiming twenty-two
-   * thousand lines, and cannot tell "nothing here" from "your filters hid it". So the buttons say
+   * thousand lines, and cannot tell "nothing here" from "your filters hid it". So the button says
    * both figures -- but only when they differ, because at the opening view they are the same number
    * twice and a count of everything out of everything is noise.
+   *
+   * Lines only. A hotspot is a cluster whose size depends on the clustering radius rather than on
+   * anything in the terrain, so counting them measures the algorithm and not the ground -- the
+   * layer is there to be looked at, not tallied.
    */
   const view = bbox as Bbox | null
   const linesHere = useMemo(
     () => (view ? visible.filter((c) => touches(view, c.a, c.b)).length : visible.length),
     [view, visible],
   )
-  const spotsHere = useMemo(() => {
-    if (!shownHotspots) return 0
-    if (!view) return shownHotspots.lat.length
-    let n = 0
-    for (let i = 0; i < shownHotspots.lat.length; i++) {
-      if (holds(view, shownHotspots.lat[i]!, shownHotspots.lon[i]!)) n++
-    }
-    return n
-  }, [view, shownHotspots])
-
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
     () =>
@@ -1225,7 +1219,7 @@ export function App() {
               )}
             </button>
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
-              {shownHotspots ? `${here(spotsHere, shownHotspots.lat.length)} hotspots` : 'hotspots'}
+              hotspots
             </button>
             {/* anchors.json is gitignored, so this only exists where the pipeline has run.
                 Vite folds the constant away, dropping the button from the bundle entirely. */}

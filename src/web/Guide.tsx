@@ -60,7 +60,10 @@ export function Guide({ onClose }: { onClose: () => void }) {
 
           <h2><span className="ico">🗺️</span>On the map</h2>
           <ul>
-            <li><b>Lines</b> hang where they are drawn. Click one for its ground profile.</li>
+            <li>
+              <b>Lines</b> hang where they are drawn, from a district-wide zoom inward. Click one
+              for its ground profile.
+            </li>
             <li><b>Hotspots</b> are the same lines clustered, for browsing zoomed out.</li>
             <li>
               <b>Background</b>: orthophoto (satellite), hillshade or OSM, with the option to mix
@@ -88,6 +91,7 @@ export function Guide({ onClose }: { onClose: () => void }) {
             <li>Drag either anchor of a selected line; it re-measures as it moves.</li>
             <li>Right-click the map for <b>Set custom point A</b> / <b>B</b> to plan a span anywhere.</li>
             <li>The address bar follows the view, so a link is the map as you left it.</li>
+            <li>The crosshair beside the zoom buttons puts the map where you are.</li>
           </ul>
 
           <div className="warn">

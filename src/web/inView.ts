@@ -1,9 +1,6 @@
 /** south, west, north, east -- the shape the map reports its viewport in. */
 export type Bbox = [number, number, number, number]
 
-export const holds = (b: Bbox, lat: number, lon: number) =>
-  lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3]
-
 /**
  * Whether a line has anything to do with the view.
  *
