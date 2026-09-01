@@ -260,6 +260,29 @@ function toGeoJson(cs: Candidate[]): GeoJSON.FeatureCollection {
 
 const emptyCollection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
+const rings = (of: [number, number][][]): GeoJSON.FeatureCollection => ({
+  type: 'FeatureCollection',
+  features: of.map((ring) => ({
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'LineString', coordinates: ring },
+  })),
+})
+
+/**
+ * The view to open on before the dataset has arrived, south-west and north-east.
+ *
+ * The map is built and interactive within a frame now, which means it has to be pointed somewhere
+ * before anything is known about what was searched. Berlin and Brandenburg is the honest answer:
+ * the search covers the state, so the state is the view -- and once candidates.json lands the AOIs
+ * it actually holds are fitted over the top, which for a statewide dataset moves the camera by
+ * almost nothing and for a single test chunk moves it to that chunk.
+ */
+const SEARCHED_STATE: [[number, number], [number, number]] = [
+  [11.17, 51.32],
+  [14.83, 53.6],
+]
+
 /** Sectors open in this anchor's mask, as compass bearings in degrees. */
 function openBearings(mask: string, sectorCount: number): number[] {
   const out: number[] = []
@@ -558,7 +581,8 @@ function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
 }
 
 interface Props {
-  data: Dataset
+  /** Null until candidates.json lands. The map is built and usable before it does. */
+  data: Dataset | null
   visible: Candidate[]
   /** Swell the found lines, while the control that counts them is under the pointer. */
   emphasiseLines: boolean
@@ -640,17 +664,18 @@ export function MapView({
   const emphasiseLinesRef = useRef(emphasiseLines)
   emphasiseLinesRef.current = emphasiseLines
   const onViewportRef = useRef(onViewport)
+  /** Whether the user has taken the camera themselves, which stops the dataset from moving it. */
+  const userMoved = useRef(false)
   onViewportRef.current = onViewport
 
   useEffect(() => {
     if (!el.current || map.current) return
-    const aois = data.meta.regions.flatMap((r) => r.aois)
     const bounds = new maplibregl.LngLatBounds()
     if (initialBbox) {
       const [south, west, north, east] = initialBbox
       bounds.extend([west, south]).extend([east, north])
     } else {
-      for (const a of aois) bounds.extend([a.west, a.south]).extend([a.east, a.north])
+      bounds.extend(SEARCHED_STATE[0]).extend(SEARCHED_STATE[1])
     }
     const m = new maplibregl.Map({
       container: el.current,
@@ -875,17 +900,7 @@ export function MapView({
         })
         .catch((e: unknown) => report('loading boundaries.json', e))
 
-      m.addSource('aoi', {
-        type: 'geojson',
-        data: {
-          type: 'FeatureCollection',
-          features: searchedRings(data.meta.regions).map((ring) => ({
-            type: 'Feature',
-            properties: {},
-            geometry: { type: 'LineString', coordinates: ring },
-          })),
-        },
-      })
+      m.addSource('aoi', { type: 'geojson', data: emptyCollection })
       m.addLayer({
         id: 'aoi',
         type: 'line',
@@ -898,17 +913,7 @@ export function MapView({
         },
       })
 
-      m.addSource('urban', {
-        type: 'geojson',
-        data: {
-          type: 'FeatureCollection',
-          features: urbanRings(data.meta.urbanAreas).map((ring) => ({
-            type: 'Feature',
-            properties: {},
-            geometry: { type: 'LineString', coordinates: ring },
-          })),
-        },
-      })
+      m.addSource('urban', { type: 'geojson', data: emptyCollection })
       m.addLayer({
         id: 'urban',
         type: 'line',
@@ -1035,7 +1040,12 @@ export function MapView({
         const b = m.getBounds()
         onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], m.getZoom())
       })
-      m.on('movestart', () => setMenu(null))
+      m.on('movestart', (e) => {
+        // originalEvent is set only for a gesture: a fitBounds of our own must not count as the
+        // user taking over, or opening the page would immediately pin the fallback view.
+        if (e.originalEvent) userMoved.current = true
+        setMenu(null)
+      })
       m.on('click', () => setMenu(null))
 
       m.on('mouseenter', 'lines-hit', () => { m.getCanvas().style.cursor = 'pointer' })
@@ -1089,7 +1099,34 @@ export function MapView({
       map.current = null
       setReady(false)
     }
-  }, [data])
+    // Deliberately built once and never rebuilt. Everything that arrives later -- the dataset, the
+    // borders, every overlay -- is fed into sources that already exist, because tearing the map
+    // down to take delivery would undo the point of showing it early.
+  }, [])
+
+  /**
+   * The searched outlines, once there is a dataset to draw them from.
+   *
+   * Also the moment the camera settles: with no view in the link the map opened on the whole state,
+   * and the AOIs are the first thing that can improve on that. Only while the user has not moved --
+   * a camera that jumps a second after you started panning is a map fighting you.
+   */
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !data) return
+    ;(m.getSource('aoi') as maplibregl.GeoJSONSource | undefined)?.setData(
+      rings(searchedRings(data.meta.regions)),
+    )
+    ;(m.getSource('urban') as maplibregl.GeoJSONSource | undefined)?.setData(
+      rings(urbanRings(data.meta.urbanAreas)),
+    )
+    if (initialBbox || userMoved.current) return
+    const bounds = new maplibregl.LngLatBounds()
+    for (const a of data.meta.regions.flatMap((r) => r.aois)) {
+      bounds.extend([a.west, a.south]).extend([a.east, a.north])
+    }
+    if (!bounds.isEmpty()) m.fitBounds(bounds, { padding: 40, animate: false })
+  }, [data, ready, initialBbox])
 
   useEffect(() => {
     const m = map.current
@@ -1248,7 +1285,7 @@ export function MapView({
       : custom.a && custom.b
         ? { a: custom.a, b: custom.b }
         : null
-    src?.setData(ends ? bandFeature(ends.a, ends.b, data.meta.params) : emptyCollection)
+    src?.setData(ends && data ? bandFeature(ends.a, ends.b, data.meta.params) : emptyCollection)
   }, [selected, custom, data, ready])
 
   /**

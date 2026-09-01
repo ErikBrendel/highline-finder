@@ -1,4 +1,3 @@
-import { fromArrayBuffer } from 'geotiff'
 import { Grid } from './grid.js'
 
 const NODATA = -9999
@@ -17,6 +16,10 @@ const NODATA = -9999
  * done with them.
  */
 export async function blitGeoTiff(bytes: ArrayBuffer, dest: Grid): Promise<void> {
+  // Imported here rather than at the top so the decoder is not in the entry bundle. Nothing on
+  // first paint reads a raster -- the map, the borders and the lines are all vector -- and this is
+  // the only door to geotiff, so deferring it defers the whole library and its decoders with it.
+  const { fromArrayBuffer } = await import('geotiff')
   const tiff = await fromArrayBuffer(bytes)
   const img = await tiff.getImage()
   const [ox, oy] = img.getOrigin()

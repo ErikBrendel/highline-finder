@@ -4,6 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/favicon.svg" />
+    <!--
+      The dataset, asked for while the browser is still parsing this file.
+
+      Without it the request cannot start until the bundle has downloaded, parsed and mounted React
+      -- so the largest thing on the page queued behind the smallest, for no reason other than
+      where the fetch is written. `crossorigin` is not optional: it makes the preload's CORS mode
+      match what fetch() asks for, and a mismatch downloads the file twice instead of once.
+    -->
+    <link rel="preload" as="fetch" crossorigin href="/candidates.json" />
+    <link rel="preload" as="fetch" crossorigin href="/hotspots.json" />
     <title>Highline Finder</title>
   </head>
   <body>

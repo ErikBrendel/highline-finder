@@ -18,6 +18,7 @@ import {
 } from './coarse.js'
 import { packAnchors, packSectors, scanAnchors } from './openness.js'
 import { dedupe, endpointsOf, locate, pairsOf, thinCrossings } from './lines.js'
+import { shipped } from './shipped.js'
 import { HOTSPOT_RADIUS, clusterSpots, isWalkable, spotOf } from './hotspots.js'
 import type { Grid, Pos } from '../shared/grid.js'
 import type { Anchor } from './openness.js'
@@ -817,7 +818,7 @@ async function main() {
     // Split rather than labelled: the list a line is in is its kind, so the word does not have to be
     // repeated on every line. `kind` is dropped here for the same reason and put back on load.
     const lines = byKind<Candidate[]>(() => [])
-    for (const { kind, ...rest } of finalCandidates) lines[kind].push(rest as Candidate)
+    for (const c of finalCandidates) lines[c.kind].push(shipped(c) as Candidate)
     say(
       `  ${LINE_KINDS.map((k) => `${lines[k].length} ${k}`).join(', ')}`,
     )

@@ -993,9 +993,17 @@ export function App() {
   }, [search])
 
   if (error) return <div className="loading">Failed to load candidates.json &mdash; {error}</div>
-  if (!data || sagPct === null) return <div className="loading">Loading&hellip;</div>
 
-  const { stats, regions } = data.meta
+  /**
+   * Everything below tolerates there being no dataset yet, and that is the point.
+   *
+   * candidates.json is four megabytes over the wire, and the whole page used to be one
+   * `Loading…` in the corner until it landed. Nothing about the map needs it: the basemaps, the
+   * borders, the terrain probe and placing a line by hand all work on their own, so they are on
+   * screen within a frame and the found lines drop in on top when they arrive. Every readout that
+   * genuinely does depend on the file says so by omitting its figure rather than by blocking.
+   */
+  const regions = data?.meta.regions ?? []
   const aoiCount = regions.reduce((n, r) => n + r.aois.length, 0)
   const areaKm2 = regions.reduce((s, r) => s + r.width * r.height, 0) / 1e6
   // Only regions that were actually searched know their terrain range; one that has merely been
@@ -1007,24 +1015,33 @@ export function App() {
   // spreading that many arguments exceeds the call stack.
   const highest = (pick: (c: Candidate) => number, floor: number) =>
     Math.ceil(candidates.reduce((m, c) => Math.max(m, pick(c)), floor))
-  const maxScore = highest((c) => c.score, 1)
-  const maxLen = highest((c) => c.length, 100)
-  const minLen = Math.floor(data.meta.params.minLength)
-  const maxExp = highest((c) => c.exposure, 10)
-  // The pipeline already caps offlevel, so the slider only needs to reach that cap.
-  const offLevelCap = Math.ceil(data.meta.params.maxOffLevelRatio * 100 * 10) / 10
-  const sagFloor = data.meta.params.sagRatio * 100
+  /** Where each slider's track ends, which only the dataset can say. Null until it has. */
+  const bounds =
+    data && sagPct !== null
+      ? {
+          sag: sagPct,
+          sagFloor: data.meta.params.sagRatio * 100,
+          maxScore: highest((c) => c.score, 1),
+          minLen: Math.floor(data.meta.params.minLength),
+          maxLen: highest((c) => c.length, 100),
+          maxExp: highest((c) => c.exposure, 10),
+          // The pipeline already caps offlevel, so the slider only needs to reach that cap.
+          offLevelCap: Math.ceil(data.meta.params.maxOffLevelRatio * 100 * 10) / 10,
+        }
+      : null
 
   return (
     <>
       <header>
         <h1>Highline Finder</h1>
-        <span className="meta">
-          {aoiCount} AOI{aoiCount === 1 ? '' : 's'}
-          {regions.length !== aoiCount && ` in ${regions.length} regions`}
-          {' · '}{areaKm2.toFixed(1)} km&sup2;
-          {' · '}terrain {groundMin}&ndash;{groundMax} m
-        </span>
+        {data && (
+          <span className="meta">
+            {aoiCount} AOI{aoiCount === 1 ? '' : 's'}
+            {regions.length !== aoiCount && ` in ${regions.length} regions`}
+            {' · '}{areaKm2.toFixed(1)} km&sup2;
+            {' · '}terrain {groundMin}&ndash;{groundMax} m
+          </span>
+        )}
         {bbox && (
           <a
             className="external"
@@ -1040,9 +1057,11 @@ export function App() {
         )}
         <span className="spacer" />
         <span className="meta">
-          {stats.anchorsKept.toLocaleString()} anchors {' · '}
-          {stats.candidatesAfterDedup.toLocaleString()} distinct lines {' · '}
-          {(stats.runtimeMs / 1000).toFixed(1)}s
+          {data
+            ? `${data.meta.stats.anchorsKept.toLocaleString()} anchors · ` +
+              `${data.meta.stats.candidatesAfterDedup.toLocaleString()} distinct lines · ` +
+              `${(data.meta.stats.runtimeMs / 1000).toFixed(1)}s`
+            : 'loading the lines…'}
         </span>
       </header>
 
@@ -1083,7 +1102,7 @@ export function App() {
               onFocus={() => setEmphasiseLines(true)}
               onBlur={() => setEmphasiseLines(false)}
             >
-              {visible.length} lines
+              {data ? `${visible.length} lines` : 'lines'}
             </button>
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
               {shownHotspots ? `${shownHotspots.lat.length.toLocaleString()} hotspots` : 'hotspots'}
@@ -1104,7 +1123,7 @@ export function App() {
               </button>
             )}
             <button data-active={showAreas} onClick={() => setShowAreas(!showAreas)}>
-              {data.meta.regions.length} areas
+              {data ? `${regions.length} areas` : 'areas'}
             </button>
             <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
               filters
@@ -1116,17 +1135,26 @@ export function App() {
               layer={debugLayer}
               mask={mask}
               tiles={tiles}
-              regions={data.meta.regions}
+              regions={regions}
             />
           )}
 
-          {showFilters && (
+          {showFilters && !bounds && (
+            <div className="filters">
+              <div className="note" style={{ marginBottom: 0 }}>
+                Every range here is fitted to the dataset &mdash; the longest line in it, the sag it
+                was generated at &mdash; so the filters arrive with it.
+              </div>
+            </div>
+          )}
+
+          {showFilters && data && bounds && (
             <div className="filters">
               <h2>Rigging</h2>
               <Slider
                 label="Midspan sag"
-                value={sagPct}
-                min={sagFloor}
+                value={bounds.sag}
+                min={bounds.sagFloor}
                 max={10}
                 step={0.5}
                 unit=" % of span"
@@ -1135,7 +1163,7 @@ export function App() {
               />
               <div className="note">
                 {rescored.length} of {candidates.length} lines still clear the terrain at{' '}
-                {sagPct.toFixed(1)} %. Cannot go below {sagFloor.toFixed(1)} % &mdash; the dataset
+                {bounds.sag.toFixed(1)} %. Cannot go below {bounds.sagFloor.toFixed(1)} % &mdash; the dataset
                 was generated there, so looser lines were never evaluated.
               </div>
 
@@ -1159,7 +1187,7 @@ export function App() {
               </div>
 
               <h2 style={{ marginTop: 14 }}>Filters</h2>
-              <Slider label="Min score" value={Math.min(minScore, maxScore)} min={0} max={maxScore} step={1} unit="" onChange={setMinScore} />
+              <Slider label="Min score" value={Math.min(minScore, bounds.maxScore)} min={0} max={bounds.maxScore} step={1} unit="" onChange={setMinScore} />
               {/* Logarithmic, because the search spans a decade and the short end is where the
                   choices are: half the dataset is under 150 m, which is a fifth of a linear track.
                   The floor is the shortest line the pipeline will report rather than zero, both
@@ -1167,26 +1195,26 @@ export function App() {
               <RangeSlider
                 label="Length"
                 from={minLength}
-                to={Math.min(maxLength, maxLen)}
-                min={minLen}
-                max={maxLen}
+                to={Math.min(maxLength, bounds.maxLen)}
+                min={bounds.minLen}
+                max={bounds.maxLen}
                 step={10}
                 unit=" m"
                 log
                 onChange={(from, to) => {
                   // At either end of the track the filter stops filtering rather than pinning
                   // itself to a number that came from whichever dataset happened to be loaded.
-                  setMinLength(from <= minLen ? 0 : from)
-                  setMaxLength(to >= maxLen ? Infinity : to)
+                  setMinLength(from <= bounds.minLen ? 0 : from)
+                  setMaxLength(to >= bounds.maxLen ? Infinity : to)
                 }}
               />
-              <Slider label="Min exposure (air below)" value={minExposure} min={0} max={maxExp} step={1} unit=" m" onChange={setMinExposure} />
+              <Slider label="Min exposure (air below)" value={minExposure} min={0} max={bounds.maxExp} step={1} unit=" m" onChange={setMinExposure} />
               <Slider label="Max canopy blocked" value={maxCanopy} min={0} max={100} step={1} unit=" %" onChange={setMaxCanopy} />
               <Slider
                 label="Max offlevel"
-                value={Math.min(maxOffLevel, offLevelCap)}
+                value={Math.min(maxOffLevel, bounds.offLevelCap)}
                 min={0}
-                max={offLevelCap}
+                max={bounds.offLevelCap}
                 step={0.1}
                 unit=" % of span"
                 onChange={setMaxOffLevel}
@@ -1210,7 +1238,7 @@ export function App() {
             anchorDump={anchorDump}
             hotspots={showHotspots ? shownHotspots : null}
             mask={debugLayer === 'coarse' ? mask : null}
-            regions={debugLayer === 'regions' ? data.meta.regions : null}
+            regions={debugLayer === 'regions' ? regions : null}
             showAreas={showAreas}
             showUrban={kinds.has('urban')}
             tiles={tileLayer ? tiles : null}
@@ -1228,7 +1256,7 @@ export function App() {
             }}
           />
 
-          {(selected || planPending) && (
+          {(selected || planPending) && data && (
             <Details
               c={detailed}
               profile={shownProfile}
