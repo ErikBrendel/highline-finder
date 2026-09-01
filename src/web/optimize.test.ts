@@ -7,8 +7,7 @@ import {
   PLANNED_REFINE_RADIUS,
   PLANNED_REFINE_RINGS,
   PLANNED_REFINE_FINEST,
-  frameMargin,
-  PLANNED_REFINE_PACE,
+  scanMargin,
 } from './optimize.js'
 import { windowsFor } from './terrain.js'
 import { measuredHalfWidth } from '../shared/profile.js'
@@ -111,15 +110,15 @@ describe('optimizeStep', () => {
 })
 
 describe('optimizeFrame', () => {
-  it('reports the spacing it reached, so the next frame carries on rather than starting over', () => {
+  it('reports the spacing it reached, so the next frame carries on rather than starting over', async () => {
     const g = terrain(1 / 2)
     const at = { a: { e: 408085, n: 5784100 }, b: { e: 408315, n: 5784100 } }
     const o = { origin: at, ground: g, surface: g, sagRatio: 0.05, params: p, rig: null, reach: 1 }
-    const first = optimizeFrame(at, o, startingSpacing(1))!
+    const first = (await optimizeFrame(at, o, startingSpacing(1)))!
     expect(first.spacing).toBeLessThanOrEqual(startingSpacing(1))
     expect(first.spacing).toBeGreaterThanOrEqual(PLANNED_REFINE_FINEST)
     // Handed its own spacing back, it picks up from there rather than re-walking the ladder.
-    const second = optimizeFrame(first.plan, o, first.spacing)
+    const second = await optimizeFrame(first.plan, o, first.spacing)
     if (second) expect(second.spacing).toBeLessThanOrEqual(first.spacing)
   })
 
@@ -134,11 +133,11 @@ describe('optimizeFrame', () => {
    * each frame is what the walk stopped doing, and a test that restarted it would be measuring
    * something the app no longer runs.
    */
-  const settle = (reach: number) => {
+  const settle = async (reach: number) => {
     let cur = start
     let spacing = startingSpacing(reach)
     for (let i = 0; i < 4000; i++) {
-      const advance = optimizeFrame(cur, opts(reach), spacing)
+      const advance = await optimizeFrame(cur, opts(reach), spacing)
       if (!advance) break
       cur = advance.plan
       spacing = advance.spacing
@@ -151,17 +150,18 @@ describe('optimizeFrame', () => {
       Math.hypot(pl.b.e - start.b.e, pl.b.n - start.b.n),
     )
 
-  it('stays inside the careful radius at reach 1 and travels past it at a bigger reach', () => {
-    expect(wander(settle(1))).toBeLessThanOrEqual(PLANNED_REFINE_RADIUS + 1e-9)
-    expect(wander(settle(4))).toBeGreaterThan(PLANNED_REFINE_RADIUS)
-    expect(wander(settle(4))).toBeLessThanOrEqual(PLANNED_REFINE_RADIUS * 4 + 1e-9)
+  it('stays inside the careful radius at reach 1 and travels past it at a bigger reach', async () => {
+    expect(wander(await settle(1))).toBeLessThanOrEqual(PLANNED_REFINE_RADIUS + 1e-9)
+    const wide = wander(await settle(4))
+    expect(wide).toBeGreaterThan(PLANNED_REFINE_RADIUS)
+    expect(wide).toBeLessThanOrEqual(PLANNED_REFINE_RADIUS * 4 + 1e-9)
   })
 
-  it('finishes at the finest step however coarsely it travelled', () => {
+  it('finishes at the finest step however coarsely it travelled', async () => {
     // The point of halving: a reach-8 run covers eight times the ground but does not leave the
     // anchors on an eight-times-coarser lattice. Nothing is left for a centimetre step to find.
     for (const reach of [1, 8]) {
-      const settled = settle(reach)
+      const settled = await settle(reach)
       expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_FINEST)).toBeNull()
     }
   })
@@ -195,7 +195,7 @@ describe('walking out of an obstruction', () => {
   const o = { origin: start, ground, surface, sagRatio: 0.05, params: p, rig: null, reach: 1 }
   const measure = (pl: typeof start) => planLine(pl.a, pl.b, ground, surface, 0.05, p)!
 
-  it('walks a line buried in the wall out to one that qualifies', () => {
+  it('walks a line buried in the wall out to one that qualifies', async () => {
     const before = measure(start)
     expect(before.violations.length).toBeGreaterThan(0)
     expect(before.penalty).toBeGreaterThan(0)
@@ -204,7 +204,7 @@ describe('walking out of an obstruction', () => {
     let cur = start
     let spacing = startingSpacing(o.reach)
     for (let i = 0; i < 4000; i++) {
-      const advance = optimizeFrame(cur, o, spacing)
+      const advance = await optimizeFrame(cur, o, spacing)
       if (!advance) break
       cur = advance.plan
       spacing = advance.spacing
@@ -220,38 +220,53 @@ describe('walking out of an obstruction', () => {
 })
 
 
-describe('frameMargin', () => {
+describe('scanMargin', () => {
   /**
-   * The property the whole fetch-ahead rests on. The scan cannot ask for terrain, so anything one
-   * frame may evaluate has to be inside what was fetched before that frame ran -- otherwise the run
-   * does not stall, it quietly decides the line cannot be improved.
+   * The property the fetch-ahead rests on. The scan cannot ask for terrain, so every position one
+   * scan evaluates has to be inside what was fetched before it ran -- otherwise the run does not
+   * stall, it quietly decides the line cannot be improved.
    *
-   * A frame moves an anchor by its budget plus the overshoot of the step that crosses it, and from
-   * there evaluates positions another patch radius out. `startingSpacing` is the widest spacing a
-   * run ever uses, so it is the worst case for every frame after the first too.
+   * One honeycomb, and no more: the patch is `PLANNED_REFINE_RINGS` spacings across, and each of
+   * its positions is measured as a line with its own band. Where the walk goes after that is the
+   * next scan's problem, and the next scan asks for its own honeycomb.
    */
-  it('covers every line one frame could evaluate, to the edges of the band each one reads', () => {
+  it('covers every line one scan could evaluate, to the edges of the band each one reads', () => {
     const a = { e: 400_100, n: 5_785_100 }
     const b = { e: 400_620, n: 5_785_380 }
     const span = Math.hypot(b.e - a.e, b.n - a.n)
+    // Distance from a point to the original segment, which is what the margin is a bound on.
+    const away = (e: number, n: number) => {
+      const [de, dn] = [b.e - a.e, b.n - a.n]
+      const t = Math.min(1, Math.max(0, ((e - a.e) * de + (n - a.n) * dn) / (span * span)))
+      return Math.hypot(e - (a.e + de * t), n - (a.n + dn * t))
+    }
     for (const reach of [1, 2, 8, 32]) {
       const spacing = startingSpacing(reach)
-      const held = new Set(
-        windowsFor(a, b, frameMargin(span, reach, spacing, p)).map(([x, y]) => `${x}_${y}`),
-      )
-      const radius = PLANNED_REFINE_PACE * reach + 2 * PLANNED_REFINE_RINGS * spacing
-      // Both anchors at every extreme of their discs, which is where the corridor is widest.
+      const margin = scanMargin(span, spacing, p)
+      const held = new Set(windowsFor(a, b, margin).map(([x, y]) => `${x}_${y}`))
+      const radius = PLANNED_REFINE_RINGS * spacing
+      // Both anchors at every extreme of the patch, which is where the corridor is widest.
       for (let i = 0; i < 32; i++) {
         for (let j = 0; j < 32; j++) {
-          const at = (o: typeof a, k: number) => ({
+          const moved = (o: typeof a, k: number) => ({
             e: o.e + radius * Math.cos((k / 32) * 2 * Math.PI),
             n: o.n + radius * Math.sin((k / 32) * 2 * Math.PI),
           })
-          const [a2, b2] = [at(a, i), at(b, j)]
+          const [a2, b2] = [moved(a, i), moved(b, j)]
           const len = Math.hypot(b2.e - a2.e, b2.n - a2.n)
-          for (const w of windowsFor(a2, b2, measuredHalfWidth(len, p))) {
-            expect(held).toContain(`${w[0]}_${w[1]}`)
+          // The band that line is measured over, out to its own widest point, stays inside the
+          // margin. Asserted in metres and not only in windows: a window is 256 m across, so a
+          // margin several metres short of what is read still lands in the same squares.
+          const hw = measuredHalfWidth(len, p)
+          for (let k = 0; k <= 20; k++) {
+            const t = k / 20
+            const [e, n] = [a2.e + (b2.e - a2.e) * t, a2.n + (b2.n - a2.n) * t]
+            const [ue, un] = [-(b2.n - a2.n) / len, (b2.e - a2.e) / len]
+            for (const off of [-hw, 0, hw]) {
+              expect(away(e + ue * off, n + un * off)).toBeLessThanOrEqual(margin + 1e-9)
+            }
           }
+          for (const w of windowsFor(a2, b2, hw)) expect(held).toContain(`${w[0]}_${w[1]}`)
         }
       }
     }

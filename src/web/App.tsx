@@ -37,7 +37,7 @@ import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
-import { frameMargin, optimizeFrame, startingSpacing } from './optimize.js'
+import { optimizeFrame, scanMargin, startingSpacing } from './optimize.js'
 import { emitProbes } from './probeOverlay.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
@@ -821,15 +821,35 @@ export function App() {
       if (!live.a || !live.b) return endRun()
       const [ae, an] = toUtm33(live.a.lat, live.a.lon)
       const [be, bn] = toUtm33(live.b.lat, live.b.lon)
-      const a = { e: ae, n: an }
-      const b = { e: be, n: bn }
-      // Everything this frame can walk onto or read from, around the line as it stands. Awaited
-      // between frames, which is the only place the run is asynchronous -- inside a frame the scan
-      // cannot ask for anything, and unfetched ground reads as a bad position rather than as a
-      // missing one. Windows already held resolve without a request.
-      const span = Math.hypot(b.e - a.e, b.n - a.n)
+      // Collected for the frame and handed over in one go, so the overlay rewrites its source once
+      // per frame rather than once per measurement.
+      const probes: number[] = []
+      let advance
       try {
-        await ensureTerrain(a, b, frameMargin(span, reach, spacing, meta.params))
+        advance = await optimizeFrame(
+          { a: { e: ae, n: an }, b: { e: be, n: bn } },
+          {
+            origin,
+            ground: groundSampler,
+            surface: surfaceSampler,
+            sagRatio: sagPct / 100,
+            params: meta.params,
+            rig,
+            scene,
+            reach,
+            onProbe: (e, n) => probes.push(e, n),
+            // One honeycomb, around wherever the walk has got to, before every scan it makes.
+            // Nothing is fetched for ground the line never reaches, and a step that stays inside
+            // the window it started in -- almost all of them -- asks for nothing.
+            ensure: (plan, at) =>
+              ensureTerrain(
+                plan.a,
+                plan.b,
+                scanMargin(Math.hypot(plan.b.e - plan.a.e, plan.b.n - plan.a.n), at, meta.params),
+              ),
+          },
+          spacing,
+        )
       } catch (e: unknown) {
         report('fetching elevation for the optimiser to walk over', e)
         if (stopped) return
@@ -837,24 +857,6 @@ export function App() {
         return endRun()
       }
       if (stopped) return
-      // Collected for the frame and handed over in one go, so the overlay rewrites its source once
-      // per frame rather than once per measurement.
-      const probes: number[] = []
-      const advance = optimizeFrame(
-        { a, b },
-        {
-          origin,
-          ground: groundSampler,
-          surface: surfaceSampler,
-          sagRatio: sagPct / 100,
-          params: meta.params,
-          rig,
-          scene,
-          reach,
-          onProbe: (e, n) => probes.push(e, n),
-        },
-        spacing,
-      )
       emitProbes(probes)
       if (!advance) return endRun()
       spacing = advance.spacing

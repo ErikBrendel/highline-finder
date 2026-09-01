@@ -96,7 +96,7 @@ export const NEIGHBOURHOOD: Pos[] = (() => {
  * Scaled by reach, so a wide run takes about as long as a narrow one -- otherwise a reach-32 run
  * would be four hundred frames of watching an anchor cross a field.
  */
-export const PLANNED_REFINE_PACE = 2
+const PLANNED_REFINE_PACE = 2
 
 /**
  * Steps a frame may take however little ground they cover, so a walk that has converged cannot spin
@@ -143,6 +143,14 @@ interface Options {
    * checked.
    */
   onProbe?: (e: number, n: number) => void
+  /**
+   * Puts the ground one scan reads into the sampler's hands, before that scan runs.
+   *
+   * The only asynchronous thing in the walk, and the reason `optimizeFrame` is. Called with the
+   * line as it stands and the spacing about to be scanned, which is exactly `scanMargin`'s two
+   * arguments. Omitted in tests, which build their terrain up front and have nothing to fetch.
+   */
+  ensure?: (plan: Plan, spacing: number) => Promise<unknown>
 }
 
 function rank(a: Pos, b: Pos, o: Options): { violations: number; score: number } | null {
@@ -205,7 +213,7 @@ export interface Advance {
 export const startingSpacing = (reach: number) => PLANNED_REFINE_START * reach
 
 /**
- * How much ground either side of the line the next frame needs in hand.
+ * How much ground either side of the line one scan reads.
  *
  * The scan is synchronous and reads elevation through a sampler that answers NaN for ground that
  * has not been fetched. A NaN makes `rank` fail, a failed rank is skipped exactly like a bad
@@ -213,25 +221,17 @@ export const startingSpacing = (reach: number) => PLANNED_REFINE_START * reach
  * does not stall the walk, it silently walls it in and reports that the line cannot be improved.
  * That is the one failure here worth designing against, because it looks like an answer.
  *
- * So terrain is fetched ahead of the walk. What it is *not* is the whole disc the walk might
- * eventually reach: that was provisioning for a journey almost no run takes, and it grew with reach
- * -- a reach-16 run pulled thirty elevation windows before its first step, against three for the
- * same line dragged by hand, and paid for every one of them whether the walk went that way or not.
+ * So terrain is fetched ahead of the scan, and this is the whole of what a scan can see: the patch,
+ * which is `PLANNED_REFINE_RINGS` spacings across, and the band each line in it is measured over.
+ * Not where the run might end up -- one honeycomb, around where the line is standing. A step moves
+ * the line, the next scan is a different honeycomb, and whatever that one needs is asked for then.
  *
- * A frame is bounded, and that is the thing to fetch. An anchor travels at most `PLANNED_REFINE_PACE
- * * reach` before the budget stops it, plus the overshoot of the step that crosses it, which is at
- * most the patch radius; and from wherever it lands the scan evaluates positions another patch
- * radius out. Two patch radii and a budget, then, around the line as it stands now -- so the fetch
- * follows the walk instead of anticipating it, and a run that converges after two frames pays for
- * two frames. Between frames is the one place this can be asked for: the tick chain is already
- * asynchronous, and windows already held cost nothing to ask for again.
- *
- * `spacing` only ever halves over a run, so the first frame is the widest and every one after it
- * asks for less.
+ * A honeycomb is small against a 256 m elevation window -- three metres at reach 1, forty-eight at
+ * reach 16 -- so most steps land inside ground already held and ask for nothing at all.
  */
-export function frameMargin(span: number, reach: number, spacing: number, p: Params): number {
-  const travel = PLANNED_REFINE_PACE * reach + 2 * PLANNED_REFINE_RINGS * spacing
-  return travel + measuredHalfWidth(span + 2 * travel, p)
+export function scanMargin(span: number, spacing: number, p: Params): number {
+  const patch = PLANNED_REFINE_RINGS * spacing
+  return patch + measuredHalfWidth(span + 2 * patch, p)
 }
 
 /**
@@ -251,7 +251,11 @@ export function frameMargin(span: number, reach: number, spacing: number, p: Par
  * Null means even the finest patch cannot improve the line, which is the only thing that stops a
  * run.
  */
-export function optimizeFrame(current: Plan, o: Options, spacing: number): Advance | null {
+export async function optimizeFrame(
+  current: Plan,
+  o: Options,
+  spacing: number,
+): Promise<Advance | null> {
   const budget = PLANNED_REFINE_PACE * o.reach
   let cur = current
   let at = spacing
@@ -259,6 +263,12 @@ export function optimizeFrame(current: Plan, o: Options, spacing: number): Advan
   let moved = false
 
   for (let i = 0; i < MAX_STEPS_PER_FRAME && travelled < budget; i++) {
+    // Before each step, not before each frame: the honeycomb about to be scanned is the honeycomb
+    // around where the line is now, and a step moves it. Awaited here because this is the only
+    // place the walk can wait -- and it is not a wait in the ordinary case, since a step lands well
+    // inside the window it started in. Halving below only ever shrinks the patch, so a finer retry
+    // reads inside what this already covers.
+    await o.ensure?.(cur, at)
     let next = optimizeStep(cur, o, at)
     while (!next && at > PLANNED_REFINE_FINEST) {
       at = Math.max(PLANNED_REFINE_FINEST, at / 2)
