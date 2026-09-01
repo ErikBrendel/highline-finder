@@ -36,7 +36,7 @@ import { Guide, useGuide } from './Guide.js'
 import { fitHeader } from './headerFit.js'
 import { useRemembered } from './remembered.js'
 import { watchLocation, type Fix } from './locate.js'
-import { touches, type Bbox } from './inView.js'
+import { overlaps, touches, type Bbox } from './inView.js'
 import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -825,6 +825,27 @@ export function App() {
     () => (view ? visible.filter((c) => touches(view, c.a, c.b)).length : visible.length),
     [view, visible],
   )
+  /**
+   * Whether the view has left the searched ground entirely.
+   *
+   * Panning off the state is not an error and nothing stops it -- the basemap keeps working, so the
+   * map looks fine and is simply empty, which reads as "this tool found nothing in my town" rather
+   * than "this tool has never looked at my town". The two are worth telling apart, and the first
+   * person to press the locate button from somewhere that is not Brandenburg will need it.
+   *
+   * Measured against the areas actually searched rather than a rectangle round the state, so it is
+   * the honest boundary: overlap even one of them and there was a search here.
+   */
+  const offMap = useMemo(
+    () =>
+      !!view &&
+      !!meta &&
+      !meta.regions.some((r) =>
+        r.aois.some((a) => overlaps(view, [a.south, a.west, a.north, a.east])),
+      ),
+    [view, meta],
+  )
+
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
     () =>
@@ -1380,6 +1401,13 @@ export function App() {
               setZoom(z)
             }}
           />
+
+          {offMap && (
+            <div className="offmap">
+              Nothing has been searched here. This map covers Berlin and Brandenburg &mdash; zoom
+              out to find your way back.
+            </div>
+          )}
 
           {(selected || planPending) && meta && (
             <Details

@@ -668,6 +668,32 @@ header .spacer { flex: 1; }
   .details .cols { gap: 6px; }
 }
 
+/*
+ * Shown over the middle of the map when the view has left the searched ground altogether.
+ *
+ * Under the control column and the details card in the stack, and transparent to the pointer: it is
+ * an explanation for an empty map, not a thing to interact with, and it must never be what a drag
+ * lands on.
+ */
+.offmap {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(340px, calc(100% - 40px));
+  padding: 10px 14px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  background: rgba(15, 17, 21, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
 /* Legend for whichever debug view is active. */
 .legendbox {
   padding: 9px 11px;

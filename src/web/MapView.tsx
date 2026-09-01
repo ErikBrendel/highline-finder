@@ -1046,7 +1046,9 @@ export function MapView({
         source: 'lines',
         minzoom: LINES_FROM,
         layout: { ...SPAN_CAPS },
-        paint: { 'line-color': '#000', 'line-opacity': 0, 'line-width': 14 },
+        // Wider than it looks, because it does not look like anything: a finger is not a cursor,
+        // and tapping a line is how a line gets read.
+        paint: { 'line-color': '#000', 'line-opacity': 0, 'line-width': 24 },
       })
       m.addLayer({
         id: 'lines',
