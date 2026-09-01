@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { guideOpen, rememberGuideOpen } from './Guide.js'
+import { readFlag, writeFlag } from './remembered.js'
 
 /**
- * Whether the guide is open outlives the page, which makes remembering the whole of the feature.
+ * Whether the guide and the filter panel are open outlives the page, which makes remembering the
+ * whole of both features.
  *
  * Both directions run through storage the browser is allowed to refuse, so the failure path is
- * tested rather than assumed: a reader who cannot be remembered gets the guide again, which is
- * annoying, where a thrown error would take the header down with it.
+ * tested rather than assumed: a reader who cannot be remembered gets the panel again, which is
+ * annoying, where a thrown error would take the page down with it.
  */
+const KEY = 'a-switch'
 const withStorage = (store: Storage | undefined, fn: () => void) => {
   const held = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
   Object.defineProperty(globalThis, 'localStorage', { value: store, configurable: true })
@@ -29,18 +31,20 @@ const fake = (): Storage => {
 
 afterEach(() => vi.restoreAllMocks())
 
-describe('guideOpen', () => {
-  it('starts open, and comes back however it was left', () => {
+describe('readFlag', () => {
+  it('starts at the fallback, and comes back however it was left', () => {
     withStorage(fake(), () => {
-      expect(guideOpen()).toBe(true)
-      rememberGuideOpen(false)
-      expect(guideOpen()).toBe(false)
-      rememberGuideOpen(true)
-      expect(guideOpen()).toBe(true)
+      expect(readFlag(KEY, true)).toBe(true)
+      writeFlag(KEY, false)
+      expect(readFlag(KEY, false)).toBe(false)
+      // Remembered false is not the same as never written: the fallback must not overrule it.
+      expect(readFlag(KEY, true)).toBe(false)
+      writeFlag(KEY, true)
+      expect(readFlag(KEY, false)).toBe(true)
     })
   })
 
-  it('opens rather than throwing when storage is refused', () => {
+  it('falls back rather than throwing when storage is refused', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const refuses = {
       getItem: () => {
@@ -51,8 +55,9 @@ describe('guideOpen', () => {
       },
     } as unknown as Storage
     withStorage(refuses, () => {
-      expect(guideOpen()).toBe(true)
-      expect(() => rememberGuideOpen(false)).not.toThrow()
+      expect(readFlag(KEY, true)).toBe(true)
+      expect(readFlag(KEY, false)).toBe(false)
+      expect(() => writeFlag(KEY, false)).not.toThrow()
     })
   })
 })

@@ -96,7 +96,7 @@ export const NEIGHBOURHOOD: Pos[] = (() => {
  * Scaled by reach, so a wide run takes about as long as a narrow one -- otherwise a reach-32 run
  * would be four hundred frames of watching an anchor cross a field.
  */
-const PLANNED_REFINE_PACE = 2
+export const PLANNED_REFINE_PACE = 2
 
 /**
  * Steps a frame may take however little ground they cover, so a walk that has converged cannot spin
@@ -205,7 +205,7 @@ export interface Advance {
 export const startingSpacing = (reach: number) => PLANNED_REFINE_START * reach
 
 /**
- * How much ground either side of the line a run needs in hand before it starts.
+ * How much ground either side of the line the next frame needs in hand.
  *
  * The scan is synchronous and reads elevation through a sampler that answers NaN for ground that
  * has not been fetched. A NaN makes `rank` fail, a failed rank is skipped exactly like a bad
@@ -213,17 +213,25 @@ export const startingSpacing = (reach: number) => PLANNED_REFINE_START * reach
  * does not stall the walk, it silently walls it in and reports that the line cannot be improved.
  * That is the one failure here worth designing against, because it looks like an answer.
  *
- * So the whole space the run may visit is fetched up front rather than chased. Each anchor stays
- * within `PLANNED_REFINE_RADIUS * reach` of where it started, and the segment between any two such
- * points lies inside the original segment fattened by that radius -- the region is convex, and both
- * ends are in it. Add what measuring a line reads sideways, at the longest the line can become.
+ * So terrain is fetched ahead of the walk. What it is *not* is the whole disc the walk might
+ * eventually reach: that was provisioning for a journey almost no run takes, and it grew with reach
+ * -- a reach-16 run pulled thirty elevation windows before its first step, against three for the
+ * same line dragged by hand, and paid for every one of them whether the walk went that way or not.
  *
- * It is paid once, on the click that starts a run, and it is not padding: it is the set of positions
- * the run is about to evaluate.
+ * A frame is bounded, and that is the thing to fetch. An anchor travels at most `PLANNED_REFINE_PACE
+ * * reach` before the budget stops it, plus the overshoot of the step that crosses it, which is at
+ * most the patch radius; and from wherever it lands the scan evaluates positions another patch
+ * radius out. Two patch radii and a budget, then, around the line as it stands now -- so the fetch
+ * follows the walk instead of anticipating it, and a run that converges after two frames pays for
+ * two frames. Between frames is the one place this can be asked for: the tick chain is already
+ * asynchronous, and windows already held cost nothing to ask for again.
+ *
+ * `spacing` only ever halves over a run, so the first frame is the widest and every one after it
+ * asks for less.
  */
-export function wanderMargin(span: number, reach: number, p: Params): number {
-  const radius = PLANNED_REFINE_RADIUS * reach
-  return radius + measuredHalfWidth(span + 2 * radius, p)
+export function frameMargin(span: number, reach: number, spacing: number, p: Params): number {
+  const travel = PLANNED_REFINE_PACE * reach + 2 * PLANNED_REFINE_RINGS * spacing
+  return travel + measuredHalfWidth(span + 2 * travel, p)
 }
 
 /**

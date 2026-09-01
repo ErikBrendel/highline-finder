@@ -7,7 +7,8 @@ import {
   PLANNED_REFINE_RADIUS,
   PLANNED_REFINE_RINGS,
   PLANNED_REFINE_FINEST,
-  wanderMargin,
+  frameMargin,
+  PLANNED_REFINE_PACE,
 } from './optimize.js'
 import { windowsFor } from './terrain.js'
 import { measuredHalfWidth } from '../shared/profile.js'
@@ -219,21 +220,26 @@ describe('walking out of an obstruction', () => {
 })
 
 
-describe('wanderMargin', () => {
+describe('frameMargin', () => {
   /**
-   * The property the whole up-front fetch rests on. The scan cannot ask for terrain, so anything it
-   * may evaluate has to be inside what was fetched before it started -- otherwise the run does not
-   * stall, it quietly decides the line cannot be improved.
+   * The property the whole fetch-ahead rests on. The scan cannot ask for terrain, so anything one
+   * frame may evaluate has to be inside what was fetched before that frame ran -- otherwise the run
+   * does not stall, it quietly decides the line cannot be improved.
+   *
+   * A frame moves an anchor by its budget plus the overshoot of the step that crosses it, and from
+   * there evaluates positions another patch radius out. `startingSpacing` is the widest spacing a
+   * run ever uses, so it is the worst case for every frame after the first too.
    */
-  it('covers every line the run could evaluate, to the edges of the band each one reads', () => {
+  it('covers every line one frame could evaluate, to the edges of the band each one reads', () => {
     const a = { e: 400_100, n: 5_785_100 }
     const b = { e: 400_620, n: 5_785_380 }
     const span = Math.hypot(b.e - a.e, b.n - a.n)
     for (const reach of [1, 2, 8, 32]) {
+      const spacing = startingSpacing(reach)
       const held = new Set(
-        windowsFor(a, b, wanderMargin(span, reach, p)).map(([x, y]) => `${x}_${y}`),
+        windowsFor(a, b, frameMargin(span, reach, spacing, p)).map(([x, y]) => `${x}_${y}`),
       )
-      const radius = PLANNED_REFINE_RADIUS * reach
+      const radius = PLANNED_REFINE_PACE * reach + 2 * PLANNED_REFINE_RINGS * spacing
       // Both anchors at every extreme of their discs, which is where the corridor is widest.
       for (let i = 0; i < 32; i++) {
         for (let j = 0; j < 32; j++) {

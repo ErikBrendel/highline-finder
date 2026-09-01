@@ -32,11 +32,12 @@ import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcov
 import { Details } from './Details.js'
 import { Guide, useGuide } from './Guide.js'
 import { fitHeader } from './headerFit.js'
+import { useRemembered } from './remembered.js'
 import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
-import { optimizeFrame, startingSpacing, wanderMargin } from './optimize.js'
+import { frameMargin, optimizeFrame, startingSpacing } from './optimize.js'
 import { emitProbes } from './probeOverlay.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
@@ -321,7 +322,7 @@ export function App() {
    * town away when they want a forest line, not so the app decides for them which they wanted.
    */
   const [kinds, setKinds] = useState<ReadonlySet<LineKind>>(new Set(initial.kinds ?? LINE_KINDS))
-  const [showFilters, setShowFilters] = useState(true)
+  const [showFilters, setShowFilters] = useRemembered('highline-finder.filters-open', true)
   const [anchorDump, setAnchorDump] = useState<AnchorDump | null>(null)
   const [hotspots, setHotspots] = useState<Hotspots | null>(null)
   const [showHotspots, setShowHotspots] = useState(initial.showHotspots ?? true)
@@ -814,17 +815,33 @@ export function App() {
     // ladder from a metre back down to a centimetre instead of moving the line -- see optimizeFrame.
     let spacing = startingSpacing(reach)
 
-    const tick = () => {
+    const tick = async () => {
       if (stopped) return
       const live = customRef.current
       if (!live.a || !live.b) return endRun()
       const [ae, an] = toUtm33(live.a.lat, live.a.lon)
       const [be, bn] = toUtm33(live.b.lat, live.b.lon)
+      const a = { e: ae, n: an }
+      const b = { e: be, n: bn }
+      // Everything this frame can walk onto or read from, around the line as it stands. Awaited
+      // between frames, which is the only place the run is asynchronous -- inside a frame the scan
+      // cannot ask for anything, and unfetched ground reads as a bad position rather than as a
+      // missing one. Windows already held resolve without a request.
+      const span = Math.hypot(b.e - a.e, b.n - a.n)
+      try {
+        await ensureTerrain(a, b, frameMargin(span, reach, spacing, meta.params))
+      } catch (e: unknown) {
+        report('fetching elevation for the optimiser to walk over', e)
+        if (stopped) return
+        setTerrainFailed(failureText(e))
+        return endRun()
+      }
+      if (stopped) return
       // Collected for the frame and handed over in one go, so the overlay rewrites its source once
       // per frame rather than once per measurement.
       const probes: number[] = []
       const advance = optimizeFrame(
-        { a: { e: ae, n: an }, b: { e: be, n: bn } },
+        { a, b },
         {
           origin,
           ground: groundSampler,
@@ -843,24 +860,10 @@ export function App() {
       spacing = advance.spacing
       const { plan } = advance
       setCustom({ a: toWgs84(plan.a.e, plan.a.n), b: toWgs84(plan.b.e, plan.b.n) })
-      timer = setTimeout(tick, 100)
+      timer = setTimeout(() => void tick(), 100)
     }
 
-    // Fetched before the first step rather than chased as the anchors move. The scan is synchronous
-    // and cannot ask for anything, so ground it has not got reads as NaN and looks exactly like
-    // ground that is no good -- which ends the run and reports the line cannot be improved. See
-    // wanderMargin. Paid once per click, and only for the reach that click asked for.
-    const span = Math.hypot(origin.b.e - origin.a.e, origin.b.n - origin.a.n)
-    ensureTerrain(origin.a, origin.b, wanderMargin(span, reach, meta.params))
-      .then(() => {
-        if (!stopped) timer = setTimeout(tick, 0)
-      })
-      .catch((e: unknown) => {
-        report('fetching elevation for the optimiser to walk over', e)
-        if (stopped) return
-        setTerrainFailed(failureText(e))
-        endRun()
-      })
+    timer = setTimeout(() => void tick(), 0)
     return () => {
       stopped = true
       clearTimeout(timer)

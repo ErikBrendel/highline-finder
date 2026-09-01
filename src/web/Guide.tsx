@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { report } from './report.js'
+import { useEffect } from 'react'
+import { useRemembered } from './remembered.js'
 
 /**
  * The panel that says what this is, open until it is closed.
@@ -10,42 +10,16 @@ import { report } from './report.js'
  * open, closed it stays closed, and reopened from the header it is open again next time. One
  * remembered boolean rather than a "seen" flag beside a live one, because two would be able to
  * disagree about the same thing.
+ *
+ * Closing is the acknowledgement. There is no separate "don't show this again", because there is
+ * nothing else the button could mean: it is a page of prose, and reading it is dismissing it.
  */
 
 const OPEN = 'highline-finder.guide-open'
 
-/**
- * Storage that may not be there.
- *
- * localStorage throws rather than returning null in a browser configured to refuse it -- private
- * windows, third-party contexts, storage blocked outright -- so both directions are guarded. The
- * fallback is open, which is the harmless way to be wrong: a reader who cannot be remembered sees
- * the guide again, rather than a first-time reader never seeing it at all.
- */
-export function guideOpen(): boolean {
-  try {
-    return localStorage.getItem(OPEN) !== '0'
-  } catch (e) {
-    report('reading whether the guide was left open', e)
-    return true
-  }
-}
-
-export function rememberGuideOpen(open: boolean): void {
-  try {
-    localStorage.setItem(OPEN, open ? '1' : '0')
-  } catch (e) {
-    report('remembering whether the guide is open', e)
-  }
-}
-
 export function useGuide(): { open: boolean; show: () => void; close: () => void } {
-  const [open, setOpen] = useState(guideOpen)
-  const set = (to: boolean) => {
-    rememberGuideOpen(to)
-    setOpen(to)
-  }
-  return { open, show: () => set(true), close: () => set(false) }
+  const [open, setOpen] = useRemembered(OPEN, true)
+  return { open, show: () => setOpen(true), close: () => setOpen(false) }
 }
 
 export function Guide({ onClose }: { onClose: () => void }) {
