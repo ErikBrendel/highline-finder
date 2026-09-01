@@ -46,17 +46,19 @@ body {
 header {
   display: flex;
   align-items: baseline;
-  gap: 16px;
-  padding: 10px 16px;
+  /* Tight on purpose: every pixel here is a pixel the row does not have to give up a word for.
+     headerFit.ts measures whatever these come to, so shrinking them moves every collapse later. */
+  gap: 10px;
+  padding: 10px 12px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-/* The negative margin pulls the mark against the title: the header's 16px gap is right between
-   controls and wrong between an icon and the words it belongs to. */
+/* The negative margin pulls the mark against the title: the header's gap is right between controls
+   and wrong between an icon and the words it belongs to. */
 header .logo {
   width: 20px; height: 20px; border-radius: 4px; align-self: center; flex: none;
-  margin-right: -8px;
+  margin-right: -4px;
 }
 header h1 {
   font-size: 15px; margin: 0; font-weight: 650; letter-spacing: 0.2px;
@@ -721,7 +723,7 @@ header .spacer { flex: 1; }
 
 header .external {
   font-size: 11px; color: var(--accent); text-decoration: none;
-  border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; white-space: nowrap;
+  border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px; white-space: nowrap;
 }
 header .external:hover { border-color: var(--accent); }
 
