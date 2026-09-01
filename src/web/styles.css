@@ -66,6 +66,9 @@ header h1 {
 }
 header .meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 header .spacer { flex: 1; }
+/* Set by headerFit.ts for the length of a measurement: with the spacer growing, the row's scroll
+   width is its client width whatever it is saying, and there is nothing to measure. */
+header[data-measuring] .spacer { flex: none; }
 
 .layout { flex: 1; display: flex; min-height: 0; }
 

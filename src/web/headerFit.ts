@@ -3,16 +3,19 @@
  *
  * The header is a logo, a title and two external links, and on a narrow screen they do not fit.
  * Which of them to abbreviate is a design decision; *when* is arithmetic on the width of a dozen
- * words in whatever font the reader's system supplies -- so it is done by asking the browser once,
- * on the real element, instead of by writing four breakpoints and hoping.
+ * words in whatever font the reader's system supplies -- so it is asked of the browser, on the real
+ * element, rather than written down as breakpoints and hoped for.
  *
- * The measurement is the whole trick: the header is set to `max-content` and its width read back at
- * each step of the ladder, which is exactly "how wide would I like to be if I said this much". That
- * is five forced reflows in one synchronous block at startup, with no paint in between, and then
- * nothing until the window is resized.
+ * The question asked is the direct one: put the row in a given state and see where its last item
+ * ends. Two proxies were tried before this and both lied. `max-content` on the header came out well
+ * over what the row needed, and collapsed it with a hundred and sixty spare pixels on screen;
+ * `scrollWidth` came out as exactly `clientWidth`, because for an `overflow: visible` box that is
+ * what browsers report, so every rung looked too wide and the row collapsed to nothing at any
+ * width. A rectangle is not a proxy: the guide button's right edge is where the words end.
  *
- * Safe with system fonts, which is all this page uses -- there is no web font that could land later
- * and change every number. A page with one would have to measure again after `document.fonts.ready`.
+ * The spacer has to be stopped for the duration. It is `flex: 1`, so ordinarily it eats whatever
+ * room the words leave and the last item sits against the right edge no matter how little is being
+ * said. Frozen, the items pack to the left and the edge means something.
  */
 
 /**
@@ -25,48 +28,48 @@
  */
 const LADDER = ['gh', 'hf', 'gm', 'notitle'] as const
 
-/** Gap to keep between the two halves of the row, so a fit is not a collision. */
+/** Room to keep between the two halves of the row, so a fit is not a collision. */
 const SLACK = 24
 
 /**
- * The fewest concessions that fit, given what each step of the ladder costs.
+ * The first rung that fits, or the bottom of the ladder when none of them does.
  *
- * `need[i]` is the width the header wants after `i` steps, so it descends. The answer depends only
- * on `have`, never on the step currently applied, which is what keeps a resize from oscillating
- * between two of them.
+ * The answer depends only on what `fits` reports, never on the rung currently applied, which is
+ * what keeps a resize from oscillating between two of them.
  */
-export function fitLevel(need: number[], have: number): number {
-  for (let i = 0; i < need.length; i++) if (need[i]! + SLACK <= have) return i
-  return need.length - 1
-}
-
-function measure(header: HTMLElement): number[] {
-  const heldFit = header.dataset.fit
-  const heldWidth = header.style.width
-  header.style.width = 'max-content'
-  const need = LADDER.map((_, i) => {
-    header.dataset.fit = LADDER.slice(0, i).join(' ')
-    return header.offsetWidth
-  })
-  // One more for the bottom of the ladder, which is every concession made.
-  header.dataset.fit = LADDER.join(' ')
-  need.push(header.offsetWidth)
-
-  header.style.width = heldWidth
-  if (heldFit === undefined) delete header.dataset.fit
-  else header.dataset.fit = heldFit
-  return need
+export function fitLevel(rungs: number, fits: (level: number) => boolean): number {
+  for (let level = 0; level < rungs; level++) if (fits(level)) return level
+  return rungs
 }
 
 export function fitHeader(header: HTMLElement): () => void {
-  const need = measure(header)
   const apply = () => {
-    // The header is a full-width row whatever it is saying, so its own width is the room available
-    // and applying a step cannot change it. No feedback, and so no loop for the observer to chase.
-    header.dataset.fit = LADDER.slice(0, fitLevel(need, header.offsetWidth)).join(' ')
+    const last = header.lastElementChild
+    if (!last) return
+    const padRight = parseFloat(getComputedStyle(header).paddingRight) || 0
+    header.dataset.measuring = '1'
+    // The inside of the right padding: where the row runs out of room.
+    const edge = header.getBoundingClientRect().right - padRight
+    const level = fitLevel(LADDER.length, (i) => {
+      header.dataset.fit = LADDER.slice(0, i).join(' ')
+      return last.getBoundingClientRect().right + SLACK <= edge
+    })
+    delete header.dataset.measuring
+    header.dataset.fit = LADDER.slice(0, level).join(' ')
   }
   apply()
-  const observer = new ResizeObserver(apply)
-  observer.observe(header)
-  return () => observer.disconnect()
+
+  const resize = new ResizeObserver(apply)
+  resize.observe(header)
+  // The row also changes when its contents do -- the Google Maps link appears only once the map has
+  // published a viewport to link to -- and that changes no size the ResizeObserver is watching.
+  // childList only: `apply` writes an attribute, and observing attributes would have it chase
+  // itself round.
+  const content = new MutationObserver(apply)
+  content.observe(header, { childList: true, subtree: true })
+
+  return () => {
+    resize.disconnect()
+    content.disconnect()
+  }
 }
