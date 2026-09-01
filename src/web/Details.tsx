@@ -208,7 +208,7 @@ export function Details({
     ? [profile[0]!, profile[profile.length - 1]!].filter((s) => Number.isNaN(s.ground)).length
     : 0
   const ends = c ? { a: c.a, b: c.b } : at
-  // Length and bearing need no elevation, so they are shown before the measurement lands.
+  // Length needs no elevation, so it is shown before the measurement lands.
   const geom = c ?? (ends && spanGeometry(ends.a, ends.b))
   /**
    * A figure, or a dash where there is none.
@@ -299,7 +299,7 @@ export function Details({
         )}
         {geom && (
           <span className="sub">
-            {geom.length.toFixed(0)} m &middot; bearing {geom.bearing.toFixed(0)}&deg;
+            {geom.length.toFixed(0)} m
             {c && (
               <>
                 {' '}&middot; midspan sag {c.sag.toFixed(1)} m
