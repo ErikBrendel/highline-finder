@@ -30,6 +30,7 @@ import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcov
 
 import { Details } from './Details.js'
 import { Guide, useGuide } from './Guide.js'
+import { fitHeader } from './headerFit.js'
 import { failureText, report } from './report.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
@@ -247,6 +248,20 @@ function CacheBadge() {
   )
 }
 
+/**
+ * A label and what it shrinks to when the header runs out of room.
+ *
+ * Both are rendered and one is hidden, rather than measuring the header and choosing: the widths
+ * involved are known at design time, and a resize observer to pick between two strings would be a
+ * layout dependency where a media query is enough. See `.full` and `.abbr` in styles.css.
+ */
+const Label = ({ full, short }: { full: string; short: string }) => (
+  <>
+    <span className="full">{full}</span>
+    <span className="abbr">{short}</span>
+  </>
+)
+
 /** Whether these placed points are just a candidate's own coordinates written back. */
 function sameLine(points: CustomPoints, c: Candidate): boolean {
   const near = (p: LatLon | null, a: { lat: number; lon: number }) =>
@@ -259,6 +274,9 @@ export function App() {
   // both ways is how a URL writer and a URL reader start feeding each other.
   const [initial] = useState(() => parseUrl(window.location.search))
   const guide = useGuide()
+  const header = useRef<HTMLElement>(null)
+  // Measured once the row is in the document, and re-applied on every resize thereafter.
+  useEffect(() => (header.current ? fitHeader(header.current) : undefined), [])
   const [data, setData] = useState<Dataset | null>(null)
   const [error, setError] = useState<string | null>(null)
   // null until the dataset is loaded, because the floor comes from the pipeline's own sag.
@@ -1006,13 +1024,6 @@ export function App() {
    * genuinely does depend on the file says so by omitting its figure rather than by blocking.
    */
   const regions = data?.meta.regions ?? []
-  const aoiCount = regions.reduce((n, r) => n + r.aois.length, 0)
-  const areaKm2 = regions.reduce((s, r) => s + r.width * r.height, 0) / 1e6
-  // Only regions that were actually searched know their terrain range; one that has merely been
-  // claimed on the map reports zeros, and would drag the floor down to sea level.
-  const measured = regions.filter((r) => r.anchorsScanned > 0)
-  const groundMin = Math.min(...measured.map((r) => r.groundMin))
-  const groundMax = Math.max(...measured.map((r) => r.groundMax))
   // Reduced rather than spread into Math.max: the dataset is tens of thousands of lines now, and
   // spreading that many arguments exceeds the call stack.
   const highest = (pick: (c: Candidate) => number, floor: number) =>
@@ -1034,19 +1045,12 @@ export function App() {
 
   return (
     <>
-      <header>
-        <h1>Highline Finder</h1>
-        {data && (
-          <span className="meta">
-            {aoiCount} AOI{aoiCount === 1 ? '' : 's'}
-            {regions.length !== aoiCount && ` in ${regions.length} regions`}
-            {' · '}{areaKm2.toFixed(1)} km&sup2;
-            {' · '}terrain {groundMin}&ndash;{groundMax} m
-          </span>
-        )}
+      <header ref={header}>
+        <img className="logo" src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
+        <h1><Label full="Highline Finder" short="HF" /></h1>
         {bbox && (
           <a
-            className="external"
+            className="external gm"
             href={`https://www.google.com/maps/@${((bbox[0] + bbox[2]) / 2).toFixed(6)},${(
               (bbox[1] + bbox[3]) / 2
             ).toFixed(6)},${zoom.toFixed(2)}z/data=!3m1!1e3`}
@@ -1054,17 +1058,19 @@ export function App() {
             rel="noreferrer"
             title="Open this view in Google Maps satellite imagery"
           >
-            Google Maps ↗
+            <Label full="Google Maps ↗" short="GM ↗" />
           </a>
         )}
         <span className="spacer" />
-        <span className="meta">
-          {data
-            ? `${data.meta.stats.anchorsKept.toLocaleString()} anchors · ` +
-              `${data.meta.stats.candidatesAfterDedup.toLocaleString()} distinct lines · ` +
-              `${(data.meta.stats.runtimeMs / 1000).toFixed(1)}s`
-            : 'loading the lines…'}
-        </span>
+        <a
+          className="external gh"
+          href="https://github.com/ErikBrendel/highline-finder"
+          target="_blank"
+          rel="noreferrer"
+          title="Source code, and how the search works"
+        >
+          <Label full="GitHub ↗" short="GH ↗" />
+        </a>
         <button
           className="guidebtn"
           onClick={guide.show}

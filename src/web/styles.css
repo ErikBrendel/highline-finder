@@ -39,7 +39,16 @@ header {
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: 0.2px; }
+/* The negative margin pulls the mark against the title: the header's 16px gap is right between
+   controls and wrong between an icon and the words it belongs to. */
+header .logo {
+  width: 20px; height: 20px; border-radius: 4px; align-self: center; flex: none;
+  margin-right: -8px;
+}
+header h1 {
+  font-size: 15px; margin: 0; font-weight: 650; letter-spacing: 0.2px;
+  white-space: nowrap;
+}
 header .meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 header .spacer { flex: 1; }
 
@@ -621,6 +630,22 @@ header .external {
   border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; white-space: nowrap;
 }
 header .external:hover { border-color: var(--accent); }
+
+/*
+ * The header, given less room than it wants.
+ *
+ * Which concessions are in force is decided by headerFit.ts, which measures the row rather than
+ * assuming a width for it, and writes the ones it has made onto the element. Every rule below is
+ * therefore a consequence, not a threshold.
+ */
+header .abbr { display: none; }
+header[data-fit~='gh'] .gh .full,
+header[data-fit~='hf'] h1 .full,
+header[data-fit~='gm'] .gm .full { display: none; }
+header[data-fit~='gh'] .gh .abbr,
+header[data-fit~='hf'] h1 .abbr,
+header[data-fit~='gm'] .gm .abbr { display: inline; }
+header[data-fit~='notitle'] h1 { display: none; }
 
 
 /* Crash report. Fixed and on top of everything, because whatever it is reporting has already gone
