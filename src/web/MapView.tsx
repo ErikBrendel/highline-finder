@@ -18,6 +18,7 @@ import { shadedUrl } from './shaded.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
+import { LocateControl } from './locateControl.js'
 import { installLoadingOverlay } from './loadingOverlay.js'
 import { installProbeOverlay } from './probeOverlay.js'
 import { installHoverMarker } from './hoverMarker.js'
@@ -619,6 +620,9 @@ interface Props {
   initialBbox: [number, number, number, number] | null
   /** Where the device says it is, or null when nobody is asking. */
   fix: Fix | null
+  /** Whether the device is being followed, and the control that turns that on and off. */
+  locating: boolean
+  onLocate: (following: boolean) => void
   custom: CustomPoints
   showLines: boolean
   onSelect: (id: string | null) => void
@@ -644,6 +648,8 @@ export function MapView({
   showUrban,
   initialBbox,
   fix,
+  locating,
+  onLocate,
   custom,
   showLines,
   onSelect,
@@ -703,6 +709,11 @@ export function MapView({
   const touching = useRef(false)
   /** Whether this run of following the device has already moved the camera once. */
   const flownTo = useRef(false)
+  // The control is built once with the map, so it reads the toggle through refs rather than closing
+  // over the value it was born with.
+  const locateCtrl = useRef<LocateControl | null>(null)
+  const locateState = useRef({ locating, onLocate })
+  locateState.current = { locating, onLocate }
   onViewportRef.current = onViewport
 
   useEffect(() => {
@@ -765,6 +776,11 @@ export function MapView({
      */
     m.on('error', (e) => report('drawing the map', e.error ?? e))
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-left')
+    locateCtrl.current = new LocateControl(() => {
+      const { locating: on, onLocate: set } = locateState.current
+      set(!on)
+    })
+    m.addControl(locateCtrl.current, 'top-left')
     m.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
 
     m.on('load', () => {
@@ -1354,6 +1370,10 @@ export function MapView({
    * panned away from. Counts as the user taking the camera, so a dataset arriving afterwards does
    * not fit itself over the top.
    */
+  useEffect(() => {
+    locateCtrl.current?.setState(!locating ? 'off' : fix ? 'on' : 'busy')
+  }, [locating, fix])
+
   useEffect(() => {
     const m = map.current
     if (!m || !ready) return

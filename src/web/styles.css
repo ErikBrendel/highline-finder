@@ -106,6 +106,25 @@ header .spacer { flex: 1; }
   font-variant-numeric: tabular-nums;
 }
 .toggles button:hover { color: var(--text); }
+/*
+ * The locate button, in MapLibre's own control group beside the zoom buttons.
+ *
+ * Inheriting that group's white chrome rather than the panel's dark one: it sits with +/-, so it
+ * has to look like them and not like the layer column. The accent is darkened from the app's
+ * --accent, which is picked to read on a dark panel and is too pale on white.
+ */
+.maplibregl-ctrl button.locate { display: grid; place-items: center; color: #333; }
+.maplibregl-ctrl button.locate[data-state='on'] { color: #0284c7; }
+.maplibregl-ctrl button.locate[data-state='busy'] {
+  color: #0284c7;
+  animation: locate-pulse 1.2s ease-in-out infinite;
+}
+/* A pulse and not a spin: it is waiting for a fix, not turning anything. */
+@keyframes locate-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .maplibregl-ctrl button.locate[data-state='busy'] { animation: none; opacity: 0.6; }
+}
+
 /* A count that is still being fetched, in place of the count. */
 .toggles button .spin {
   display: inline-block;

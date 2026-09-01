@@ -1227,13 +1227,6 @@ export function App() {
             <button data-active={showHotspots} onClick={() => setShowHotspots(!showHotspots)}>
               {shownHotspots ? `${here(spotsHere, shownHotspots.lat.length)} hotspots` : 'hotspots'}
             </button>
-            <button
-              data-active={locating}
-              onClick={() => setLocating(!locating)}
-              title="Centre the map on where you are"
-            >
-              {locating && !fix ? <Spinner label="locating" /> : 'my location'}
-            </button>
             {/* anchors.json is gitignored, so this only exists where the pipeline has run.
                 Vite folds the constant away, dropping the button from the bundle entirely. */}
             {import.meta.env.DEV && (
@@ -1380,6 +1373,8 @@ export function App() {
             tileLayer={tileLayer ?? 'terrain'}
             initialBbox={initial.bbox}
             fix={fix}
+            locating={locating}
+            onLocate={setLocating}
             custom={custom}
             showLines={showLines}
             onSelect={setSelectedId}
