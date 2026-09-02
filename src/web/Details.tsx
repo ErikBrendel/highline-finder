@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import type { Cover } from './landcover.js'
-import { ProfileChart } from './ProfileChart.js'
+import { ProfileChart, type Wings } from './ProfileChart.js'
 import { Slider } from './Slider.js'
 import {
   NEIGHBOURHOOD,
@@ -12,6 +12,7 @@ import {
   PLANNED_REFINE_START,
 } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
+import { Terrain3D } from './Terrain3D.js'
 
 function scoreColor(score: number): string {
   if (score >= 70) return '#22c55e'
@@ -88,6 +89,8 @@ interface Props {
    * profiles has its figures immediately but its chart a moment later.
    */
   profile: ProfileSample[] | null
+  /** Ground beyond the anchors, for context behind the span. Null when there is none to be had. */
+  wings: Wings | null
   /** Land cover per profile sample, or null when it is still loading or unavailable. */
   cover: Cover | null
   /** The run's parameters, for the clearance rule the chart draws. */
@@ -118,6 +121,20 @@ interface Props {
    * centimetres can go either way. The panel says which measurement it is showing.
    */
   violations: string[] | null
+  /**
+   * The sag every line is measured at, and the lowest the dataset allows.
+   *
+   * The same state the filter panel's slider holds, not a copy: sag is the one control that
+   * re-measures rather than hides, so a second one that meant something different would be two
+   * charts of the same line disagreeing. Null before the dataset has said what its floor is.
+   */
+  sag: { pct: number; floor: number } | null
+  onSag: (pct: number) => void
+  /** Whether this line fills the window. Lives in the URL, so it is the App's to hold. */
+  full: boolean
+  onFull: (full: boolean) => void
+  /** An anchor dropped in the 3D view, which places it and then settles it. */
+  onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
   optimizing: boolean
   /** Reach the button is offering for the next run, or null for the careful default. */
   offer: number | null
@@ -147,10 +164,28 @@ const MIN_WIDTH = 360
 const KEEP_VISIBLE = 40
 
 export function Details({
-  c, profile, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
-  optimizing, offer, onOptimize,
+  c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
+  sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
   rig, onRig, onClose,
 }: Props) {
+  /**
+   * The full-screen view of one line.
+   *
+   * Not remembered between lines. It is a thing you go into to look at one place and come out of,
+   * like a photograph you hold up, and a panel that opened full every time would be in the way of
+   * the map that got you here.
+   */
+  useEffect(() => {
+    if (!full) return
+    const onKey = (e: KeyboardEvent) => {
+      // Escape leaves the full view rather than closing the line, which is the smaller undo and so
+      // the one a key with no label should do.
+      if (e.key === 'Escape') onFull(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [full])
+
   const [width, setWidth] = useState(preferredWidth)
   useEffect(() => {
     preferredWidth = width
@@ -265,7 +300,7 @@ export function Details({
   ]
 
   return (
-    <div className="details" style={widthVar}>
+    <div className="details" data-full={full || undefined} style={widthVar}>
       <div
         className="grip"
         role="separator"
@@ -309,14 +344,54 @@ export function Details({
             )}
           </span>
         )}
-        <button className="close" onClick={onClose}>close</button>
+        <span className="headbtns">
+          {!full && (
+            <button
+              className="close"
+              onClick={() => onFull(true)}
+              title="Fill the window: the profile at full width, and the site in three dimensions"
+            >
+              full view
+            </button>
+          )}
+          {/* One way out, and it undoes one step: from the full view back to the card, and from the
+              card back to the map. Two buttons side by side both saying close-ish is a choice
+              nobody wants to have to read. */}
+          <button className="close" onClick={() => (full ? onFull(false) : onClose())}>
+            close
+          </button>
+        </span>
       </div>
+
+      {/* Only in the full view: on the card the filter panel is a click away and the room is worth
+          more than a duplicate. Here there is room, and this is where the answer it changes is. */}
+      {full && sag && (
+        <div className="sagbar">
+          <Slider
+            label="Midspan sag"
+            value={sag.pct}
+            min={sag.floor}
+            max={10}
+            step={0.5}
+            unit=" % of span"
+            format={(v) => v.toFixed(1)}
+            onChange={onSag}
+          />
+        </div>
+      )}
 
       <div className="cols">
         <div className="chart">
           {c && profile?.length ? (
             <>
-              <ProfileChart c={c} profile={profile} cover={cover} params={params} fetching={fetching} />
+              <ProfileChart
+                c={c}
+                profile={profile}
+                wings={wings}
+                cover={cover}
+                params={params}
+                fetching={fetching}
+              />
               {/* Over the chart rather than instead of it, and only where the chart has a hole to
                   explain. Elevation is in flight for all sorts of reasons -- another line, the
                   optimiser, the map -- and a badge over a complete profile says the thing being
@@ -506,6 +581,19 @@ export function Details({
             {ends.b.lat.toFixed(6)}, {ends.b.lon.toFixed(6)}
           </a>
         </div>
+      )}
+
+      {full && c && (
+        <Terrain3D
+          a={{ e: c.a.e, n: c.a.n }}
+          b={{ e: c.b.e, n: c.b.n }}
+          anchorA={c.a.anchor}
+          anchorB={c.b.anchor}
+          // The sag actually drawn, not the dataset's: the slider re-measures every line, and the
+          // span in the picture has to be the span in the figures beside it.
+          sagRatio={c.length > 0 ? c.sag / c.length : 0}
+          onMoveAnchor={onMoveAnchor}
+        />
       )}
       </div>
     </div>

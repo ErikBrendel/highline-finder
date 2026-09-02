@@ -8,7 +8,7 @@ import {
   type UrlState,
 } from './urlState.js'
 
-const full: UrlState = {
+const everything: UrlState = {
   bbox: [52.1977, 13.6513, 52.2066, 13.6681],
   lineId: '408123.0_5784200.5__408380.0_5784310.0',
   custom: { a: { lat: 52.2001, lon: 13.6552 }, b: { lat: 52.2043, lon: 13.6614 } },
@@ -18,13 +18,14 @@ const full: UrlState = {
   showLines: false,
   showHotspots: false,
   showAreas: true,
+  full: true,
   kinds: ['natural', 'urban'],
   filters: { minScore: 40, maxCanopy: 25 },
 }
 
 describe('url state', () => {
   it('round-trips everything it carries', () => {
-    expect(parseUrl(toSearch(full))).toEqual(full)
+    expect(parseUrl(toSearch(everything))).toEqual(everything)
   })
 
   it('carries nothing when there is nothing to carry', () => {
@@ -32,8 +33,8 @@ describe('url state', () => {
   })
 
   it('keeps a candidate id intact through encoding', () => {
-    const search = toSearch({ ...full, custom: { a: null, b: null } })
-    expect(parseUrl(search).lineId).toBe(full.lineId)
+    const search = toSearch({ ...everything, custom: { a: null, b: null } })
+    expect(parseUrl(search).lineId).toBe(everything.lineId)
   })
 
   it('ignores malformed values rather than throwing', () => {
@@ -46,14 +47,14 @@ describe('url state', () => {
   })
 
   it('reads a basemap blend of zero rather than treating it as absent', () => {
-    expect(parseUrl(toSearch({ ...full, basemapMix: 0 })).basemapMix).toBe(0)
+    expect(parseUrl(toSearch({ ...everything, basemapMix: 0 })).basemapMix).toBe(0)
   })
 
   it('writes nothing for a control left at its default', () => {
     // The whole point of the rule: a link carries what the sharer changed and nothing else, so
     // adding a control with a new default never invalidates a link written before it existed.
     const search = toSearch({
-      ...full,
+      ...everything,
       showLines: null,
       showHotspots: null,
       kinds: null,
@@ -74,7 +75,7 @@ describe('url state', () => {
       ['maxCanopy', 30],
       ['maxOffLevel', 1.5],
     ] as const) {
-      const back = parseUrl(toSearch({ ...full, filters: { [field]: value } }))
+      const back = parseUrl(toSearch({ ...everything, filters: { [field]: value } }))
       expect(back.filters).toEqual({ [field]: value })
     }
   })
@@ -102,14 +103,14 @@ describe('url state', () => {
   })
 
   it('keeps one end of a half-placed line', () => {
-    const s = parseUrl(toSearch({ ...full, custom: { a: full.custom.a, b: null } }))
-    expect(s.custom).toEqual({ a: full.custom.a, b: null })
+    const s = parseUrl(toSearch({ ...everything, custom: { a: everything.custom.a, b: null } }))
+    expect(s.custom).toEqual({ a: everything.custom.a, b: null })
   })
 })
 
 describe('viewport precision', () => {
   const at = (s: string) => new URLSearchParams(s).get('at')!
-  const box = (bbox: [number, number, number, number]) => at(toSearch({ ...full, bbox }))
+  const box = (bbox: [number, number, number, number]) => at(toSearch({ ...everything, bbox }))
 
   it('writes a small view finely and a large one coarsely', () => {
     // A 900 m rectangle keeps five decimals; a whole region needs far fewer to land in the same
@@ -174,8 +175,8 @@ describe('the area outlines', () => {
   const params = (s: UrlState) => new URLSearchParams(toSearch(s))
 
   it('stay out of a link until switched on', () => {
-    expect(params({ ...full, showAreas: false }).has('areas')).toBe(false)
-    expect(params({ ...full, showAreas: true }).get('areas')).toBe('1')
+    expect(params({ ...everything, showAreas: false }).has('areas')).toBe(false)
+    expect(params({ ...everything, showAreas: true }).get('areas')).toBe('1')
   })
 
   it('come back on from a link that carries them', () => {

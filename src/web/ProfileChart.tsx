@@ -101,9 +101,37 @@ export function steppedOutline(
   return out
 }
 
+/**
+ * Terrain a little way past an anchor, which is not part of the line and is drawn anyway.
+ *
+ * A chart that stops dead at the anchor says nothing about what the anchor is standing on the edge
+ * of. Whether the ground falls away past it or carries on flat is most of what tells you which of
+ * these is a cliff top and which is a field, and it is a centimetre of chart to say so.
+ *
+ * `d` runs on the line's own scale: negative before A, past `length` after B.
+ */
+export interface WingSample {
+  d: number
+  ground: number
+  surface: number
+  /** One of the COVER_* constants, so a shed past the anchor reads as a shed and not as a hillock. */
+  kind: number
+  /** Bare earth under it, which is the foot of a building's column. */
+  bare: number
+}
+
+export interface Wings {
+  before: WingSample[]
+  after: WingSample[]
+  /** Metres shown either side, which the horizontal scale has to make room for. */
+  margin: number
+}
+
 interface Props {
   c: Candidate
   profile: ProfileSample[]
+  /** Ground beyond the anchors, or null when there is none to be had. */
+  wings: Wings | null
   /** Per profile sample, or null while the land cover is still loading or unavailable. */
   cover: Cover | null
   /** The run's parameters, for the clearance rule the required-clearance line draws. */
@@ -214,7 +242,7 @@ export function bridgeGaps(profile: ProfileSample[]): {
   return { samples, gaps, measured }
 }
 
-export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
+export function ProfileChart({ c, profile, wings, cover, params, fetching }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const { samples: p, gaps, measured } = bridgeGaps(profile)
   const crossings = c.crossings ?? []
@@ -286,7 +314,8 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
       })
   })()
 
-  const lo = Math.min(...p.map((s) => s.ground)) - 2
+  const wingSamples = wings ? [...wings.before, ...wings.after] : []
+  const lo = Math.min(...p.map((s) => s.ground), ...wingSamples.map((s) => s.ground)) - 2
   // The required-clearance line is part of the picture, so a 23 m demand over a railway has to fit
   // in it rather than run off the top. So is the band envelope, which is what a rejected line is
   // usually rejected by.
@@ -294,6 +323,7 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
     Math.max(
       ...p.map((s) => Math.max(s.surfaceMax, s.line)),
       ...requiredPoints.map((q) => q.v),
+      ...wingSamples.map((s) => s.surface),
     ) + 3
   /** Whether the band found anything the centreline did not, which is when it is worth drawing. */
   const bandShows = p.some((s) => s.groundMax > s.ground + 0.05)
@@ -301,7 +331,16 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
   const iw = W - PAD.left - PAD.right
   const ih = H - PAD.top - PAD.bottom
 
-  const x = (d: number) => PAD.left + (d / c.length) * iw
+  /**
+   * Distance to pixels, over the line and a margin either side of it.
+   *
+   * The margin is why this is not simply `d / length`: the plot area is the whole of what is drawn,
+   * so widening what is drawn narrows the line within it. Everything positioned in the chart goes
+   * through here, so the wings cost nothing beyond this one line.
+   */
+  const margin = wings?.margin ?? 0
+  const shown = c.length + 2 * margin
+  const x = (d: number) => PAD.left + ((d + margin) / shown) * iw
   const y = (v: number) => PAD.top + ih - ((v - lo) / (hi - lo)) * ih
 
   /** The sagging line itself, which is a span rather than terrain and so walks no walls. */
@@ -322,7 +361,56 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
   const between = (top: Vertex[], bottom: Vertex[]) =>
     `${draw(top)}${draw([...bottom].reverse(), 1)}Z`
 
-  const groundFill = `${groundPath}L${x(c.length)},${PAD.top + ih}L${PAD.left},${PAD.top + ih}Z`
+  const groundFill = `${groundPath}L${x(c.length)},${PAD.top + ih}L${x(0)},${PAD.top + ih}Z`
+
+  /**
+   * The wings, drawn like the terrain they are and dimmed a little.
+   *
+   * Same colours, because it is the same hillside; not full strength, because it is outside the
+   * span and no rule in this chart applies to it. Straight polylines rather than the walled
+   * outlines the measured stretch gets: those exist to keep a building's wall vertical, and a
+   * couple of dozen samples of context does not need a building drawn on it.
+   */
+  const wingFill = (part: WingSample[], key: 'ground' | 'surface') => {
+    if (part.length < 2) return undefined
+    const top = part.map((w, i) => `${i ? 'L' : 'M'}${x(w.d).toFixed(1)},${y(w[key]).toFixed(1)}`)
+    return key === 'ground'
+      ? `${top.join('')}L${x(part[part.length - 1]!.d)},${PAD.top + ih}L${x(part[0]!.d)},${PAD.top + ih}Z`
+      : `${top.join('')}${part
+          .slice()
+          .reverse()
+          .map((w) => `L${x(w.d).toFixed(1)},${y(w.ground).toFixed(1)}`)
+          .join('')}Z`
+  }
+
+  /**
+   * The same building and water shapes the measured stretch gets, over a wing.
+   *
+   * Without them a boathouse past the anchor is drawn as brown ground at roof height, which is a
+   * hillock that is not there -- the ground series is the roof wherever there is a building, and
+   * saying so is the whole job of these fills. The classes come from the same `coverAlong` the rest
+   * of the chart uses, over the wing's own two ends, so the two halves of the picture cannot
+   * disagree about what is a building.
+   */
+  const wingCover = (part: WingSample[]) => {
+    if (part.length < 2) return []
+    const kinds = Uint8Array.from(part, (w) => w.kind)
+    return coverRuns(kinds).map((r) => {
+      const span = part.slice(r.from, r.to + 1)
+      const top = span
+        .map((w, i) => `${i ? 'L' : 'M'}${x(w.d).toFixed(1)},${y(w.ground).toFixed(1)}`)
+        .join('')
+      const bottom = [...span]
+        .reverse()
+        .map((w) => {
+          const floor =
+            r.kind === COVER_BUILDING && Number.isFinite(w.bare) ? y(w.bare) : PAD.top + ih
+          return `L${x(w.d).toFixed(1)},${floor.toFixed(1)}`
+        })
+        .join('')
+      return { key: `${r.kind}-${r.from}`, d: `${top}${bottom}Z`, kind: r.kind }
+    })
+  }
   const canopyFill = between(surfaceOutline, outline)
 
   /**
@@ -371,7 +459,7 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
   const trackPointer = (e: React.MouseEvent<SVGSVGElement>) => {
     const box = e.currentTarget.getBoundingClientRect()
     const at = ((e.clientX - box.left) / box.width) * W
-    const d = ((at - PAD.left) / iw) * c.length
+    const d = ((at - PAD.left) / iw) * shown - margin
     let nearest = 0
     for (let i = 1; i < p.length; i++) {
       if (Math.abs(p[i]!.d - d) < Math.abs(p[nearest]!.d - d)) nearest = i
@@ -429,6 +517,21 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
           opacity="0.22"
         />
       )}
+      {/* Behind everything measured, and dimmer than it: context, not part of the line. */}
+      {wings &&
+        ([wings.before, wings.after] as const).map((part, i) => (
+          <g key={i} opacity="0.55">
+            <path d={wingFill(part, 'ground')} fill="var(--ground)" />
+            <path d={wingFill(part, 'surface')} fill="var(--canopy)" />
+            {wingCover(part).map((r) => (
+              <path
+                key={r.key}
+                d={r.d}
+                fill={r.kind === COVER_BUILDING ? 'var(--building)' : 'var(--water)'}
+              />
+            ))}
+          </g>
+        ))}
       <path d={canopyFill} fill="var(--canopy)" opacity="0.5" />
       <path d={groundFill} fill="var(--ground)" opacity="0.9" />
       {runs.map((r) => (
@@ -602,10 +705,14 @@ export function ProfileChart({ c, profile, cover, params, fetching }: Props) {
         </g>
       )}
 
-      <text x={PAD.left} y={H - 6} fill="#8b93a3" fontSize="10">A</text>
-      <text x={W - PAD.right} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="end">
-        B &middot; {c.length.toFixed(0)} m
+      {/* A and B stand under the anchors themselves, so the span they name is the stretch between
+          them rather than the whole plot; the length goes in the middle of that stretch, where it
+          cannot collide with either however narrow the wings make the gap to the plot edge. */}
+      <text x={x(0)} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="middle">A</text>
+      <text x={x(c.length / 2)} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="middle">
+        {c.length.toFixed(0)} m
       </text>
+      <text x={x(c.length)} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="middle">B</text>
     </svg>
   )
 }

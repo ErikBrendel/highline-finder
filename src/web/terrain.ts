@@ -238,6 +238,16 @@ export function windowsFor(a: Pos, b: Pos, margin = WINDOW): [number, number][] 
  * already in hand is the difference between a smooth drag and a request per pixel. A caller that is
  * only measuring a line that will not move should say what it actually reaches.
  */
+/**
+ * How many windows a call to {@link ensureTerrain} would have to go and get.
+ *
+ * For telling somebody how long they are waiting. Everywhere else in the app a fetch is a window or
+ * two behind a badge on the map; the 3D view asks for a whole square at once, which can be dozens,
+ * and a spinner with no denominator for eight seconds reads as broken rather than as busy.
+ */
+export const missingWindows = (a: Pos, b: Pos, margin = WINDOW): number =>
+  windowsFor(a, b, margin).filter(([tx, ty]) => !loaded.has(keyOf(tx, ty))).length
+
 export async function ensureTerrain(a: Pos, b: Pos, margin = WINDOW): Promise<boolean> {
   const missing = windowsFor(a, b, margin).filter(([tx, ty]) => !loaded.has(keyOf(tx, ty)))
   if (!missing.length) return false

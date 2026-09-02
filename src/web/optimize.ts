@@ -144,6 +144,14 @@ interface Options {
    */
   onProbe?: (e: number, n: number) => void
   /**
+   * Move this end only, holding the other exactly where it is.
+   *
+   * For the case where one anchor has just been placed by hand and the other is where somebody
+   * meant it to be: a two-ended run would walk both away from a decision that had already been
+   * made. Undefined moves both, which is the ordinary run.
+   */
+  only?: 'a' | 'b'
+  /**
    * Puts the ground one scan reads into the sampler's hands, before that scan runs.
    *
    * The only asynchronous thing in the walk, and the reason `optimizeFrame` is. Called with the
@@ -175,6 +183,9 @@ const within = (p: Pos, origin: Pos, radius: number) =>
  * and eventually to stop. B is scanned against A's new position rather than its old one -- that is
  * what makes this coordinate descent, and also what it cannot see past: a move that only helps if
  * both ends make it together is invisible here.
+ *
+ * With `only` set it is one end and there is no descent to speak of, just a hill climbed by one
+ * anchor over ground the other end is fixed against.
  */
 export function optimizeStep(current: Plan, o: Options, spacing: number): Plan | null {
   let best = rank(current.a, current.b, o)
@@ -183,7 +194,7 @@ export function optimizeStep(current: Plan, o: Options, spacing: number): Plan |
   let out = current
   let moved = false
 
-  for (const which of ['a', 'b'] as const) {
+  for (const which of o.only ? ([o.only] as const) : (['a', 'b'] as const)) {
     // Fixed for the anchor's whole scan, so it lands on one position out of the patch rather than
     // hopping from each improvement to the next and travelling several patches in a single step.
     const from = out[which]

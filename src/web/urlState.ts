@@ -75,6 +75,11 @@ export interface UrlState {
    * it should survive being shared.
    */
   showAreas: boolean | null
+  /**
+   * Whether the open line is being looked at full screen. Default off, so it is written only when
+   * on -- and a link that was sent from the full view is a link to that view of the line.
+   */
+  full: boolean | null
   /** Anchor classes shown. Null means all of them, which is the default. */
   kinds: LineKind[] | null
   /** Only the sliders that have been moved off {@link FILTER_DEFAULTS}. */
@@ -91,6 +96,7 @@ const EMPTY: UrlState = {
   showLines: null,
   showHotspots: null,
   showAreas: null,
+  full: null,
   kinds: null,
   filters: {},
 }
@@ -206,6 +212,7 @@ export function parseUrl(search: string): UrlState {
     showLines: toggle(q.get('lines')),
     showHotspots: toggle(q.get('spots')),
     showAreas: toggle(q.get('areas')),
+    full: toggle(q.get('full')),
     kinds: kinds(q.get('kinds')),
     filters,
   }
@@ -223,6 +230,7 @@ export function toSearch(s: UrlState): string {
   if (s.showLines === false) q.set('lines', '0')
   if (s.showHotspots === false) q.set('spots', '0')
   if (s.showAreas === true) q.set('areas', '1')
+  if (s.full === true) q.set('full', '1')
   if (s.kinds) q.set('kinds', s.kinds.join(','))
   for (const [field, param] of Object.entries(FILTER_PARAMS) as [keyof Filters, string][]) {
     const v = s.filters[field]

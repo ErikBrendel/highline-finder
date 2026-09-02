@@ -32,6 +32,7 @@ import {
 import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
 
 import { Details } from './Details.js'
+import type { WingSample } from './ProfileChart.js'
 import { Guide, useGuide } from './Guide.js'
 import { fitHeader } from './headerFit.js'
 import { useRemembered } from './remembered.js'
@@ -46,6 +47,10 @@ import { emitProbes } from './probeOverlay.js'
 
 /** How long the button keeps offering a wider search after a run ends. */
 const OFFER_MS = 2000
+
+/** How far past each anchor the profile shows terrain, and at how many samples. */
+const WING_FRACTION = 0.02
+const WING_POINTS = 20
 import { toWgs84 } from '../shared/geo.js'
 
 type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roads' | 'regions'
@@ -402,6 +407,14 @@ export function App() {
    * and the next click is careful again.
    */
   const [reach, setReach] = useState(1)
+  /**
+   * The one anchor a run is allowed to move, or null for the ordinary two-ended run.
+   *
+   * Set only by a drop in the 3D view. Putting an anchor somewhere by looking at the ground is a
+   * decision; walking the *other* end away from wherever it was, as a two-ended run would, throws
+   * away a decision nobody revisited.
+   */
+  const [optimizeOnly, setOptimizeOnly] = useState<'a' | 'b' | null>(null)
   const [offer, setOffer] = useState<number | null>(null)
   // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
@@ -418,6 +431,8 @@ export function App() {
   const [layerError, setLayerError] = useState<string | null>(null)
   /** Whether the pointer is on the lines count, which is the cue to make them easy to spot. */
   const [emphasiseLines, setEmphasiseLines] = useState(false)
+  /** Whether the open line fills the window. In the URL, so a link can be sent from that view. */
+  const [full, setFull] = useState(initial.full ?? false)
   /**
    * Following the device, and the last position it gave.
    *
@@ -773,6 +788,22 @@ export function App() {
   }
 
   /**
+   * An anchor let go of in the 3D view: move it there, then let it find the top of the hill it
+   * landed on.
+   *
+   * The drop is a rough gesture -- a fingertip on a hillside seen at an angle -- and the settling
+   * afterwards is what turns it into a position. Careful reach, because the point of having placed
+   * it by eye is that it is roughly right already.
+   */
+  const dropAnchor = (which: 'a' | 'b', at: LatLon) => {
+    moveAnchor(which, at)
+    setOptimizeOnly(which)
+    setReach(1)
+    setOffer(null)
+    setOptimizing(true)
+  }
+
+  /**
    * Debug overlay of every anchor the openness scan kept. Development only: anchors.json is
    * gitignored and never deployed, and this is diagnostics for the scan rather than a feature.
    * Fetched on first use so the normal load never pays for ~25k points.
@@ -908,7 +939,8 @@ export function App() {
             rig,
             scene,
             reach,
-            onProbe: (e, n) => probes.push(e, n),
+            only: optimizeOnly ?? undefined,
+          onProbe: (e, n) => probes.push(e, n),
             // One honeycomb, around wherever the walk has got to, before every scan it makes.
             // Nothing is fetched for ground the line never reaches, and a step that stays inside
             // the window it started in -- almost all of them -- asks for nothing.
@@ -1025,6 +1057,52 @@ export function App() {
     )
   }, [detailed, sagPct, meta])
 
+  /**
+   * Ground a little way past each anchor, for the chart to draw behind the span.
+   *
+   * A profile that stops dead at the anchor says nothing about what that anchor is standing on the
+   * edge of, and whether the ground falls away past it or carries on flat is most of what tells a
+   * cliff top from a field. Read from the same samplers everything else uses, so it costs no fetch:
+   * the band already loaded for measuring the line reaches this far past its ends.
+   *
+   * Samples over ground nobody has covered are dropped rather than guessed, so a wing simply stops
+   * where the survey does.
+   */
+  const wings = useMemo(() => {
+    const c = detailed
+    if (!c || !(c.length > 0)) return null
+    const margin = c.length * WING_FRACTION
+    const [de, dn] = [(c.b.e - c.a.e) / c.length, (c.b.n - c.a.n) / c.length]
+    const at = (d: number) => ({ e: c.a.e + de * d, n: c.a.n + dn * d })
+    const arm = (from: number, to: number) => {
+      // Buildings and water from the same reader the measured stretch uses, over the wing's own two
+      // ends, so the two halves of the chart cannot disagree about what is a building.
+      const cover = coverAlong(at(from), at(to), WING_POINTS + 1)
+      const out: WingSample[] = []
+      for (let i = 0; i <= WING_POINTS; i++) {
+        const d = from + ((to - from) * i) / WING_POINTS
+        const { e, n } = at(d)
+        const ground = groundSampler.sample(e, n)
+        if (Number.isNaN(ground)) continue
+        const surface = surfaceSampler.sample(e, n)
+        out.push({
+          d,
+          ground,
+          surface: Number.isNaN(surface) ? ground : surface,
+          kind: cover.kind[i]!,
+          bare: cover.bare[i]!,
+        })
+      }
+      return out
+    }
+    const before = arm(-margin, 0)
+    const after = arm(c.length, c.length + margin)
+    // No margin at all rather than an empty strip: the chart's width is worth more than a gesture
+    // toward ground that was never measured.
+    if (before.length < 2 && after.length < 2) return null
+    return { before, after, margin }
+  }, [detailed, terrainVersion, coverVersion])
+
   const shownEnds = useMemo(
     () =>
       detailed && { a: { e: detailed.a.e, n: detailed.a.n }, b: { e: detailed.b.e, n: detailed.b.n } },
@@ -1104,6 +1182,7 @@ export function App() {
       showLines: changed(showLines, true),
       showHotspots: changed(showHotspots, true),
       showAreas: changed(showAreas, false),
+      full: changed(full, false),
       // Every class on is the default, so only a narrowed selection is worth a parameter.
       kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
       filters: movedFilters({
@@ -1112,7 +1191,7 @@ export function App() {
     })
   }, [
     bbox, selectedId, selected, custom, rig, sagPct, basemapMix, meta,
-    showLines, showHotspots, showAreas, kinds,
+    showLines, showHotspots, showAreas, full, kinds,
     minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
   ])
 
@@ -1413,6 +1492,7 @@ export function App() {
             <Details
               c={detailed}
               profile={shownProfile}
+              wings={wings}
               cover={cover}
               params={meta.params}
               roadState={selectedId === PLANNED_ID ? roadState : 'ok'}
@@ -1423,6 +1503,8 @@ export function App() {
                 if (optimizing) return endRun()
                 setReach(offer ?? 1)
                 setOffer(null)
+                // The button is the two-ended run, whatever the last 3D drop asked for.
+                setOptimizeOnly(null)
                 setOptimizing(true)
               }}
               planned={planned}
@@ -1430,6 +1512,11 @@ export function App() {
               failed={selectedId === PLANNED_ID ? terrainFailed : profileFailed}
               violations={remeasured?.violations ?? null}
               fetching={fetchingElevation}
+              sag={bounds && { pct: bounds.sag, floor: bounds.sagFloor }}
+              onSag={setSagPct}
+              full={full}
+              onFull={setFull}
+              onMoveAnchor={dropAnchor}
               rig={rig}
               onRig={setRig}
               onClose={() => setSelectedId(null)}

@@ -11,7 +11,7 @@ import {
 } from './optimize.js'
 import { windowsFor } from './terrain.js'
 import { measuredHalfWidth } from '../shared/profile.js'
-import { Grid } from '../shared/grid.js'
+import { Grid, type Pos } from '../shared/grid.js'
 import { planLine } from '../shared/plan.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
@@ -164,6 +164,32 @@ describe('optimizeFrame', () => {
       const settled = await settle(reach)
       expect(optimizeStep(settled, opts(reach), PLANNED_REFINE_FINEST)).toBeNull()
     }
+  })
+})
+
+describe('optimizeStep with one end held', () => {
+  const g = terrain(1 / 2)
+  const start = { a: at(85, 100), b: at(315, 100) }
+  const opts = (only?: 'a' | 'b') => ({
+    origin: start, ground: g, surface: g, sagRatio: 0.05, params: p, rig: null, reach: 1, only,
+  })
+  const moved = (from: Pos, to: Pos) => Math.hypot(to.e - from.e, to.n - from.n)
+
+  /**
+   * What a drop in the 3D view runs. Placing an anchor by looking at the ground it will stand on is
+   * a decision; a two-ended run would walk the other end away from a decision nobody revisited.
+   */
+  it('moves only the end it was given, and leaves the other exactly where it was', () => {
+    const step = optimizeStep(start, opts('a'), startingSpacing(1))
+    expect(step).not.toBeNull()
+    expect(moved(start.a, step!.a)).toBeGreaterThan(0)
+    expect(step!.b).toEqual(start.b)
+  })
+
+  it('moves both when it is not restricted, which is the ordinary run', () => {
+    const step = optimizeStep(start, opts(), startingSpacing(1))!
+    expect(moved(start.a, step.a)).toBeGreaterThan(0)
+    expect(moved(start.b, step.b)).toBeGreaterThan(0)
   })
 })
 
