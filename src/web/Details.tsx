@@ -113,6 +113,14 @@ interface Props {
   /** Whether elevation is still arriving, which is what makes a gap in the chart temporary. */
   fetching: boolean
   /**
+   * Whether anything is known about what stands on the ground under this line.
+   *
+   * False outside Brandenburg, where the terrain comes from a source with no surface model. Every
+   * figure stays finite -- the surface is taken to be the ground -- so clearance over terrain is
+   * exact and the canopy ones describe a bare field. Which is only acceptable while it is said.
+   */
+  canopyKnown: boolean
+  /**
    * Hard constraints the *re-measured* line fails, for a line out of the dataset. Null before the
    * finer profile has been built, and empty once it has and the line still clears everything.
    *
@@ -165,7 +173,7 @@ const KEEP_VISIBLE = 40
 
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
-  sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
+  canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
   rig, onRig, onClose,
 }: Props) {
   /**
@@ -185,6 +193,15 @@ export function Details({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [full])
+
+  /**
+   * Where the pointer is on the profile, shared with the 3D view below it.
+   *
+   * Held here because both views are this panel's children and neither is above the other: the
+   * chart says where the pointer is and the scene marks it, and nothing outside this panel has any
+   * use for the answer.
+   */
+  const [hoverAt, setHoverAt] = useState<number | null>(null)
 
   const [width, setWidth] = useState(preferredWidth)
   useEffect(() => {
@@ -391,6 +408,7 @@ export function Details({
                 cover={cover}
                 params={params}
                 fetching={fetching}
+                onHover={setHoverAt}
               />
               {/* Over the chart rather than instead of it, and only where the chart has a hole to
                   explain. Elevation is in flight for all sorts of reasons -- another line, the
@@ -449,22 +467,40 @@ export function Details({
       {isPlanned && c && (
         <>
           <div className="rig">
-            {(['a', 'b'] as const).map((which) => (
-              <Slider
-                key={which}
-                label={`Rig ${which.toUpperCase()}`}
-                value={c[which].aFrame}
-                min={0}
-                max={PLANNED_RIG_MAX}
-                step={0.1}
-                unit=" m"
-                format={(v) => v.toFixed(1)}
-                derived={rig === null}
-                onChange={(v) =>
-                  onRig(which === 'a' ? { a: v, b: c.b.aFrame } : { a: c.a.aFrame, b: v })
-                }
-              />
-            ))}
+            {(['a', 'b'] as const).map((which) => {
+              /**
+               * How high this end is rigged, or nothing.
+               *
+               * `aFrame` is measured against the ground the survey actually read, and over ground
+               * it has not read there is none -- so it is NaN, and handing NaN to a range input is
+               * both a React warning and a thumb in an arbitrary place. The set rig heights are
+               * preferred where there are any, since those are a decision rather than a
+               * measurement and are known whatever the terrain is doing.
+               */
+              const known = (end: 'a' | 'b') => rig?.[end] ?? c[end].aFrame
+              const here = known(which)
+              const measured = Number.isFinite(here)
+              return (
+                <Slider
+                  key={which}
+                  label={`Rig ${which.toUpperCase()}`}
+                  value={measured ? here : 0}
+                  min={0}
+                  max={PLANNED_RIG_MAX}
+                  step={0.1}
+                  unit={measured ? ' m' : ''}
+                  format={() => (measured ? here.toFixed(1) : DASH)}
+                  derived={rig === null}
+                  // Touching either slider is taking the heights by hand, so an end whose own
+                  // height was never measurable becomes a plain zero rather than staying unknown.
+                  onChange={(v) => {
+                    const other = known(which === 'a' ? 'b' : 'a')
+                    const kept = Number.isFinite(other) ? other : 0
+                    onRig(which === 'a' ? { a: v, b: kept } : { a: kept, b: v })
+                  }}
+                />
+              )
+            })}
             <button
               disabled={rig === null}
               onClick={() => onRig(null)}
@@ -515,6 +551,20 @@ export function Details({
         </div>
       )}
 
+      {/* Same shape as the road banner and the same reason: a figure nobody measured must not read
+          as a figure that came out well. */}
+      {!canopyKnown && (
+        <div className="violations" data-tone="wait">
+          <b>No surface model for this ground</b>
+          <div>
+            Only Brandenburg publishes one. Everywhere else the terrain is real and the canopy is
+            not: this line is measured as though the ground were bare, so{' '}
+            <strong>clearance and exposure are exact and the canopy figures are empty</strong>.
+            Trees, and anything else standing here, are yours to check.
+          </div>
+        </div>
+      )}
+
       {/* Said before the verdict, because it qualifies the verdict: a line can only be called clear
           of the roads under it once we know what they are. */}
       {isPlanned && roadState !== 'ok' && (
@@ -522,14 +572,16 @@ export function Details({
           <b>
             {roadState === 'loading'
               ? 'Checking what this line passes over…'
-              : 'Road data unavailable'}
+              : 'No roads or water for this ground'}
           </b>
           <div>
             {roadState === 'loading'
               ? 'Clearance over roads and railways is not in the figures below yet.'
-              : 'The road data that ships with this app did not load, so nothing below accounts ' +
-                'for roads or railways under this line. This is a broken deployment rather than ' +
-                'something you did.'}
+              : 'Outside Berlin and Brandenburg this is asked of OpenStreetMap as the line is ' +
+                'placed, and that request did not come back. Until it does, a span over a road ' +
+                'reads as a span over a field, and a span over a lake is held to the three metres ' +
+                'this search asks over ground rather than the one it asks over water. Cautious in ' +
+                'both directions, and blind in both. Moving an anchor asks again.'}
           </div>
         </div>
       )}
@@ -592,6 +644,7 @@ export function Details({
           // The sag actually drawn, not the dataset's: the slider re-measures every line, and the
           // span in the picture has to be the span in the figures beside it.
           sagRatio={c.length > 0 ? c.sag / c.length : 0}
+          hoverAt={hoverAt}
           onMoveAnchor={onMoveAnchor}
         />
       )}

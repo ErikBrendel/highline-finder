@@ -5,8 +5,10 @@ import { lineHeightAt } from '../shared/scoring.js'
 import {
   bareGround, ensureTerrain, missingWindows, onBuilding, onWindowActivity, surfaceSampler,
 } from './terrain.js'
-import { ensureCover, water } from './landcover.js'
-import { meshOf, samplePatch } from './terrainMesh.js'
+import { ensureCover, onCoverChange, water } from './landcover.js'
+import {
+  colorsOf, coverOf, meshOf, samplePatch, type Patch, type Readers,
+} from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Scene3D } from './scene3d.js'
@@ -39,6 +41,16 @@ import type { Scene3D } from './scene3d.js'
 const STEP_M = 1
 const MAX_SIDE = 480
 const MIN_SIDE = 128
+
+/**
+ * Vertices a side for the first pass, which exists to be quick rather than right.
+ *
+ * Reading the full square is a quarter of a million points through four samplers, which is most of
+ * a second of arithmetic with nothing on screen. A coarse pass is a fiftieth of that: the hillside
+ * is there in a frame or two, the fine one replaces it a moment later, and because both are
+ * measured from the coarse pass's own floor the swap does not move anything.
+ */
+const ROUGH_SIDE = 72
 
 /**
  * How many times life size heights may be drawn at.
@@ -102,24 +114,30 @@ export function stale(held: Ground | null, a: Pos, b: Pos): boolean {
 }
 
 export function Terrain3D({
-  a, b, anchorA, anchorB, sagRatio, onMoveAnchor,
+  a, b, anchorA, anchorB, sagRatio, hoverAt, onMoveAnchor,
 }: {
   a: Pos
   b: Pos
   anchorA: number
   anchorB: number
   sagRatio: number
+  /** Where along the span the profile chart's pointer is, in metres, or null when it has left. */
+  hoverAt?: number | null
   /** Omit to make the view read-only; with it, the anchors can be dragged onto the terrain. */
   onMoveAnchor?: (which: 'a' | 'b', at: LatLon) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const scene = useRef<Scene3D | null>(null)
   const ground = useRef<Ground | null>(null)
+  /** The heights as read, kept so a lake arriving later repaints them without reading them again. */
+  const patch = useRef<Patch | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [failed, setFailed] = useState<string | null>(null)
   const [measured, setMeasured] = useState(1)
   /** Windows still to arrive and how many there were, so the wait has a length. */
   const [fetching, setFetching] = useState<{ done: number; total: number } | null>(null)
+  /** Whether the roads and water for the whole square are still on their way. */
+  const [coverPending, setCoverPending] = useState(false)
   const [exaggeration, setExaggeration] = useState(preferred)
   /** Bumped when the ground under the view has to be read again. */
   const [epoch, setEpoch] = useState(0)
@@ -209,33 +227,38 @@ export function Terrain3D({
         done++
         setFetching(done >= total ? null : { done, total })
       })
-      // Land cover comes from blocks this app ships with itself, so it is a local read rather than
-      // a request; asked for alongside the elevation so lakes are lakes in the first frame rather
-      // than brown ground that turns blue later.
+      // Elevation only. Land cover is asked for below and never waited on: outside Brandenburg it
+      // is an Overpass request that takes tens of seconds, and having it in here meant the view sat
+      // on "reading the ground" long after the ground had been read. A picture of the terrain now
+      // is worth more than a picture with the lakes already in it later, and the lakes repaint
+      // themselves when they land.
       try {
-        await Promise.all([
-          ensureTerrain(g.centre, g.centre, g.halfSide),
-          ensureCover(a, b),
-        ])
+        await ensureTerrain(g.centre, g.centre, g.halfSide)
       } finally {
         watching()
         setFetching(null)
       }
       if (dropped) return
 
-      const side = Math.min(
-        MAX_SIDE,
-        Math.max(MIN_SIDE, Math.round((2 * g.halfSide) / STEP_M) + 1),
-      )
-      const patch = samplePatch(g.centre, g.halfSide, side, {
+      const readers: Readers = {
+        // Both readings nearest, and that matters more than it looks. Bare earth has no bilinear
+        // reader, so pairing a bilinear surface with a nearest ground compares two different
+        // samplings of the same field -- and where the field is a dam wall or a cliff, the two
+        // differ by metres between neighbouring cells. That difference is what `classOf` reads as
+        // vegetation, so a bare concrete face came out in canopy green. Read alike, ground with
+        // nothing standing on it gives exactly zero.
         ground: bareGround,
-        surface: (e, n) => surfaceSampler.sample(e, n),
+        surface: (e, n) => surfaceSampler.nearest(e, n),
         building: onBuilding,
         water: (e, n) => water.covers(e, n),
-      })
-      setMeasured(patch.measured)
-      g.datum = patch.low
-      const mesh = meshOf(patch, patch.low)
+      }
+      const rough = samplePatch(g.centre, g.halfSide, ROUGH_SIDE, readers)
+      setMeasured(rough.measured)
+      patch.current = rough
+      // The coarse pass sets the floor everything is measured from, and the fine one keeps it, so
+      // replacing the ground does not lift or drop the span hanging over it.
+      g.datum = rough.low
+      const mesh = meshOf(rough, g.datum)
       if (!mesh.indices.length) throw new Error('no elevation for the ground around this line')
 
       const { createScene } = await import('./scene3d.js')
@@ -258,6 +281,48 @@ export function Terrain3D({
         },
       })
       setState('ready')
+
+      /**
+       * And now the same square read properly.
+       *
+       * After a turn of the event loop, so the coarse hillside actually paints before the main
+       * thread disappears into a quarter of a million samples. One metre a vertex is the whole of
+       * what the survey knows; the cap is what a phone can hold.
+       */
+      await new Promise((done) => setTimeout(done, 0))
+      if (dropped) return
+      const side = Math.min(
+        MAX_SIDE,
+        Math.max(MIN_SIDE, Math.round((2 * g.halfSide) / STEP_M) + 1),
+      )
+      const fine = samplePatch(g.centre, g.halfSide, side, readers)
+      if (dropped) return
+      patch.current = fine
+      setMeasured(fine.measured)
+      scene.current?.setMesh(meshOf(fine, g.datum))
+
+      /**
+       * And now the rest of the square's land cover, which the picture does not wait for.
+       *
+       * Inside Brandenburg the blocks are already held and this returns at once. Outside it, every
+       * kilometre of the square is a request to Overpass -- so the ground is drawn brown, the lakes
+       * arrive when they arrive, and only the colours change when they do.
+       */
+      const half = g.halfSide
+      setCoverPending(true)
+      ensureCover(
+        { e: g.centre.e - half, n: g.centre.n - half },
+        { e: g.centre.e + half, n: g.centre.n + half },
+        0,
+      )
+        .catch((e: unknown) => report('fetching land cover for the 3D view', e))
+        .finally(() => {
+          if (dropped) return
+          setCoverPending(false)
+          // Once on our own account as well as on every announcement: this scene may have been
+          // built after the cover it needs had already landed, and then nothing would announce.
+          repaint.current()
+        })
     }
 
     build().catch((e: unknown) => {
@@ -274,6 +339,33 @@ export function Terrain3D({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epoch])
+
+  /**
+   * Repaint whenever land cover lands, whoever asked for it.
+   *
+   * Not in the build above, after this view's own request: the panel asks for the line's corridor
+   * at the same time, and either request can be the one that delivers the lake. Subscribing means
+   * the ground is repainted when the data exists rather than when this component's promise happens
+   * to settle -- and it goes on working after an anchor is dropped somewhere new.
+   */
+  const repaint = useRef(() => {
+    if (!patch.current || !scene.current) return
+    const cover = coverOf(patch.current, {
+      building: onBuilding,
+      water: (e, n) => water.covers(e, n),
+    })
+    patch.current.cover.set(cover)
+    scene.current.setColors(colorsOf(cover))
+  })
+  useEffect(() => onCoverChange(() => repaint.current()), [])
+
+  /** The chart's pointer, as a fraction of the span, so the scene need not know about metres. */
+  useEffect(() => {
+    const length = Math.hypot(b.e - a.e, b.n - a.n)
+    scene.current?.setHover(
+      hoverAt === null || hoverAt === undefined || length <= 0 ? null : hoverAt / length,
+    )
+  }, [hoverAt, a.e, a.n, b.e, b.n, state])
 
   // Moving the span: the cheap half, and the one that runs on every step of an optimiser run.
   const lineKey = [a.e, a.n, b.e, b.n, anchorA, anchorB, sagRatio]
@@ -323,6 +415,7 @@ export function Terrain3D({
               </button>
             ))}
           </span>
+          {coverPending && ' finding water and roads…'}
           {measured < 0.995 && ` ${Math.round((1 - measured) * 100)} % unsurveyed ·`}
           {onMoveAnchor ? ' drag an anchor onto the ground · drag elsewhere to turn' : ' drag to turn'}
         </div>

@@ -361,6 +361,16 @@ export function metricsAt(
  * qualify instead of discarding it -- "why does this spot not work" is as useful an answer as a
  * list of spots that do.
  */
+/**
+ * `maxLength` is not among the faults, on purpose.
+ *
+ * It is a bound on the *search* -- how far apart two anchors may be for the pipeline to bother
+ * enumerating the pair -- and not a statement about a line. A 600 m span is a harder rig and a
+ * bigger commitment, and it is not a rule violation; the figures below describe it perfectly well.
+ * No found candidate can exceed it anyway, since nothing longer is ever paired, so this only ever
+ * fired at a line somebody placed by hand and it told them their own line was wrong for being long.
+ * The sanity ceiling on a hand-placed span lives in planPoints.ts, where it belongs.
+ */
 export function violationsOf(
   m: Metrics,
   length: number,
@@ -370,7 +380,6 @@ export function violationsOf(
 ): string[] {
   const out: string[] = []
   if (length < p.minLength) out.push(`${length.toFixed(0)} m is under the ${p.minLength} m minimum`)
-  if (length > p.maxLength) out.push(`${length.toFixed(0)} m is over the ${p.maxLength} m maximum`)
   if (m.clearanceMargin < 0) {
     /**
      * The shortfall, which is one place on the span, and not a clearance next to a requirement.
@@ -479,8 +488,7 @@ export function penaltyOf(m: Metrics, length: number, offLevel: number, p: Param
     over(p.minExposure - m.exposure, p.minExposure, PENALTY.exposure) +
     over(m.canopyBlockedFraction - p.maxCanopyBlocked, 1 - p.maxCanopyBlocked, PENALTY.canopy) +
     over(offLevel - budget, budget, PENALTY.level) +
-    over(p.minLength - length, p.minLength, PENALTY.length) +
-    over(length - p.maxLength, p.maxLength, PENALTY.length)
+    over(p.minLength - length, p.minLength, PENALTY.length)
   )
 }
 

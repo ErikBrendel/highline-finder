@@ -55,7 +55,11 @@ export function Guide({ onClose }: { onClose: () => void }) {
           <h2><span className="ico">🛰️</span>The data</h2>
           <ul>
             <li>Terrain, canopy and buildings, published free and open by the state.</li>
-            <li>Berlin and Brandenburg only. The grey outlines are where it stops.</li>
+            <li>
+              Searched in Berlin and Brandenburg only &mdash; the grey outlines are where that
+              stops. Past them you can still place two anchors by hand and have the line measured,
+              wherever a state survey covers the ground.
+            </li>
           </ul>
 
           <h2><span className="ico">🗺️</span>On the map</h2>

@@ -1,5 +1,7 @@
 import maplibregl from 'maplibre-gl'
 import { fetchCached } from './tileCache.js'
+import { applyShading } from './shadeMath.js'
+import { STACKED, stackedBitmap } from './stacked.js'
 
 /**
  * Relief shading applied to a map instead of laid over it.
@@ -22,15 +24,6 @@ import { fetchCached } from './tileCache.js'
  */
 
 const SCHEME = 'shaded'
-
-/**
- * Grey the shaded-relief product renders flat ground at, as a channel value.
- *
- * #c4c4c4. Fixed rather than measured per tile: a per-tile baseline would make the same hillside
- * lighter or darker depending on what else happened to be in frame, which is exactly the artefact
- * this is meant to remove.
- */
-export const SHADE_BASELINE = 196
 
 /** Raw tile templates for one composite, before MapLibre substitutes anything into them. */
 interface Pair {
@@ -60,21 +53,15 @@ const fill = (template: string, z: string, x: string, y: string, bbox: string) =
     .replace('{y}', y)
 
 /**
- * Multiplies `shade` into `base` in place, relative to the flat-ground grey.
+ * One input tile, however it is addressed.
  *
- * Exported for its test, which is the only way to check the arithmetic: everything else here is
- * fetching and encoding.
+ * A basemap here is no longer a URL a server answers: ortho and relief are each assembled from
+ * whichever surveys cover the tile, and that assembly has its own scheme. Only MapLibre can resolve
+ * a scheme it was given a handler for, and this is not MapLibre -- so a stacked input is composited
+ * directly rather than fetched, which is what it would have done anyway.
  */
-export function applyShading(base: Uint8ClampedArray, shade: Uint8ClampedArray): void {
-  for (let i = 0; i < base.length; i += 4) {
-    const factor = shade[i]! / SHADE_BASELINE
-    base[i] = base[i]! * factor
-    base[i + 1] = base[i + 1]! * factor
-    base[i + 2] = base[i + 2]! * factor
-  }
-}
-
 async function bitmap(url: string, signal: AbortSignal): Promise<ImageBitmap> {
+  if (url.startsWith(`${STACKED}://`)) return stackedBitmap(url, signal)
   return createImageBitmap(new Blob([await fetchCached(url, signal)]))
 }
 

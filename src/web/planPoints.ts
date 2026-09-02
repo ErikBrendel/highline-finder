@@ -20,11 +20,12 @@ export interface CustomPoints {
 /**
  * Longest span the planner will hold both ends of.
  *
- * Not a rigging limit -- `maxLength` is that, and an over-long line is reported as a violation
- * rather than refused. This exists because a planned line fetches an elevation window for every
- * 256 m it crosses: a stray click on the far side of the map would start pulling down a corridor
- * hundreds of windows long before anyone could stop it. Past this the far end is dropped instead,
- * leaving a single placed point, which fetches nothing at all.
+ * Not a rigging limit and not a judgement: a hand-placed line has no length it is too long at, and
+ * `maxLength` is a bound on what the *search* enumerates rather than a rule about a span. This
+ * exists because a planned line fetches an elevation window for every 256 m it crosses: a stray
+ * click on the far side of the map would start pulling down a corridor hundreds of windows long
+ * before anyone could stop it. Past this the far end is dropped instead, leaving a single placed
+ * point, which fetches nothing at all.
  */
 export const PLANNED_MAX_SPAN = 4000
 

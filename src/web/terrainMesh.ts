@@ -16,7 +16,14 @@ import type { Pos } from '../shared/grid.js'
 export const COVER = { ground: 0, canopy: 1, building: 2, water: 3 } as const
 export type CoverClass = (typeof COVER)[keyof typeof COVER]
 
-/** What a patch needs to know about the world. NaN height means the survey has not covered it. */
+/**
+ * What a patch needs to know about the world. NaN height means the survey has not covered it.
+ *
+ * The two height readers must sample the same way as each other. What decides canopy is the
+ * difference between them, so a bilinear reading of one against a nearest reading of the other
+ * finds vegetation on every cliff -- the two samplings of one field disagree by metres where the
+ * field is steep, and nothing here can tell that apart from a stand of trees.
+ */
 export interface Readers {
   /** Bare earth, with nothing standing on it. */
   ground(e: number, n: number): number
@@ -94,6 +101,32 @@ export function samplePatch(centre: Pos, halfSide: number, side: number, read: R
   }
 }
 
+/**
+ * The cover classes again, over a patch already read.
+ *
+ * Land cover outside Brandenburg is fetched from Overpass as the view is opened, and arrives some
+ * seconds after the ground does. Re-reading the heights to colour a lake in would mean sampling a
+ * quarter of a million points twice; this walks the same grid and asks only the two questions that
+ * have changed their answer.
+ */
+export function coverOf(patch: Patch, read: Pick<Readers, 'building' | 'water'>): Uint8Array {
+  const { side, step, centre, height, ground } = patch
+  const half = ((side - 1) * step) / 2
+  const cover = new Uint8Array(side * side)
+  for (let row = 0; row < side; row++) {
+    const n = centre.n + half - row * step
+    for (let col = 0; col < side; col++) {
+      const i = row * side + col
+      cover[i] = classOf(centre.e - half + col * step, n, ground[i]!, height[i]!, {
+        ...read,
+        ground: () => NaN,
+        surface: () => NaN,
+      })
+    }
+  }
+  return cover
+}
+
 /** How tall something has to stand above bare earth before it is vegetation rather than noise. */
 const CANOPY_FROM = 2
 
@@ -132,11 +165,23 @@ export interface MeshData {
  * away from the camera every time the factor changed. Measured from its own floor, the ground stays
  * where it is and only its relief grows, which is what the factor is for.
  */
+/** The palette applied to a set of classes, which is the only thing a late lake changes. */
+export function colorsOf(cover: Uint8Array): Float32Array {
+  const colors = new Float32Array(cover.length * 3)
+  for (let i = 0; i < cover.length; i++) {
+    const rgb = COVER_RGB[cover[i] as CoverClass]
+    colors[i * 3] = rgb[0]
+    colors[i * 3 + 1] = rgb[1]
+    colors[i * 3 + 2] = rgb[2]
+  }
+  return colors
+}
+
 export function meshOf(patch: Patch, datum = 0): MeshData {
-  const { side, step, height, cover } = patch
+  const { side, step, height } = patch
   const half = ((side - 1) * step) / 2
   const positions = new Float32Array(side * side * 3)
-  const colors = new Float32Array(side * side * 3)
+  const colors = colorsOf(patch.cover)
 
   for (let row = 0; row < side; row++) {
     for (let col = 0; col < side; col++) {
@@ -145,10 +190,6 @@ export function meshOf(patch: Patch, datum = 0): MeshData {
       positions[i * 3] = col * step - half
       positions[i * 3 + 1] = Number.isNaN(h) ? 0 : h - datum
       positions[i * 3 + 2] = row * step - half
-      const rgb = COVER_RGB[cover[i] as CoverClass]
-      colors[i * 3] = rgb[0]
-      colors[i * 3 + 1] = rgb[1]
-      colors[i * 3 + 2] = rgb[2]
     }
   }
 

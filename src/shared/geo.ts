@@ -18,6 +18,71 @@ export function toWgs84(e: number, n: number): { lat: number; lon: number } {
   return { lat, lon }
 }
 
+/**
+ * The neighbouring zone, for the surveys west of 12 degrees east.
+ *
+ * Everything this project computes in is zone 33, because Brandenburg is. Saxony is too. Saxony-
+ * Anhalt is not: Halle sits at 11.97 E, a few kilometres the wrong side of the line, and its survey
+ * publishes in zone 32 accordingly. The two describe the same ground and disagree about what to
+ * call it by hundreds of kilometres of easting, so a raster from one cannot be laid into a grid of
+ * the other without being carried across.
+ */
+export const UTM32 =
+  '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs'
+
+/** Which zone a piece of ground is published in by whoever surveyed it. */
+export const zoneOf = (lon: number): 32 | 33 => (lon < 12 ? 32 : 33)
+
+export function toUtm32(lat: number, lon: number): [number, number] {
+  const [e, n] = proj4('EPSG:4326', UTM32, [lon, lat])
+  return [e, n]
+}
+
+/**
+ * A coordinate mapping, sampled coarsely and interpolated between.
+ *
+ * Reprojecting a raster means asking where every destination cell falls in the source, and a window
+ * is sixty-five thousand cells: proj4 answers about two hundred thousand a second, so doing it
+ * honestly would cost a third of a second a window. Over a square a few hundred metres across the
+ * mapping between two UTM zones is very nearly affine, so it is evaluated on a lattice -- a few
+ * hundred calls -- and read off bilinearly in between. The residual over a 256 m window at a 16 m
+ * lattice is well under a millimetre, against a source grid of one metre.
+ */
+export function latticeProjector(
+  project: (e: number, n: number) => [number, number],
+  e0: number,
+  n0: number,
+  size: number,
+  steps = 16,
+): (e: number, n: number) => [number, number] {
+  const step = size / steps
+  const xs = new Float64Array((steps + 1) * (steps + 1))
+  const ys = new Float64Array(xs.length)
+  for (let row = 0; row <= steps; row++) {
+    for (let col = 0; col <= steps; col++) {
+      const [x, y] = project(e0 + col * step, n0 + row * step)
+      xs[row * (steps + 1) + col] = x
+      ys[row * (steps + 1) + col] = y
+    }
+  }
+  const side = steps + 1
+  return (e, n) => {
+    const fx = Math.min(steps - 1e-9, Math.max(0, (e - e0) / step))
+    const fy = Math.min(steps - 1e-9, Math.max(0, (n - n0) / step))
+    const cx = Math.floor(fx)
+    const cy = Math.floor(fy)
+    const tx = fx - cx
+    const ty = fy - cy
+    const at = (a: Float64Array, r: number, c: number) => a[r * side + c]!
+    const mix = (a: Float64Array) =>
+      at(a, cy, cx) * (1 - tx) * (1 - ty) +
+      at(a, cy, cx + 1) * tx * (1 - ty) +
+      at(a, cy + 1, cx) * (1 - tx) * ty +
+      at(a, cy + 1, cx + 1) * tx * ty
+    return [mix(xs), mix(ys)]
+  }
+}
+
 export function tileId(e: number, n: number): string {
   return `33${Math.floor(e / 1000)}-${Math.floor(n / 1000)}`
 }

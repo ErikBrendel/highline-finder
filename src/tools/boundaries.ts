@@ -1,35 +1,63 @@
-import { mkdir, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { toUtm33, toWgs84 } from '../shared/geo.js'
 import { MEMBER_WAY, readNodes, readWaysAndRelations } from './osmPbf.js'
+import { ensureExtract } from './extract.js'
 
 /**
- * Extracts the Berlin and Brandenburg state borders from the OpenStreetMap extract.
+ * Extracts the state borders of everywhere this app can measure, from OpenStreetMap extracts.
  *
  * Run it by hand, about never: `npm run boundaries`. A state border moves less often than anything
  * else this project draws, and the output is committed, so the deployed site asks nothing of anyone
- * to know where Brandenburg ends.
+ * to know where a survey ends.
  *
- * The same extract `osmRefresh` already downloads and the same three passes, for the same reason:
- * a relation names its member ways, the ways come first in the file, and nothing about a member way
- * says which relation wants it. So the relations are read to learn the ids, the ways are read again
- * to get their node references, and the nodes are read to get positions.
+ * One extract per state, because Geofabrik cuts them that way and a state's own extract is the
+ * cheapest place to find its own relation. Each is read in the same three passes, for the same
+ * reason: a relation names its member ways, the ways come first in the file, and nothing about a
+ * member way says which relation wants it. So the relations are read to learn the ids, the ways are
+ * read again to get their node references, and the nodes are read to get positions.
  *
  * Only outer members are kept. Brandenburg's relation carries Berlin as an inner ring -- the state
  * genuinely has a hole in it -- and drawing that would put a second line under Berlin's own.
  */
 
-const CACHE = new URL('../../data/cache/', import.meta.url).pathname
-const PBF = join(CACHE, 'brandenburg-latest.osm.pbf')
 const OUT = new URL('../web/public/boundaries.json', import.meta.url).pathname
+/**
+ * A second, much coarser copy, bundled rather than fetched.
+ *
+ * The drawn outlines are a hundred kilobytes and arrive with the map. The elevation sources need to
+ * know which state a point is in *before* anything has loaded, to decide which survey to ask, and
+ * they need it synchronously -- so they get their own version, simplified until it is a few dozen
+ * points a state and imported as data. It is a hint and not a border: a source that is asked about
+ * ground it does not hold declines, and the next one is asked.
+ */
+const COARSE_OUT = new URL('../web/outlines.json', import.meta.url).pathname
+/**
+ * Tolerance for that copy, in metres.
+ *
+ * Deliberately far coarser than the drawn outline. What it has to be is smaller than the margin
+ * the coverage test allows around it -- see SOURCE_MARGIN -- so that a shortcut across a bend can
+ * never put real ground outside the source that holds it.
+ */
+const COARSE_TOLERANCE = 2500
 
-/** The two relations wanted, by the tags that identify a German federal state. */
-const WANTED = ['Berlin', 'Brandenburg']
-const isState = (tags: Record<string, string>) =>
+/**
+ * Which relations to trace, and which extract holds each.
+ *
+ * The list is the ground the planner can measure: Brandenburg and Berlin because the search covers
+ * them, Saxony and Saxony-Anhalt because their surveys answer a browser. Berlin comes out of
+ * Brandenburg's extract, which encloses it.
+ */
+const STATES: { extract: string; names: string[] }[] = [
+  { extract: 'brandenburg', names: ['Berlin', 'Brandenburg'] },
+  { extract: 'sachsen', names: ['Sachsen'] },
+  { extract: 'sachsen-anhalt', names: ['Sachsen-Anhalt'] },
+]
+
+const isState = (tags: Record<string, string>, wanted: string[]) =>
   tags.boundary === 'administrative' &&
   tags.admin_level === '4' &&
   tags.type === 'boundary' &&
-  WANTED.includes(tags.name ?? '')
+  wanted.includes(tags.name ?? '')
 
 /**
  * Douglas-Peucker, on projected metres so the tolerance means what it says.
@@ -132,12 +160,9 @@ function stitch(parts: number[][][]): { chains: number[][][]; gaps: number[]; st
   return { chains, gaps, stubs }
 }
 
-async function main() {
-  try {
-    await stat(PBF)
-  } catch {
-    throw new Error(`${PBF} is missing -- run \`npm run osm\` first, which downloads it`)
-  }
+/** Every outline in one extract, as GeoJSON features. */
+async function trace(extract: string, WANTED: string[]) {
+  const PBF = await ensureExtract(extract)
 
   console.log('[1/3] relations')
   const wantWays = new Map<number, string>()
@@ -146,7 +171,7 @@ async function main() {
     PBF,
     () => {},
     (rel) => {
-      if (!isState(rel.tags)) return
+      if (!isState(rel.tags, WANTED)) return
       const name = rel.tags.name!
       found.set(name, (found.get(name) ?? 0) + 1)
       for (const m of rel.members) {
@@ -219,10 +244,68 @@ async function main() {
     }
   })
 
+  return features
+}
+
+/**
+ * The outline of the ground the German extracts cover, from Geofabrik's own clipping polygon.
+ *
+ * Not a political border and better than one for this purpose: it is the shape that decides what is
+ * in a German extract, which is the shape of what the republisher of the state surveys can possibly
+ * hold. Forty kilobytes of text and one ring, where the country's real boundary relation is a
+ * four-gigabyte download away.
+ *
+ * The format is a header line, a section name, then coordinate pairs until END.
+ */
+const GERMANY_POLY = 'https://download.geofabrik.de/europe/germany.poly'
+
+async function germany(): Promise<[number, number][]> {
+  console.log(`\n== Germany\ndownloading ${GERMANY_POLY}`)
+  const res = await fetch(GERMANY_POLY, { headers: { 'User-Agent': 'highline-finder/0.1' } })
+  if (!res.ok) throw new Error(`germany.poly failed: HTTP ${res.status}`)
+  const ring: [number, number][] = []
+  for (const line of (await res.text()).split('\n')) {
+    const pair = line.trim().split(/\s+/).map(Number)
+    if (pair.length === 2 && pair.every((v) => Number.isFinite(v))) ring.push([pair[0]!, pair[1]!])
+  }
+  if (ring.length < 100) throw new Error(`germany.poly parsed as ${ring.length} points`)
+  console.log(`  ${ring.length.toLocaleString()} points`)
+  return ring
+}
+
+async function main() {
+  const features = []
+  for (const { extract, names } of STATES) {
+    console.log(`\n== ${names.join(', ')}`)
+    features.push(...(await trace(extract, names)))
+  }
+
+  const coarse = [
+    ...features.map((f) => ({
+      name: f.properties.name,
+      rings: f.geometry.coordinates.map((r) => r.map(([lon, lat]) => [lon!, lat!])),
+    })),
+    { name: 'Germany', rings: [await germany()] },
+  ].map((f) => ({
+    name: f.name,
+    rings: f.rings.map((ring) =>
+      simplify(ring as number[][], COARSE_TOLERANCE / 111_320).map(([lon, lat]) => [
+        Math.round(lon! * 1e3) / 1e3,
+        Math.round(lat! * 1e3) / 1e3,
+      ]),
+    ),
+  }))
+  const coarseText = JSON.stringify(coarse)
+  await writeFile(COARSE_OUT, `${coarseText}\n`)
+  console.log(
+    `wrote outlines.json: ${coarse
+      .map((c) => `${c.name} ${c.rings.reduce((n, r) => n + r.length, 0)}`)
+      .join(', ')} points, ${(coarseText.length / 1024).toFixed(1)} KB`,
+  )
   await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
   const text = JSON.stringify({ type: 'FeatureCollection', features })
   await writeFile(OUT, text)
-  console.log(`\nwrote boundaries.json (${(text.length / 1024).toFixed(0)} KB)`)
+  console.log(`\nwrote boundaries.json: ${features.length} outlines, ${(text.length / 1024).toFixed(0)} KB`)
 }
 
 /**

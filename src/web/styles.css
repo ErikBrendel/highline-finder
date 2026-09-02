@@ -577,7 +577,10 @@ header[data-measuring] .spacer { flex: none; }
   .details[data-full='true'] { animation-duration: 1ms; }
 }
 .details[data-full='true'] .grip { display: none; }
-.details[data-full='true'] .body { padding: 12px 16px 16px; }
+/* No padding above the head, because the head is the thing pinned to the top of this box: `top: 0`
+   sticks to the padding edge, so any padding there is a strip of window that content scrolls up
+   through and reappears in. The head carries that space itself instead. */
+.details[data-full='true'] .body { padding: 0 16px 16px; }
 /*
  * The profile takes the whole width and everything else queues underneath it.
  *
@@ -594,7 +597,7 @@ header[data-measuring] .spacer { flex: none; }
   top: 0;
   z-index: 1;
   margin-bottom: 12px;
-  padding: 4px 0 8px;
+  padding: 12px 0 8px;
   background: var(--bg);
 }
 .details[data-full='true'] .chart { width: 100%; }
@@ -803,7 +806,12 @@ header[data-measuring] .spacer { flex: none; }
 }
 
 /*
- * Shown over the middle of the map when the view has left the searched ground altogether.
+ * Shown when the view has left the searched ground.
+ *
+ * Two positions, because it says two different things. Where a line can still be planned it is a
+ * note about a map that works, so it sits at the top out of the way of the ground someone is about
+ * to right-click on. Where nothing can be measured at all there is nothing to get out of the way
+ * of, and the middle is where a message that ends the matter belongs.
  *
  * Under the control column and the details card in the stack, and transparent to the pointer: it is
  * an explanation for an empty map, not a thing to interact with, and it must never be what a drag
@@ -812,9 +820,9 @@ header[data-measuring] .spacer { flex: none; }
 .offmap {
   position: absolute;
   z-index: 2;
-  top: 50%;
+  top: 14px;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   max-width: min(340px, calc(100% - 40px));
   padding: 10px 14px;
   text-align: center;
@@ -826,6 +834,10 @@ header[data-measuring] .spacer { flex: none; }
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   pointer-events: none;
+}
+.offmap[data-where='nothing'] {
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 /* Legend for whichever debug view is active. */

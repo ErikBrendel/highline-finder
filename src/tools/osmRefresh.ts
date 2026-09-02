@@ -1,12 +1,11 @@
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { createWriteStream } from 'node:fs'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { toUtm33 } from '../shared/geo.js'
 import { classifyWay } from '../shared/roads.js'
+import { waterKind } from '../shared/water-tags.js'
 import { BLOCK, blockKeysFor, encodeBlock, type OsmFeature, type OsmKind } from '../shared/osmBlocks.js'
 import { MEMBER_WAY, readNodes, readWaysAndRelations, type PbfWay } from './osmPbf.js'
+import { ensureExtract, extractPath } from './extract.js'
 
 /**
  * Rebuilds the roads and water this project ships with itself, from an OpenStreetMap extract.
@@ -28,46 +27,17 @@ import { MEMBER_WAY, readNodes, readWaysAndRelations, type PbfWay } from './osmP
  *   3. assemble, project, block and write
  */
 
-const SOURCE = 'https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf'
-const CACHE = new URL('../../data/cache/', import.meta.url).pathname
 const OUT = new URL('../web/public/osm/', import.meta.url).pathname
-const PBF = join(CACHE, 'brandenburg-latest.osm.pbf')
-
-/** Water tags worth drawing. Same set the Overpass query used, so nothing changes visually. */
-function waterKind(tags: Record<string, string>): OsmKind | null {
-  if (tags.natural === 'water') return 'water'
-  if (tags.waterway === 'riverbank') return 'water'
-  if (tags.landuse === 'reservoir' || tags.landuse === 'basin') return 'water'
-  // Rivers and streams as lines, for the chart to draw where there is no polygon.
-  if (tags.waterway === 'river' || tags.waterway === 'canal') return 'waterway'
-  return null
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function download(): Promise<void> {
-  if (await exists(PBF)) {
-    const { size, mtime } = await stat(PBF)
-    console.log(
-      `extract cached: ${(size / 1048576).toFixed(0)} MB, downloaded ${mtime.toISOString().slice(0, 10)}` +
-        ` (delete it to refresh)`,
-    )
-    return
-  }
-  await mkdir(CACHE, { recursive: true })
-  console.log(`downloading ${SOURCE}`)
-  const res = await fetch(SOURCE, { headers: { 'User-Agent': 'highline-finder/0.1' } })
-  if (!res.ok || !res.body) throw new Error(`extract download failed: HTTP ${res.status}`)
-  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(PBF))
-  console.log(`  ${((await stat(PBF)).size / 1048576).toFixed(0)} MB`)
-}
+/**
+ * Brandenburg only, deliberately.
+ *
+ * These blocks are shipped with the app, and roads are a hard constraint the *search* enforces --
+ * so what is here is the ground the search covers. A planned line elsewhere is measured without
+ * them and the panel says so; shipping the road network of every state a browser can fetch
+ * elevation for would be tens of megabytes for the sake of a banner not appearing.
+ */
+const STATE = 'brandenburg'
+const PBF = extractPath(STATE)
 
 /** A way we intend to keep, with its classification already decided. */
 interface Kept {
@@ -150,7 +120,7 @@ const reverse = (pts: number[]): number[] => {
 
 async function main(): Promise<void> {
   const started = Date.now()
-  await download()
+  await ensureExtract(STATE)
 
   /**
    * Relations first, on their own pass.
@@ -313,7 +283,7 @@ async function main(): Promise<void> {
     join(OUT, 'index.json'),
     JSON.stringify({
       block: BLOCK,
-      source: SOURCE,
+      source: `geofabrik ${STATE}`,
       generated: new Date().toISOString(),
       blocks: [...blocks.keys()].sort(),
     }),

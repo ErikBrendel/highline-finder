@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COVER, meshOf, samplePatch, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, colorsOf, coverOf, meshOf, samplePatch, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -87,5 +87,45 @@ describe('meshOf', () => {
     expect(floored.positions[1]).toBe(0)
     expect(floored.positions[0]).toBe(raw.positions[0])
     expect(floored.positions[2]).toBe(raw.positions[2])
+  })
+})
+
+/**
+ * Land cover outside Brandenburg is fetched while the view is already on screen, so the ground is
+ * drawn brown and repainted when the lakes arrive. Repainting must not mean reading the heights
+ * again -- that is a quarter of a million samples for a colour change.
+ */
+describe('coverOf', () => {
+  const patch = samplePatch(centre, 10, 3, flat())
+
+  it('finds what was not there when the heights were read', () => {
+    expect([...patch.cover]).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0])
+    const wet = coverOf(patch, { building: () => false, water: () => true })
+    expect([...wet]).toEqual(Array(9).fill(COVER.water))
+  })
+
+  it('walks the same grid, so a colour lands on the point it was read for', () => {
+    const seen: [number, number][] = []
+    coverOf(patch, { building: () => false, water: (e, n) => (seen.push([e, n]), false) })
+    // Row 0 is the north edge and column 0 the west one, exactly as samplePatch reads them.
+    expect(seen[0]).toEqual([centre.e - 10, centre.n + 10])
+    expect(seen[8]).toEqual([centre.e + 10, centre.n - 10])
+  })
+
+  it('still knows canopy from the heights it already has', () => {
+    const trees = samplePatch(centre, 10, 2, flat({ ground: () => 50, surface: () => 60 }))
+    const again = coverOf(trees, { building: () => false, water: () => false })
+    expect([...again]).toEqual(Array(4).fill(COVER.canopy))
+  })
+})
+
+describe('colorsOf', () => {
+  it('is three floats a vertex, in the palette the chart uses', () => {
+    const colors = colorsOf(Uint8Array.from([COVER.water, COVER.ground]))
+    expect(colors).toHaveLength(6)
+    // Float32, so compared as such rather than against the doubles the palette is written in.
+    for (const [i, want] of [...COVER_RGB[COVER.water], ...COVER_RGB[COVER.ground]].entries()) {
+      expect(colors[i]).toBeCloseTo(want, 5)
+    }
   })
 })

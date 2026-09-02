@@ -80,18 +80,28 @@ describe('encode and decode', () => {
     expect(() => decodeBlock(key, new Uint8Array([1, 2, 3]))).toThrow()
   })
 
-  it('drops a way already seen, which is how a way in two blocks stays one way', () => {
+  /**
+   * A road in two blocks is one road; a lake in two blocks is a lake in both of them.
+   *
+   * They are read differently and so they deduplicate differently. Every crossing a road makes of a
+   * line is charged for, so the same road indexed twice charges twice. Water is asked spatially --
+   * is this point inside a ring the block *under it* holds -- so dropping a lake from the second
+   * block it reaches deletes it from half of itself, and the span over that half is then held to
+   * the clearance owed to dry ground.
+   */
+  it('drops a road already seen, and keeps water in every block that has it', () => {
     const shared: OsmFeature = { id: 7, kind: 'street', name: 'residential', half: 3, bridge: false, pts: [e0, n0, e0 + 10, n0] }
     const lake: OsmFeature = { id: 8, kind: 'water', name: 'water', half: 0, bridge: false, pts: [e0, n0, e0 + 9, n0, e0, n0] }
+    const island: OsmFeature = { id: 9, kind: 'island', name: 'island', half: 0, bridge: false, pts: [e0, n0, e0 + 3, n0, e0, n0] }
     const seen = new Set<number>()
-    const first = splitFeatures([shared, lake], seen)
+    const first = splitFeatures([shared, lake, island], seen)
     expect(first.roads).toHaveLength(1)
     expect(first.water.rings).toHaveLength(1)
-    // The same block again, as the neighbouring block would deliver it.
-    expect(splitFeatures([shared, lake], seen)).toEqual({
-      roads: [],
-      water: { rings: [], islands: [] },
-    })
+    // The same features again, as the neighbouring block would deliver them.
+    const second = splitFeatures([shared, lake, island], seen)
+    expect(second.roads).toHaveLength(0)
+    expect(second.water.rings).toHaveLength(1)
+    expect(second.water.islands).toHaveLength(1)
   })
 
   it('keeps an island apart from the lake it stands in', () => {

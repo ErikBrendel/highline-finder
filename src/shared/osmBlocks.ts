@@ -66,10 +66,18 @@ export interface OsmFeature {
 }
 
 /**
- * A block's features as the two things that read them, with ways seen twice dropped.
+ * A block's features as the two things that read them, with roads seen twice dropped.
  *
  * `seen` carries across calls so a caller loading several blocks deduplicates across all of them,
  * which is the case that matters: the duplicate is always a way lying across a block boundary.
+ *
+ * Roads only, and that distinction is the whole of this comment. The two are looked up differently.
+ * A road is counted -- every crossing it makes of a line is a crossing, so a road indexed in two
+ * neighbouring blocks reports its crossing twice and the line is charged for it twice. Water is
+ * asked spatially: is *this point* inside a lake, of the rings the block under it holds. Dropping a
+ * lake from the second block it touches does not deduplicate it, it deletes it from half of itself
+ * -- and the half of the span over the missing half is then held to the clearance owed to dry
+ * ground. A ring kept twice costs a second point-in-polygon test and answers the same.
  */
 export function splitFeatures(
   features: OsmFeature[],
@@ -78,9 +86,9 @@ export function splitFeatures(
   const roads: RoadWay[] = []
   const water: Water = { rings: [], islands: [] }
   for (const f of features) {
-    if (seen.has(f.id)) continue
-    seen.add(f.id)
     if (isRoadKind(f.kind)) {
+      if (seen.has(f.id)) continue
+      seen.add(f.id)
       roads.push({ tier: f.kind, kind: f.name, half: f.half, bridge: f.bridge, pts: f.pts })
     } else if (f.kind === 'water') water.rings.push(f.pts)
     else if (f.kind === 'island') water.islands.push(f.pts)

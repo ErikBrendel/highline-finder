@@ -27,9 +27,10 @@ import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import {
   DRAG_LOOKAHEAD, ensureTerrain, fetchingWindows, groundSampler, onBuilding, onWindowActivity,
-  roofs, surfaceSampler,
+  roofs, surfaceKnown, surfaceSampler,
 } from './terrain.js'
-import { coverAlong, coverFailed, ensureCover, roadsFor, water } from './landcover.js'
+import { sourceFor } from './sources.js'
+import { coverAlong, coverFailed, ensureCover, onCoverChange, roadsFor, water } from './landcover.js'
 
 import { Details } from './Details.js'
 import type { WingSample } from './ProfileChart.js'
@@ -867,15 +868,17 @@ export function App() {
    * Measured against the areas actually searched rather than a rectangle round the state, so it is
    * the honest boundary: overlap even one of them and there was a search here.
    */
-  const offMap = useMemo(
-    () =>
-      !!view &&
-      !!meta &&
-      !meta.regions.some((r) =>
-        r.aois.some((a) => overlaps(view, [a.south, a.west, a.north, a.east])),
-      ),
-    [view, meta],
-  )
+  const offMap = useMemo(() => {
+    if (!view || !meta) return null
+    const searched = meta.regions.some((r) =>
+      r.aois.some((a) => overlaps(view, [a.south, a.west, a.north, a.east])),
+    )
+    if (searched) return null
+    // Two different nothings. Ground the search never covered can still be measured by hand, and
+    // saying only "nothing here" would send someone away from a tool that would have answered them.
+    const [e, n] = toUtm33((view[0] + view[2]) / 2, (view[1] + view[3]) / 2)
+    return sourceFor(e, n) ? 'plannable' : 'nothing'
+  }, [view, meta])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = useMemo(
@@ -1030,7 +1033,8 @@ export function App() {
     // terrainVersion rebuilds this as each window lands, so a selected line fills in piece by piece
     // like a dragged one does. The fetch inside is a no-op once nothing is missing, so the rebuilds
     // stop of their own accord rather than needing a guard.
-  }, [meta, selected, terrainVersion])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta, selected, terrainVersion, coverVersion])
 
   /** The selected line with its stored profile, or the fetched one, or neither yet. */
   const remeasured = useMemo(() => {
@@ -1110,6 +1114,22 @@ export function App() {
   )
 
   /**
+   * Whether the canopy figures for this line describe what is standing on the ground, or bare earth.
+   *
+   * Outside Brandenburg the terrain comes from a source with no surface model, and the app fills
+   * the surface in from the terrain so every figure stays finite. That makes the clearance exact
+   * and the canopy a fiction, which is fine as long as it is said out loud.
+   */
+  const canopyKnown = useMemo(
+    () =>
+      !shownEnds || !meta
+        ? true
+        : surfaceKnown(shownEnds.a, shownEnds.b, measuredHalfWidth(detailed!.length, meta.params)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shownEnds, meta, terrainVersion],
+  )
+
+  /**
    * Land cover along whatever line is on screen: water for the chart to draw, and roads for the
    * planner to hold the line to.
    *
@@ -1123,19 +1143,23 @@ export function App() {
    */
   useEffect(() => {
     if (!shownEnds) return
-    let stale = false
     const timer = setTimeout(() => {
-      ensureCover(shownEnds.a, shownEnds.b)
-        .then((arrived) => {
-          if (!stale && arrived) setCoverVersion((v) => v + 1)
-        })
-        .catch((e: unknown) => report('loading roads and water along the shown line', e))
+      ensureCover(shownEnds.a, shownEnds.b).catch((e: unknown) =>
+        report('loading roads and water along the shown line', e),
+      )
     }, 300)
-    return () => {
-      stale = true
-      clearTimeout(timer)
-    }
+    return () => clearTimeout(timer)
   }, [shownEnds])
+
+  /**
+   * Everything measured against roads and water is rebuilt whenever any of it lands.
+   *
+   * Not on the corridor fetch above resolving: the 3D view asks for the square around the line, so
+   * whichever of the two asked second was told nothing had arrived and this never fired. The
+   * profile then kept the clearance it was built with -- three metres over what the chart was by
+   * then drawing as a lake.
+   */
+  useEffect(() => onCoverChange(() => setCoverVersion((v) => v + 1)), [])
 
   const cover = useMemo(() => {
     if (!shownEnds || !shownProfile) return null
@@ -1482,9 +1506,21 @@ export function App() {
           />
 
           {offMap && (
-            <div className="offmap">
-              Nothing has been searched here. This map covers Berlin and Brandenburg &mdash; zoom
-              out to find your way back.
+            <div className="offmap" data-where={offMap}>
+              {offMap === 'plannable' ? (
+                <>
+                  No lines were searched here &mdash; that covers Berlin and Brandenburg only. You
+                  can still <b>right-click to place two anchors</b> and have a line measured against
+                  the survey for this ground.
+                </>
+              ) : (
+                <>
+                  Nothing to measure here. Every height this tool reads comes from a German state
+                  survey, so outside Germany &mdash; and outside the part of it this map&rsquo;s
+                  projection is honest over &mdash; there is nothing to fetch. Zoom out to find your
+                  way back.
+                </>
+              )}
             </div>
           )}
 
@@ -1512,6 +1548,7 @@ export function App() {
               failed={selectedId === PLANNED_ID ? terrainFailed : profileFailed}
               violations={remeasured?.violations ?? null}
               fetching={fetchingElevation}
+              canopyKnown={canopyKnown}
               sag={bounds && { pct: bounds.sag, floor: bounds.sagFloor }}
               onSag={setSagPct}
               full={full}

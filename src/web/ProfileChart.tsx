@@ -138,6 +138,13 @@ interface Props {
   params: Params
   /** Whether elevation is still arriving, which is what a gap in the chart means while it is. */
   fetching: boolean
+  /**
+   * Where along the span the pointer is, in metres, or null when it has left.
+   *
+   * Reported in metres rather than as a sample index so the 3D view can place a marker without
+   * knowing anything about how finely this chart happens to be sampled.
+   */
+  onHover?: (at: number | null) => void
 }
 
 /**
@@ -242,7 +249,7 @@ export function bridgeGaps(profile: ProfileSample[]): {
   return { samples, gaps, measured }
 }
 
-export function ProfileChart({ c, profile, wings, cover, params, fetching }: Props) {
+export function ProfileChart({ c, profile, wings, cover, params, fetching, onHover }: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const { samples: p, gaps, measured } = bridgeGaps(profile)
   const crossings = c.crossings ?? []
@@ -465,6 +472,7 @@ export function ProfileChart({ c, profile, wings, cover, params, fetching }: Pro
       if (Math.abs(p[i]!.d - d) < Math.abs(p[nearest]!.d - d)) nearest = i
     }
     setHoverIndex(nearest)
+    onHover?.(p[nearest]!.d)
   }
 
   const hover = hoverIndex === null ? null : p[hoverIndex]!
@@ -498,7 +506,10 @@ export function ProfileChart({ c, profile, wings, cover, params, fetching }: Pro
       aria-label="elevation profile"
       style={{ cursor: 'crosshair' }}
       onMouseMove={trackPointer}
-      onMouseLeave={() => setHoverIndex(null)}
+      onMouseLeave={() => {
+        setHoverIndex(null)
+        onHover?.(null)
+      }}
     >
       {ticks.map((t) => (
         <g key={t}>

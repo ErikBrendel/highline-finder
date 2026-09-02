@@ -1,7 +1,8 @@
 import {
   AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
-  HemisphereLight, Mesh, MeshBasicMaterial, MeshLambertMaterial, PerspectiveCamera, Raycaster,
-  Scene, SphereGeometry, TubeGeometry, Vector2, Vector3, WebGLRenderer,
+  HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
+  MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
+  Vector3, WebGLRenderer,
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { MeshData } from './terrainMesh.js'
@@ -58,8 +59,32 @@ export interface Scene3D {
   setExaggeration(k: number): void
   /** Replaces the span without touching the terrain, which is the expensive half. */
   setLine(line: Float32Array, track: Float32Array, anchors: [number, number, number][]): void
+  /**
+   * Marks where along the span something is being pointed at, or clears it.
+   *
+   * `t` runs 0 to 1 from A to B, which is what the profile chart's own distance divides down to --
+   * so the chart can say "here" without knowing how this view is scaled or which way it is facing.
+   */
+  setHover(t: number | null): void
   /** Where the camera stands relative to its target, to hand to whatever replaces this scene. */
   viewOffset(): [number, number, number]
+  /**
+   * Repaints the ground without rebuilding it.
+   *
+   * Land cover outside Brandenburg arrives seconds after the terrain, and the terrain is a quarter
+   * of a million vertices. Only the colour attribute changes, so only the colour attribute is
+   * replaced -- the geometry, its normals and the camera all stay exactly as they are.
+   */
+  setColors(colors: Float32Array): void
+  /**
+   * Replaces the ground with a finer reading of the same square.
+   *
+   * The view is built from a coarse pass so there is something to look at while the fine one is
+   * sampled, and this is the swap. Only the ground changes: the span, the camera and the scale are
+   * all in terms of the patch rather than the mesh, and the datum is the coarse pass's so the two
+   * sit at exactly the same height.
+   */
+  setMesh(mesh: MeshData): void
 }
 
 /** How long a camera left alone waits before it starts turning again. */
@@ -79,12 +104,23 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   // got far away rather than because the data stopped in a straight line.
   scene.fog = new Fog('#0f1115', input.radius * 1.6, input.radius * 3.4)
 
-  const geometry = new BufferGeometry()
-  geometry.setAttribute('position', new BufferAttribute(input.mesh.positions, 3))
-  geometry.setAttribute('color', new BufferAttribute(input.mesh.colors, 3))
-  geometry.setIndex(new BufferAttribute(input.mesh.indices, 1))
-  geometry.computeVertexNormals()
-  const ground = new Mesh(geometry, new MeshLambertMaterial({ vertexColors: true }))
+  /**
+   * The ground, built whole every time rather than attribute by attribute.
+   *
+   * Replacing a coarse reading with a fine one changes the vertex count, so positions, colours and
+   * indices have to change together: leave any one of them behind and the index buffer asks for
+   * vertices the attributes do not have, which WebGL reports and then draws nothing at all. One
+   * object, swapped, cannot be half updated.
+   */
+  const geometryOf = (mesh: MeshData) => {
+    const g = new BufferGeometry()
+    g.setAttribute('position', new BufferAttribute(mesh.positions, 3))
+    g.setAttribute('color', new BufferAttribute(mesh.colors, 3))
+    g.setIndex(new BufferAttribute(mesh.indices, 1))
+    g.computeVertexNormals()
+    return g
+  }
+  const ground = new Mesh(geometryOf(input.mesh), new MeshLambertMaterial({ vertexColors: true }))
   scene.add(ground)
 
   // Lambert and not standard: this is matte ground and matte foliage, there is nothing in the scene
@@ -169,6 +205,45 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     grabs.push(grab)
   }
 
+  /**
+   * The pointer, borrowed from the chart beside this view.
+   *
+   * A ball on the span and a dashed line from it to the ground under it. The drop is what makes the
+   * position readable: a ball hanging in a picture of a valley could be anywhere along the line of
+   * sight, and the foot of a vertical tells you which.
+   */
+  const hoverBall = new Mesh(new SphereGeometry(tubeRadius * 4, 14, 10), new MeshBasicMaterial({ color: '#ffffff' }))
+  const hoverDrop = new ThreeLine(
+    new BufferGeometry(),
+    new LineDashedMaterial({ color: '#ffffff', dashSize: tubeRadius * 6, gapSize: tubeRadius * 4 }),
+  )
+  hoverBall.visible = false
+  hoverDrop.visible = false
+  scene.add(hoverBall, hoverDrop)
+
+  /** A point along one of the stored polylines, at a fraction of its length. */
+  const along = (a: Float32Array, t: number, k: number): Vector3 => {
+    const n = a.length / 3
+    const at = Math.min(n - 1, Math.max(0, t * (n - 1)))
+    const i = Math.min(n - 2, Math.floor(at))
+    const f = at - i
+    const mix = (c: number) => a[i * 3 + c]! * (1 - f) + a[(i + 1) * 3 + c]! * f
+    return new Vector3(mix(0), mix(1) * k, mix(2))
+  }
+
+  let hoverAt: number | null = null
+  const drawHover = () => {
+    hoverBall.visible = hoverDrop.visible = hoverAt !== null
+    if (hoverAt === null) return
+    const top = along(line, hoverAt, exaggeration)
+    const foot = along(track, hoverAt, exaggeration)
+    hoverBall.position.copy(top)
+    hoverDrop.geometry.dispose()
+    hoverDrop.geometry = new BufferGeometry().setFromPoints([top, foot])
+    // Dashes are measured along the line, so it has to be told how long it is.
+    hoverDrop.computeLineDistances()
+  }
+
   /** Everything whose height is baked into its geometry rather than into a scale. */
   const rescale = (k: number) => {
     ground.scale.y = k
@@ -180,6 +255,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
       grabs[i]!.position.copy(ball.position)
     })
+    drawHover()
   }
   rescale(exaggeration)
 
@@ -368,9 +444,25 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       rescale(k)
       controls.update()
     },
+    setMesh(mesh: MeshData) {
+      const old = ground.geometry
+      ground.geometry = geometryOf(mesh)
+      old.dispose()
+    },
+    setColors(colors: Float32Array) {
+      // Only when it is the same ground: a repaint that arrives between two readings of the square
+      // would otherwise put one reading's colours on the other's vertices, which is the same
+      // mismatch by a slower route. The next reading carries its own colours anyway.
+      if (colors.length !== ground.geometry.getAttribute('position').count * 3) return
+      ground.geometry.setAttribute('color', new BufferAttribute(colors, 3))
+    },
     viewOffset() {
       const o = camera.position.clone().sub(controls.target)
       return [o.x, o.y, o.z]
+    },
+    setHover(t) {
+      hoverAt = t
+      drawHover()
     },
     setLine(nextLine, nextTrack, nextAnchors) {
       line = nextLine
@@ -392,12 +484,14 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       controls.dispose()
       for (const g of [
-        geometry, spanMesh.geometry, trackMesh.geometry, ghostMesh.geometry, ballGeom, grabGeom,
+        ground.geometry, spanMesh.geometry, trackMesh.geometry, ghostMesh.geometry, ballGeom,
+        grabGeom, hoverBall.geometry, hoverDrop.geometry,
       ]) {
         g.dispose()
       }
       for (const m of [
         ground.material as MeshLambertMaterial, spanMat, trackMat, ghostMat, ballMat, grabMat,
+        hoverBall.material as MeshBasicMaterial, hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()
       }

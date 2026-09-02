@@ -1,10 +1,10 @@
 import { unzipSync } from 'fflate'
 import { Grid, type Pos, type Sampler } from '../shared/grid.js'
-import { blitGeoTiff } from '../shared/geotiff.js'
 import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
 import type { Roofs } from '../shared/anchoring.js'
 import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
+import { NoData, noteAnswered, sourcesFor, type Source } from './sources.js'
 import { report } from './report.js'
 
 /**
@@ -37,11 +37,6 @@ import { report } from './report.js'
  * and roofs, which are the hard constraints, match exactly.
  */
 
-const WCS = 'https://isk.geobasis-bb.de/ows'
-const LAYERS = {
-  ground: { service: 'dgm_wcs', coverage: 'bb_dgm' },
-  surface: { service: 'bdom_wcs', coverage: 'bb_bdom' },
-} as const
 const LOD1 = 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml'
 
 /** Window size in metres. 256 keeps a request near 256 KB per layer and reuses well while dragging. */
@@ -64,7 +59,7 @@ export const WINDOW = 256
  */
 export const DRAG_LOOKAHEAD = 64
 
-type Layer = keyof typeof LAYERS
+type Layer = 'ground' | 'surface'
 
 interface Window {
   ground: Grid
@@ -75,6 +70,11 @@ interface Window {
    * building it belongs to.
    */
   roof: Grid
+  /**
+   * Whether the surface came from a survey or was copied from the terrain because the source for
+   * this ground has no surface model. False means the canopy figures describe bare earth.
+   */
+  hasSurface: boolean
 }
 
 const loaded = new Map<string, Window>()
@@ -117,15 +117,6 @@ const emit = (e: WindowEvent) => listeners.forEach((fn) => fn(e))
  */
 export const fetchingWindows = () => inFlight.size > 0
 
-function url(layer: Layer, e0: number, n0: number): string {
-  const { service, coverage } = LAYERS[layer]
-  return (
-    `${WCS}/${service}?SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage` +
-    `&COVERAGEID=${coverage}&FORMAT=image/tiff` +
-    `&SUBSET=x(${e0},${e0 + WINDOW})&SUBSET=y(${n0},${n0 + WINDOW})`
-  )
-}
-
 /**
  * Level building faces per 1 km tile, parsed once and kept for the session.
  *
@@ -160,33 +151,80 @@ async function loadRoofs(e0: number, n0: number, into: Grid): Promise<void> {
   for (const faces of await Promise.all(tiles.map(facesFor))) rasteriseFaces(faces, into)
 }
 
+/**
+ * One window, from the first source that will answer for it.
+ *
+ * Sources are tried in order and a `NoData` from one is not a failure -- it is that service saying
+ * this ground is not its, which is the ordinary case a few hundred metres outside a state border.
+ * Only running out of sources is a failure.
+ *
+ * A source without a surface model leaves the canopy unknown, and the window says so. Rather than
+ * carry NaN through every canopy figure, the surface is set to the terrain: that reads as bare
+ * ground, which is the assumption the numbers are then making, and `hasSurface` is what lets the
+ * panel say the numbers are making it. The hard constraint -- clearance over terrain -- is measured
+ * against ground either way and is exact wherever a line can be drawn at all.
+ */
 async function loadWindow(tx: number, ty: number): Promise<void> {
   const e0 = tx * WINDOW
   const n0 = ty * WINDOW
-  const ground = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
-  const surface = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
-  const roof = Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
+  const grid = () => Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
+  const roof = grid()
   emit({ tx, ty, state: 'loading' })
-  try {
-    await Promise.all(
-      (['ground', 'surface'] as Layer[]).map(async (layer) => {
-        const bytes = await fetchCached(url(layer, e0, n0))
-        await blitGeoTiff(bytes, layer === 'ground' ? ground : surface)
-      }),
-    )
-  } catch (e) {
-    report(`fetching the elevation window at ${e0},${n0} (${WINDOW} m)`, e)
-    emit({ tx, ty, state: 'failed' })
-    throw e
+
+  const mid = { e: e0 + WINDOW / 2, n: n0 + WINDOW / 2 }
+  let used: Source | null = null
+  let ground = grid()
+  let surface = grid()
+  let last: unknown = new Error('no elevation source covers this ground')
+  for (const source of sourcesFor(mid.e, mid.n)) {
+    // Fresh grids per attempt, so a source that filled half a window before giving up cannot leave
+    // its half behind for the next one to be credited with.
+    const into = { ground: grid(), surface: grid() }
+    try {
+      await source.load(e0, n0, WINDOW, into)
+      // A service asked about ground outside its state does not always say so. Brandenburg's
+      // answers a window over Leipzig with a polite raster of nothing, and a raster of nothing is
+      // indistinguishable from a decline -- so it is treated as one, and the next source is asked.
+      if (!into.ground.data.some(Number.isFinite)) throw new NoData(`${source.id} holds nothing here`)
+      ground = into.ground
+      surface = into.surface
+      used = source
+      noteAnswered(mid.e, mid.n, source)
+      break
+    } catch (e) {
+      last = e
+      if (!(e instanceof NoData)) {
+        report(`fetching the elevation window at ${e0},${n0} from ${source.id}`, e)
+      }
+    }
   }
+  if (!used) {
+    emit({ tx, ty, state: 'failed' })
+    throw last
+  }
+  if (!used.hasSurface) surface.data.set(ground.data)
+
   // Separately, after, and caught: an outage on the city model must cost the buildings, never the
-  // elevation. The roof grid starts all NaN, which is the same answer as open ground.
-  await loadRoofs(e0, n0, roof).catch((e: unknown) =>
-    report(`rasterising buildings into the window at ${e0},${n0}`, e),
-  )
-  loaded.set(keyOf(tx, ty), { ground, surface, roof })
+  // elevation. The roof grid starts all NaN, which is the same answer as open ground. Only asked of
+  // Brandenburg, whose city model this is -- elsewhere it would be four 404s a window.
+  if (used.id === 'bb') {
+    await loadRoofs(e0, n0, roof).catch((e: unknown) =>
+      report(`rasterising buildings into the window at ${e0},${n0}`, e),
+    )
+  }
+  loaded.set(keyOf(tx, ty), { ground, surface, roof, hasSurface: used.hasSurface })
   emit({ tx, ty, state: 'loaded' })
 }
+
+/**
+ * Whether every window along a corridor knows what is standing on the ground.
+ *
+ * False where any of them came from a source with no surface model, which means the canopy figures
+ * describe bare ground rather than what is there. Nothing else about the line is affected, and
+ * saying so is the whole of the handling this needs.
+ */
+export const surfaceKnown = (a: Pos, b: Pos, margin = WINDOW): boolean =>
+  windowsFor(a, b, margin).every(([tx, ty]) => loaded.get(keyOf(tx, ty))?.hasSurface !== false)
 
 /**
  * Windows covering the corridor between two points, fattened by `margin` metres.

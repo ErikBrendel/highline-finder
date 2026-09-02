@@ -1,6 +1,9 @@
 import type { Pos } from '../shared/grid.js'
 import { RoadIndex } from '../shared/roads.js'
-import { blockKeysFor, decodeBlock, splitFeatures, type Water } from '../shared/osmBlocks.js'
+import {
+  blockKeysFor, decodeBlock, splitFeatures, type OsmFeature, type Water,
+} from '../shared/osmBlocks.js'
+import { PATCH, fetchPatch, patchKeysFor } from './overpass.js'
 import type { Roads } from '../shared/scene.js'
 import { WaterMask, type WaterCover } from '../shared/water.js'
 import { WINDOW, bareGround, onBuilding } from './terrain.js'
@@ -22,12 +25,17 @@ import { report } from './report.js'
  *     under public/osm/. Roads are emphatically not decoration: a line over one owes it a great
  *     deal more air than it owes bare ground, and that is a hard constraint. See shared/roads.ts.
  *
- * These used to come from the public Overpass API, per corridor, at run time. That was wrong twice
- * over. It is a shared community service, and this project's own pipeline got the machine refused
- * outright asking it for a state's road network; and the pipeline and the browser asked it
- * separately, so the two could disagree about what a line passes over -- the exact thing the
- * project refuses to allow for terrain and roofs. Now both read the same bytes, and there is no
- * run-time dependency and no failure mode left to handle.
+ * The shipped blocks used to be the only source, and everything the pipeline searches still comes
+ * from them: they are the same bytes the pipeline read, so a found line and a planned one cannot
+ * disagree about what either passes over, and Brandenburg needs no third party at run time.
+ *
+ * They cover Brandenburg and Berlin, because that is what the search covers and because they are
+ * thirty megabytes. Elevation now reaches most of Germany, so outside them a planned line was
+ * measured with every road unknown and every lake read as dry ground. For that ground only -- never
+ * where a block exists -- the browser asks Overpass for a square kilometre at a time and caches
+ * what comes back. See overpass.ts, which is careful about why that is the fallback and not the
+ * rule: a public instance is a shared service, and asking it for a state's road network is what
+ * drove this project onto shipped extracts in the first place.
  */
 
 export const COVER_NONE = 0
@@ -55,19 +63,29 @@ const failed = new Set<string>()
  * empty and present-but-unfetchable means broken, which is worth saying out loud.
  */
 let index: Promise<Set<string>> | null = null
+/**
+ * The same set once it has arrived, for the questions that cannot wait.
+ *
+ * `roadsFor` has to answer synchronously whether this corridor's roads are known, and knowing that
+ * means knowing which squares the shipped blocks do not cover. Null means the index has not been
+ * read yet, which is itself an answer: nothing is known about anything.
+ */
+let knownBlocks: Set<string> | null = null
 
 function blockIndex(): Promise<Set<string>> {
   index ??= fetchCached(`${import.meta.env.BASE_URL}osm/index.json`)
     .then((bytes) => {
       const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { blocks: string[] }
-      return new Set(parsed.blocks)
+      knownBlocks = new Set(parsed.blocks)
+      return knownBlocks
     })
     // An unreadable index is itself a broken deployment, and reporting every block as missing is
     // how that surfaces rather than as silently unchecked lines -- but it is said out loud, since
     // "no roads anywhere" and "the road data did not load" look identical on the map.
     .catch((e: unknown) => {
       report('loading the OSM block index (public/osm/index.json)', e)
-      return new Set<string>()
+      knownBlocks = new Set<string>()
+      return knownBlocks
     })
   return index
 }
@@ -82,12 +100,34 @@ function blockIndex(): Promise<Set<string>> {
 const seenWays = new Set<number>()
 
 /**
+ * Told whenever anything new lands, rather than whoever asked for it being told.
+ *
+ * `ensureCover` used to report "something arrived" to its own caller, and that is not the same
+ * question. Two things ask for land cover -- the panel, for the line, and the 3D view, for the
+ * square around it -- and whichever asked second was told nothing arrived, because the first had
+ * already fetched it. The panel then never rebuilt its profile, so a lake was drawn blue while the
+ * clearance line went on demanding the three metres it asks over dry ground.
+ *
+ * A change is a fact about the data, not about a request, so it is announced to everyone reading it.
+ */
+const listeners = new Set<() => void>()
+
+export function onCoverChange(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+const announce = () => {
+  for (const fn of listeners) fn()
+}
+
+/**
  * The blocks a corridor touches, with a margin.
  *
  * The margin is what stops dragging an anchor near a block edge from fetching and discarding a
  * neighbour repeatedly; at 8 km blocks it costs a block occasionally and saves a request often.
  */
-const keysFor = (a: Pos, b: Pos, margin = 500) =>
+const keysFor = (a: Pos, b: Pos, margin: number = 500) =>
   blockKeysFor(
     Math.min(a.e, b.e) - margin,
     Math.min(a.n, b.n) - margin,
@@ -96,6 +136,64 @@ const keysFor = (a: Pos, b: Pos, margin = 500) =>
   )
 
 const EMPTY: Block = { roads: new RoadIndex(), water: { rings: [], islands: [] } }
+
+/**
+ * Land cover for ground the shipped blocks do not cover, a square kilometre at a time.
+ *
+ * A second, finer index beside the shipped one rather than a replacement for it. The blocks are
+ * eight kilometres because that is a good size for a file in a repository; an Overpass query for
+ * eight kilometres of a city is thirty megabytes and times out, so what is fetched is fetched
+ * smaller. Both are read through the same functions below, and a patch is only ever asked for where
+ * no block exists, so the two never describe the same ground.
+ */
+const patches = new Map<string, Block>()
+const patching = new Map<string, Promise<void>>()
+const patchFailed = new Set<string>()
+
+/** Turns a bag of features into the two things that read them, exactly as a shipped block does. */
+function blockFrom(features: OsmFeature[]): Block {
+  const split = splitFeatures(features, seenWays)
+  const roads = new RoadIndex()
+  for (const road of split.roads) roads.add(road)
+  return { roads, water: split.water }
+}
+
+function loadPatch(key: string): Promise<void> {
+  let job = patching.get(key)
+  if (job) return job
+  job = fetchPatch(key)
+    .then((features) => {
+      patches.set(key, blockFrom(features))
+      // The water raster is built per window and cached; a window over this patch may already have
+      // been built from nothing, and would go on reporting dry ground for ever.
+      waterWindows.clear()
+    })
+    .catch((e: unknown) => {
+      report(`asking Overpass for the land cover around ${key}`, e)
+      patchFailed.add(key)
+    })
+    // Both ways: a refusal changes what `roadsFor` may answer just as much as an arrival does.
+    .finally(announce)
+  patching.set(key, job)
+  return job
+}
+
+const blockUnder = (patch: string) => {
+  const [x, y] = patch.split('-').map(Number) as [number, number]
+  return blockKeysFor(x * PATCH, y * PATCH, x * PATCH, y * PATCH)[0]!
+}
+
+/**
+ * The patches a corridor needs, or null before the shipped index has been read.
+ *
+ * None of them wherever a block covers the ground: "this square is not in the index" is the whole
+ * test, and until the index is here that question has no answer rather than the answer "none".
+ */
+function patchesWanted(a: Pos, b: Pos, margin?: number): string[] | null {
+  if (!knownBlocks) return null
+  const known = knownBlocks
+  return patchKeysFor(a, b, margin).filter((key) => !known.has(blockUnder(key)))
+}
 
 /**
  * One block, or an empty one where the build produced none.
@@ -118,25 +216,38 @@ function load(key: string): Promise<void> {
       const roads = new RoadIndex()
       for (const road of split.roads) roads.add(road)
       held.set(key, { roads, water: split.water })
+      waterWindows.clear()
     })
     .catch((e: unknown) => {
       report(`loading the OSM block ${key}`, e)
       failed.add(key)
     })
+    .finally(announce)
   loading.set(key, job)
   return job
 }
 
 /** Fetches whatever this corridor needs. Resolves true when something new arrived. */
-export async function ensureCover(a: Pos, b: Pos): Promise<boolean> {
-  const keys = keysFor(a, b)
+export async function ensureCover(a: Pos, b: Pos, margin?: number): Promise<boolean> {
+  const keys = keysFor(a, b, margin)
   const missing = keys.filter((k) => !held.has(k))
   await Promise.all(keys.map(load))
-  return missing.length > 0
+  await blockIndex()
+  const wanted = patchesWanted(a, b, margin) ?? []
+  const fetching = wanted.filter((k) => !patches.has(k))
+  await Promise.all(wanted.map(loadPatch))
+  return missing.length > 0 || fetching.length > 0
 }
 
-/** Whether a block this corridor needs is listed in the index but could not be loaded. */
-export const coverFailed = (a: Pos, b: Pos) => keysFor(a, b).some((k) => failed.has(k))
+/** Whether anything this corridor needs was asked for and did not arrive. */
+export const coverFailed = (a: Pos, b: Pos) =>
+  keysFor(a, b).some((k) => failed.has(k)) || patchKeysFor(a, b).some((k) => patchFailed.has(k))
+
+/** The fetched squares under a corridor. A patch over shipped ground is never fetched. */
+const patchesUnder = (a: Pos, b: Pos) =>
+  patchKeysFor(a, b)
+    .map((k) => patches.get(k))
+    .filter(Boolean) as Block[]
 
 /**
  * The roads under a corridor, or null until every block it needs has arrived.
@@ -148,10 +259,22 @@ export const coverFailed = (a: Pos, b: Pos) => keysFor(a, b).some((k) => failed.
 export function roadsFor(a: Pos, b: Pos): Roads | null {
   const keys = keysFor(a, b)
   if (!keys.every((k) => held.has(k))) return null
+  /**
+   * Outside the shipped blocks, an absent block is not an absent road.
+   *
+   * `load` records a square the index does not list as empty, which is right for a corner of the
+   * extract and exactly wrong for Saxony: the block is empty because nothing was ever built for it,
+   * not because the ground is bare. Answering with those alone reported every road in Germany as
+   * checked and not there -- no banner, no crossing, no waiting for the patch that would have said
+   * otherwise. So a corridor is known only once every patch it wants has arrived.
+   */
+  const wanted = patchesWanted(a, b)
+  if (!wanted || !wanted.every((k) => patches.has(k))) return null
+  const under = [...keys.map((k) => held.get(k)!), ...patchesUnder(a, b)]
   return {
     crossings: (from, to, p, elevation) =>
-      keys
-        .flatMap((k) => held.get(k)!.roads.crossings(from, to, p, elevation))
+      under
+        .flatMap((block) => block.roads.crossings(from, to, p, elevation))
         .sort((x, y) => x.d - y.d),
   }
 }
@@ -182,6 +305,12 @@ function waterAt(tx: number, ty: number): WaterMask {
     // Not loaded yet: leave the window unbuilt so it is rasterised again once the block arrives.
     if (!block) return mask
     mask.add(block.water)
+  }
+  // And whatever was fetched for ground no block covers. A window is 256 m and a patch a kilometre,
+  // so this is one or two of them; both are added because a window can straddle the join.
+  for (const k of patchKeysFor({ e: e0, n: n0 }, { e: e0 + WINDOW, n: n0 + WINDOW }, 0)) {
+    const patch = patches.get(k)
+    if (patch) mask.add(patch.water)
   }
   waterWindows.set(key, mask)
   return mask
@@ -242,9 +371,12 @@ export interface Cover {
 export function coverAlong(a: Pos, b: Pos, count: number): Cover {
   const kind = new Uint8Array(count)
   const bare = new Float32Array(count)
-  const rings = keysFor(a, b).flatMap((k) => held.get(k)?.water.rings ?? [])
+  // Both sources, or a lake outside the shipped blocks is drawn as dry ground even after it has
+  // been fetched -- the sampler behind `water.covers` reads both and this has to agree with it.
+  const under = [...keysFor(a, b).map((k) => held.get(k)), ...patchesUnder(a, b)]
+  const rings = under.flatMap((block) => block?.water.rings ?? [])
   // An island is not a lake to draw a section through, so a sample standing on one is bare ground.
-  const islands = keysFor(a, b).flatMap((k) => held.get(k)?.water.islands ?? [])
+  const islands = under.flatMap((block) => block?.water.islands ?? [])
   const last = count - 1
   for (let i = 0; i < count; i++) {
     const t = last > 0 ? i / last : 0

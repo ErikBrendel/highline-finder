@@ -12,7 +12,7 @@ import {
   lineWidth,
   stopAt,
 } from './MapView.js'
-import { SHADE_BASELINE, applyShading } from './shaded.js'
+import { SHADE_BASELINE, applyShading, normaliseShade } from './shadeMath.js'
 import { toUtm33, toWgs84 } from '../shared/geo.js'
 
 const n = BLEND_STOPS.length
@@ -236,5 +236,43 @@ describe('vintageScale', () => {
 
   it('sends an unreadable stamp to the stale end rather than the fresh one', () => {
     expect(vintageScale([at(day(10)), at(day(30))])('not a date')).toBe(1)
+  })
+})
+
+/**
+ * Surveys disagree about what flat ground looks like: Brandenburg renders it at #c4c4c4, Saxony at
+ * #dddddd. Stacked as they come, the border between them is a step in brightness across an unbroken
+ * field -- and the multiply that shades a basemap divides by one fixed grey, so the paler survey
+ * brightens everything it covers.
+ */
+describe('normaliseShade', () => {
+  const pixel = (v: number) => {
+    const data = new Uint8ClampedArray([v, v, v, 128])
+    normaliseShade(data, 0xdd, SHADE_BASELINE)
+    return data
+  }
+
+  it('puts one survey’s flat ground on the grey the other one is read against', () => {
+    expect(pixel(0xdd)[0]).toBe(SHADE_BASELINE)
+  })
+
+  it('leaves black black and white white, so no contrast is lost at either end', () => {
+    expect(pixel(0)[0]).toBe(0)
+    expect(pixel(255)[0]).toBe(255)
+  })
+
+  it('keeps the order of everything in between', () => {
+    const values = [0, 60, 120, 220, 0xdd, 255].map((v) => pixel(v)[0]!)
+    expect([...values].sort((a, b) => a - b)).toEqual(values)
+  })
+
+  it('leaves alpha alone, which is what lets the next survey show through', () => {
+    expect(pixel(200)[3]).toBe(128)
+  })
+
+  it('does nothing at all to a survey already on the common grey', () => {
+    const data = new Uint8ClampedArray([10, 200, 250, 7])
+    normaliseShade(data, SHADE_BASELINE, SHADE_BASELINE)
+    expect([...data]).toEqual([10, 200, 250, 7])
   })
 })

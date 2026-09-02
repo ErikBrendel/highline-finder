@@ -15,6 +15,8 @@ import { utmBounds } from '../shared/geo.js'
 import { cachedUrl } from './tileCache.js'
 import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
+import { stackedUrl } from './stacked.js'
+import { reachable } from './hosts.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
@@ -31,7 +33,14 @@ import { sideHalfWidthAt } from '../shared/profile.js'
  * decoration here: dl-de/by-2.0 requires naming GeoBasis-DE/LGB wherever the data is shown.
  */
 const LGB_ATTR = '&copy; GeoBasis-DE/LGB (dl-de/by-2.0)'
+const GEOSN_ATTR = '&copy; GeoBasis-DE/GeoSN (dl-de/by-2.0)'
+const LVERMGEO_ST_ATTR = '&copy; GeoBasis-DE/LVermGeo ST (dl-de/by-2.0)'
+const S2_ATTR =
+  '<a href="https://s2maps.eu" target="_blank" rel="noreferrer">Sentinel-2 cloudless</a> by EOX ' +
+  '(modified Copernicus Sentinel data 2020, CC BY 4.0)'
 const OSM_ATTR = '&copy; OpenStreetMap contributors (ODbL)'
+/** Every survey whose imagery can appear in a stacked basemap, since any of them may be on screen. */
+const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, S2_ATTR].join(' &middot; ')
 
 /**
  * Attribution for the data behind the measurements, shown whatever basemap is on.
@@ -44,12 +53,66 @@ const OSM_ATTR = '&copy; OpenStreetMap contributors (ODbL)'
  */
 const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR]
 const wms = (path: string, layer: string) =>
-  `https://isk.geobasis-bb.de/mapproxy/${path}/service/wms?SERVICE=WMS&VERSION=1.3.0` +
-  `&REQUEST=GetMap&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
-  `&FORMAT=image/png&TRANSPARENT=false&BBOX={bbox-epsg-3857}`
+  anyWms(`https://isk.geobasis-bb.de/mapproxy/${path}/service/wms`, layer)
 
-const ORTHO = wms('dop20c', 'bebb_dop20c')
-const SHADE = wms('dgm', 'dgmshade')
+/** A WMS anywhere, in the shape MapLibre's raster template needs. Transparent, so stacks work. */
+const anyWms = (base: string, layer: string) =>
+  `${reachable(base)}${base.includes('?') ? '&' : '?'}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap` +
+  `&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
+  `&FORMAT=image/png&TRANSPARENT=true&BBOX={bbox-epsg-3857}`
+
+/** Where each survey has imagery: west, south, east, north. Only used to skip pointless requests. */
+const BB_BOX: [number, number, number, number] = [11.2, 51.3, 14.8, 53.6]
+const SN_BOX: [number, number, number, number] = [11.8, 50.1, 15.1, 51.7]
+const ST_BOX: [number, number, number, number] = [10.5, 50.9, 13.4, 53.1]
+
+/**
+ * The three basemaps, each assembled from whatever survey covers the ground on screen.
+ *
+ * Bottom to top, broadest first. basemap.de is the whole country and is what stops any of these
+ * from being blank outside the three states; over it go the state orthophotos and reliefs, each
+ * ending where its own survey does.
+ */
+const ORTHO = stackedUrl('ortho', {
+  layers: [
+    /**
+     * Sentinel-2, cloud-free, everywhere.
+     *
+     * The bottom of the stack has to be imagery and not a map, or panning out of a surveyed state
+     * turns the orthophoto view into something that looks like the OSM view beside it. Ten metres
+     * a pixel against the surveys' twenty centimetres, so it is scenery rather than something to
+     * site an anchor on -- but it is unmistakably the ground, which is the whole job down here.
+     * Openly licensed and needs no key, which the federal orthophoto coverage does.
+     */
+    { url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg' },
+    { url: anyWms('https://geodienste.sachsen.de/wms_geosn_dop-rgb/guest', 'sn_dop_020'), bbox: SN_BOX },
+    { url: anyWms('https://geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_DOP_WMS_OpenData/guest', 'lsa_lvermgeo_dop20_2'), bbox: ST_BOX },
+    { url: wms('dop20c', 'bebb_dop20c'), bbox: BB_BOX },
+  ],
+})
+
+/**
+ * The relief, with the flat-ground grey underneath it.
+ *
+ * Painted rather than left transparent because the shaded composites divide by that grey: ground
+ * no survey has shaded has to come out unchanged, not black. Saxony-Anhalt publishes no relief
+ * product a browser can reach, so its ground is exactly that case.
+ */
+const SHADE = stackedUrl('shade', {
+  under: '#c4c4c4',
+  layers: [
+    // Saxony renders flat ground at #dddddd where Brandenburg uses #c4c4c4, so it is rebased on the
+    // way in -- otherwise the state border is a step in brightness across an unbroken field, and
+    // the shaded composites brighten everything Saxony covers.
+    {
+      url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'),
+      bbox: SN_BOX,
+      baseline: 0xdd,
+    },
+    { url: wms('dgm', 'dgmshade'), bbox: BB_BOX },
+  ],
+})
+
 const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
 
 /** The three maps the slider is labelled with, and which its whole numbers land on. */
@@ -77,10 +140,12 @@ export const MIX_MAX = BASEMAPS.length - 1
  * the halfway marks changed.
  */
 export const BLEND_STOPS = [
-  { id: 'ortho', tiles: cachedUrl(ORTHO), attribution: LGB_ATTR },
-  { id: 'orthoShaded', tiles: shadedUrl('ortho', { base: ORTHO, shade: SHADE }), attribution: LGB_ATTR },
-  { id: 'hillshade', tiles: cachedUrl(SHADE), attribution: LGB_ATTR },
-  { id: 'osmShaded', tiles: shadedUrl('osm', { base: OSM, shade: SHADE }), attribution: `${OSM_ATTR} &middot; ${LGB_ATTR}` },
+  // Already stacked, so not run through `cachedUrl` again: the stack caches each survey's own tile
+  // and composites what it has, which is the level the caching belongs at.
+  { id: 'ortho', tiles: ORTHO, attribution: BASEMAP_ATTR },
+  { id: 'orthoShaded', tiles: shadedUrl('ortho', { base: ORTHO, shade: SHADE }), attribution: BASEMAP_ATTR },
+  { id: 'hillshade', tiles: SHADE, attribution: BASEMAP_ATTR },
+  { id: 'osmShaded', tiles: shadedUrl('osm', { base: OSM, shade: SHADE }), attribution: `${OSM_ATTR} &middot; ${BASEMAP_ATTR}` },
   { id: 'osm', tiles: cachedUrl(OSM), attribution: OSM_ATTR },
 ] as const
 
