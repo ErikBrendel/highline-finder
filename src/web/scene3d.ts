@@ -1,6 +1,6 @@
 import {
   AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
-  HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
+  DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
   Vector3, WebGLRenderer,
 } from 'three'
@@ -22,6 +22,8 @@ import type { MeshData } from './terrainMesh.js'
 
 export interface SceneInput {
   mesh: MeshData
+  /** The vegetation skin, drawn translucent over the solid ground. Null where none is known. */
+  canopy: MeshData | null
   /** The span, three floats a point, sagging. */
   line: Float32Array
   /** The same span dropped onto the ground under it, which is what tells you where it runs. */
@@ -75,16 +77,17 @@ export interface Scene3D {
    * of a million vertices. Only the colour attribute changes, so only the colour attribute is
    * replaced -- the geometry, its normals and the camera all stay exactly as they are.
    */
-  setColors(colors: Float32Array): void
   /**
-   * Replaces the ground with a finer reading of the same square.
+   * Replaces the ground and the canopy over it, together.
    *
    * The view is built from a coarse pass so there is something to look at while the fine one is
-   * sampled, and this is the swap. Only the ground changes: the span, the camera and the scale are
-   * all in terms of the patch rather than the mesh, and the datum is the coarse pass's so the two
-   * sit at exactly the same height.
+   * sampled, and this is the swap; it is also how a lake arriving late is repainted. Both surfaces
+   * at once and whole, because positions, colours and indices have to change together -- leave one
+   * behind and the index asks for vertices the attributes do not have, and nothing draws at all.
+   * The span, the camera and the height scale are in terms of the patch rather than the mesh, and
+   * the datum is the coarse pass's, so the two readings sit at exactly the same height.
    */
-  setMesh(mesh: MeshData): void
+  setMesh(mesh: MeshData, canopy: MeshData | null): void
 }
 
 /** How long a camera left alone waits before it starts turning again. */
@@ -92,6 +95,13 @@ const RESUME_AFTER_MS = 4000
 
 /** Points along a span being dragged. Fewer than the measured one; it is only a preview. */
 const DRAG_SEGMENTS = 48
+
+/** Stands in for a canopy that is not there, so the mesh always exists and is simply empty. */
+const EMPTY_MESH: MeshData = {
+  positions: new Float32Array(0),
+  colors: new Float32Array(0),
+  indices: new Uint32Array(0),
+}
 
 export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene3D {
   const parent = canvas.parentElement!
@@ -122,6 +132,25 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   }
   const ground = new Mesh(geometryOf(input.mesh), new MeshLambertMaterial({ vertexColors: true }))
   scene.add(ground)
+
+  /**
+   * The vegetation, over the ground rather than instead of it.
+   *
+   * Translucent, so the shape of the hill reads through the wood standing on it -- which is most of
+   * what someone is looking for here, since the line hangs over the ground and through the trees.
+   * Both sides, because the camera goes under the canopy as often as over it, and no depth writing,
+   * so the sheet never hides the terrain or the span behind it.
+   */
+  const canopyMat = new MeshLambertMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.5,
+    depthWrite: false,
+    side: DoubleSide,
+  })
+  const canopy = new Mesh(geometryOf(input.canopy ?? EMPTY_MESH), canopyMat)
+  canopy.visible = !!input.canopy
+  scene.add(canopy)
 
   // Lambert and not standard: this is matte ground and matte foliage, there is nothing in the scene
   // that wants a roughness parameter, and the cheaper shader is the one a phone should be running.
@@ -247,6 +276,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   /** Everything whose height is baked into its geometry rather than into a scale. */
   const rescale = (k: number) => {
     ground.scale.y = k
+    canopy.scale.y = k
     spanMesh.geometry.dispose()
     spanMesh.geometry = tubeAlong(points(line, k), tubeRadius, 6)
     trackMesh.geometry.dispose()
@@ -444,17 +474,16 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       rescale(k)
       controls.update()
     },
-    setMesh(mesh: MeshData) {
-      const old = ground.geometry
-      ground.geometry = geometryOf(mesh)
-      old.dispose()
-    },
-    setColors(colors: Float32Array) {
-      // Only when it is the same ground: a repaint that arrives between two readings of the square
-      // would otherwise put one reading's colours on the other's vertices, which is the same
-      // mismatch by a slower route. The next reading carries its own colours anyway.
-      if (colors.length !== ground.geometry.getAttribute('position').count * 3) return
-      ground.geometry.setAttribute('color', new BufferAttribute(colors, 3))
+    setMesh(mesh: MeshData, next: MeshData | null) {
+      for (const [target, data] of [
+        [ground, mesh],
+        [canopy, next ?? EMPTY_MESH],
+      ] as const) {
+        const old = target.geometry
+        target.geometry = geometryOf(data)
+        old.dispose()
+      }
+      canopy.visible = !!next && next.indices.length > 0
     },
     viewOffset() {
       const o = camera.position.clone().sub(controls.target)
@@ -484,14 +513,14 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       controls.dispose()
       for (const g of [
-        ground.geometry, spanMesh.geometry, trackMesh.geometry, ghostMesh.geometry, ballGeom,
-        grabGeom, hoverBall.geometry, hoverDrop.geometry,
+        ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, ghostMesh.geometry,
+        ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
       ]) {
         g.dispose()
       }
       for (const m of [
-        ground.material as MeshLambertMaterial, spanMat, trackMat, ghostMat, ballMat, grabMat,
-        hoverBall.material as MeshBasicMaterial, hoverDrop.material as LineDashedMaterial,
+        ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, ghostMat, ballMat,
+        grabMat, hoverBall.material as MeshBasicMaterial, hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()
       }

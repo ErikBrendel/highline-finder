@@ -6,9 +6,7 @@ import {
   bareGround, ensureTerrain, missingWindows, onBuilding, onWindowActivity, surfaceSampler,
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
-import {
-  colorsOf, coverOf, meshOf, samplePatch, type Patch, type Readers,
-} from './terrainMesh.js'
+import { coverOf, meshOf, samplePatch, type Patch, type Readers } from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Scene3D } from './scene3d.js'
@@ -68,9 +66,10 @@ const FACTORS = [1, 2, 3, 5]
  *
  * The same reasoning as the details panel's width: it is how someone is reading the view, not a
  * property of the thing being read, and having it snap back for every line would make it useless.
- * Not persisted -- a working preference for the session.
+ * Starts at life size, which is the only setting that is not a lie. Brandenburg is flat and the
+ * view says so; anyone who wants the drop drawn taller can say so and it will stay said.
  */
-let preferred = 2
+let preferred = 1
 
 /** Points along the drawn span. Enough that a 500 m curve reads as a curve. */
 const SPAN_POINTS = 96
@@ -270,6 +269,7 @@ export function Terrain3D({
       scene.current?.dispose()
       scene.current = createScene(canvas, {
         mesh,
+        canopy: meshOf(rough, g.datum, 'canopy'),
         ...spanRef.current(g),
         radius: g.halfSide,
         exaggeration: preferred,
@@ -299,7 +299,7 @@ export function Terrain3D({
       if (dropped) return
       patch.current = fine
       setMeasured(fine.measured)
-      scene.current?.setMesh(meshOf(fine, g.datum))
+      scene.current?.setMesh(meshOf(fine, g.datum), meshOf(fine, g.datum, 'canopy'))
 
       /**
        * And now the rest of the square's land cover, which the picture does not wait for.
@@ -348,14 +348,22 @@ export function Terrain3D({
    * the ground is repainted when the data exists rather than when this component's promise happens
    * to settle -- and it goes on working after an anchor is dropped somewhere new.
    */
+  /**
+   * Re-reads what is standing on the ground and rebuilds both surfaces from it.
+   *
+   * Both, because the classes decide more than a colour now: a cell that turns out to be a building
+   * belongs to the solid mesh at its roof, and one that is canopy belongs to the sheet above. So
+   * this is a rebuild rather than a repaint -- a few milliseconds of arithmetic over heights that
+   * were already read, and no fetch.
+   */
   const repaint = useRef(() => {
-    if (!patch.current || !scene.current) return
-    const cover = coverOf(patch.current, {
-      building: onBuilding,
-      water: (e, n) => water.covers(e, n),
-    })
-    patch.current.cover.set(cover)
-    scene.current.setColors(colorsOf(cover))
+    const read = patch.current
+    if (!read || !scene.current || !ground.current) return
+    read.cover.set(
+      coverOf(read, { building: onBuilding, water: (e, n) => water.covers(e, n) }),
+    )
+    const datum = ground.current.datum
+    scene.current.setMesh(meshOf(read, datum), meshOf(read, datum, 'canopy'))
   })
   useEffect(() => onCoverChange(() => repaint.current()), [])
 

@@ -70,14 +70,17 @@ describe('meshOf', () => {
   })
 
   it('drops every cell touching ground nobody measured, rather than interpolating over it', () => {
+    // Unmeasured ground is NaN in both readings, since neither reader has anything to give there.
+    const blank = (at: number) => {
+      const patch = samplePatch(centre, 100, 3, flat())
+      patch.height[at] = NaN
+      patch.ground[at] = NaN
+      return patch
+    }
     // One missing corner, which is a corner of exactly one of the four cells.
-    const patch = samplePatch(centre, 100, 3, flat())
-    patch.height[0] = NaN
-    expect(meshOf(patch).indices).toHaveLength(18)
+    expect(meshOf(blank(0)).indices).toHaveLength(18)
     // A missing centre belongs to all four.
-    const middle = samplePatch(centre, 100, 3, flat())
-    middle.height[4] = NaN
-    expect(meshOf(middle).indices).toHaveLength(0)
+    expect(meshOf(blank(4)).indices).toHaveLength(0)
   })
 
   it('measures height from the datum and leaves the other two axes alone', () => {
@@ -127,5 +130,51 @@ describe('colorsOf', () => {
     for (const [i, want] of [...COVER_RGB[COVER.water], ...COVER_RGB[COVER.ground]].entries()) {
       expect(colors[i]).toBeCloseTo(want, 5)
     }
+  })
+})
+
+/**
+ * Two surfaces, not one. A wood is a thing you can see the shape of the hill through, so the
+ * vegetation is its own translucent sheet and the solid ground beneath it stays solid ground.
+ */
+describe('the two mesh layers', () => {
+  /** Flat earth at 50, with 10 m of trees over the eastern half. */
+  const wooded = samplePatch(centre, 10, 4, flat({
+    ground: () => 50,
+    surface: (e) => (e >= centre.e ? 60 : 50),
+  }))
+
+  it('puts the solid ground on the earth, not on the treetops', () => {
+    const solid = meshOf(wooded, 0)
+    const ys = [...solid.positions].filter((_, i) => i % 3 === 1)
+    expect(new Set(ys)).toEqual(new Set([50]))
+  })
+
+  it('puts the canopy sheet on the treetops', () => {
+    const canopy = meshOf(wooded, 0, 'canopy')
+    const used = new Set(
+      [...canopy.indices].map((v) => canopy.positions[v * 3 + 1]),
+    )
+    expect(used).toEqual(new Set([60]))
+  })
+
+  it('draws no canopy where nothing is standing', () => {
+    expect(meshOf(samplePatch(centre, 10, 3, flat()), 0, 'canopy').indices).toHaveLength(0)
+  })
+
+  it('keeps a building solid, since a roof is a floor and not a leaf', () => {
+    const built = samplePatch(centre, 10, 2, flat({
+      ground: () => 50, surface: () => 62, building: () => true,
+    }))
+    const ys = [...meshOf(built, 0).positions].filter((_, i) => i % 3 === 1)
+    expect(new Set(ys)).toEqual(new Set([62]))
+    expect(meshOf(built, 0, 'canopy').indices).toHaveLength(0)
+  })
+
+  it('hangs no green skirt from the treetops to the field beside them', () => {
+    // The edge column is half wood and half open, so its quads belong to neither sheet whole.
+    const canopy = meshOf(wooded, 0, 'canopy')
+    const solid = meshOf(wooded, 0)
+    expect(canopy.indices.length).toBeLessThan(solid.indices.length)
   })
 })

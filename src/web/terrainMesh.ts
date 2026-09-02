@@ -177,16 +177,35 @@ export function colorsOf(cover: Uint8Array): Float32Array {
   return colors
 }
 
-export function meshOf(patch: Patch, datum = 0): MeshData {
-  const { side, step, height } = patch
+/**
+ * Which of the two surfaces a mesh is of.
+ *
+ * `solid` is what a line has to clear and an anchor can stand on: bare earth, and the roof where
+ * there is a building, because a roof is a floor. `canopy` is the skin over the vegetation, drawn
+ * as a separate translucent sheet so the ground beneath it stays visible -- a wood is a thing you
+ * can see the shape of the hill through, and a single opaque surface at treetop height is not.
+ */
+export type MeshLayer = 'solid' | 'canopy'
+
+export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): MeshData {
+  const { side, step, height, ground, cover } = patch
   const half = ((side - 1) * step) / 2
   const positions = new Float32Array(side * side * 3)
-  const colors = colorsOf(patch.cover)
+  // Under the canopy the solid ground is brown, not green: the green has moved to its own sheet.
+  const colors = colorsOf(
+    layer === 'canopy'
+      ? cover
+      : Uint8Array.from(cover, (k) => (k === COVER.canopy ? COVER.ground : k)),
+  )
+
+  /** A building is solid to its roof; everything else stands on the earth it is measured from. */
+  const at = (i: number) =>
+    layer === 'canopy' || cover[i] === COVER.building ? height[i]! : ground[i]!
 
   for (let row = 0; row < side; row++) {
     for (let col = 0; col < side; col++) {
       const i = row * side + col
-      const h = height[i]!
+      const h = at(i)
       positions[i * 3] = col * step - half
       positions[i * 3 + 1] = Number.isNaN(h) ? 0 : h - datum
       positions[i * 3 + 2] = row * step - half
@@ -200,7 +219,10 @@ export function meshOf(patch: Patch, datum = 0): MeshData {
       const b = a + 1
       const c = a + side
       const d = c + 1
-      if (Number.isNaN(height[a]! + height[b]! + height[c]! + height[d]!)) continue
+      if (Number.isNaN(at(a) + at(b) + at(c) + at(d))) continue
+      // The canopy sheet covers only cells that are all four of them canopy. A quad with one foot
+      // on open ground would hang a green skirt from the treetops down to the field beside them.
+      if (layer === 'canopy' && [a, b, c, d].some((k) => cover[k] !== COVER.canopy)) continue
       indices.push(a, c, b, b, c, d)
     }
   }
