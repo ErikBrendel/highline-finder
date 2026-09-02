@@ -174,6 +174,7 @@ export function Terrain3D({
     const sag = sagRatio * length
     const line = new Float32Array(SPAN_POINTS * 3)
     const track = new Float32Array(SPAN_POINTS * 3)
+    const overTrack = new Float32Array(SPAN_POINTS * 3)
     for (let i = 0; i < SPAN_POINTS; i++) {
       const t = i / (SPAN_POINTS - 1)
       const e = a.e + (b.e - a.e) * t
@@ -183,24 +184,28 @@ export function Terrain3D({
       line[i * 3] = x
       line[i * 3 + 1] = lineHeightAt(anchorA, anchorB, sag, t) - g.datum
       line[i * 3 + 2] = z
-      // The skin, not the bare earth: under a canopy the drawn ground *is* the treetops, and a
-      // shadow laid on the soil beneath them would be inside the mesh and invisible.
+      // Two shadows, because the ground is drawn under the wood rather than replaced by it. One on
+      // the bare earth, which is where the line runs; one on whatever is standing there, which over
+      // a wood is the treetops. A metre clear of each, so both read as lying on a surface rather
+      // than in it.
       const bare = bareGround(e, n)
-      const skin = surfaceSampler.sample(e, n)
-      const under = Math.max(
+      const skin = surfaceSampler.nearest(e, n)
+      const over = Math.max(
         Number.isNaN(bare) ? -Infinity : bare,
         Number.isNaN(skin) ? -Infinity : skin,
       )
       track[i * 3] = x
-      // A metre clear of what it follows, so it reads as lying on the ground rather than in it.
-      track[i * 3 + 1] = (Number.isFinite(under) ? under : g.datum) - g.datum + 1
+      track[i * 3 + 1] = (Number.isFinite(bare) ? bare : g.datum) - g.datum + 1
       track[i * 3 + 2] = z
+      overTrack[i * 3] = x
+      overTrack[i * 3 + 1] = (Number.isFinite(over) ? over : g.datum) - g.datum + 1
+      overTrack[i * 3 + 2] = z
     }
     const anchors: [number, number, number][] = [
       [a.e - g.centre.e, anchorA - g.datum, -(a.n - g.centre.n)],
       [b.e - g.centre.e, anchorB - g.datum, -(b.n - g.centre.n)],
     ]
-    return { line, track, anchors, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
+    return { line, track, overTrack, anchors, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
   }
   const spanRef = useRef(spanOf)
   spanRef.current = spanOf
@@ -381,8 +386,8 @@ export function Terrain3D({
     .join('_')
   useEffect(() => {
     if (state !== 'ready' || !ground.current) return
-    const { line, track, anchors } = spanRef.current(ground.current)
-    scene.current?.setLine(line, track, anchors)
+    const { line, track, overTrack, anchors } = spanRef.current(ground.current)
+    scene.current?.setLine(line, track, overTrack, anchors)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineKey, state])
 

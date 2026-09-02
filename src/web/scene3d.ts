@@ -26,8 +26,16 @@ export interface SceneInput {
   canopy: MeshData | null
   /** The span, three floats a point, sagging. */
   line: Float32Array
-  /** The same span dropped onto the ground under it, which is what tells you where it runs. */
+  /**
+   * The span dropped onto what it passes over, twice.
+   *
+   * `track` follows the bare earth -- where the line actually runs, which is the mark that says
+   * which side of a gully it is on. `overTrack` follows whatever is standing there, so over a wood
+   * it sits on the treetops. Both are drawn: one shadow alone either disappears under the canopy or
+   * floats above ground that is nowhere near it.
+   */
   track: Float32Array
+  overTrack: Float32Array
   anchors: [number, number, number][]
   /** Half the patch's width in metres, which sets how far back the camera stands. */
   radius: number
@@ -60,7 +68,12 @@ export interface Scene3D {
   /** Redraws at a different vertical scale, keeping the camera where the viewer put it. */
   setExaggeration(k: number): void
   /** Replaces the span without touching the terrain, which is the expensive half. */
-  setLine(line: Float32Array, track: Float32Array, anchors: [number, number, number][]): void
+  setLine(
+    line: Float32Array,
+    track: Float32Array,
+    overTrack: Float32Array,
+    anchors: [number, number, number][],
+  ): void
   /**
    * Marks where along the span something is being pointed at, or clears it.
    *
@@ -163,6 +176,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   let exaggeration = input.exaggeration
   let line = input.line
   let track = input.track
+  let overTrack = input.overTrack
   let anchors = input.anchors
 
   const points = (a: Float32Array, k: number) => {
@@ -185,6 +199,12 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const trackMat = new MeshBasicMaterial({ color: '#7f1d2e' })
   const trackMesh = new Mesh(tubeAlong(points(track, exaggeration), tubeRadius * 0.7, 5), trackMat)
   scene.add(trackMesh)
+
+  // The same mark where the line crosses a canopy, thinner and paler: it is the top of the wood
+  // rather than the ground, and the ground is the one being read.
+  const overMat = new MeshBasicMaterial({ color: '#f43f5e', transparent: true, opacity: 0.45 })
+  const overMesh = new Mesh(tubeAlong(points(overTrack, exaggeration), tubeRadius * 0.45, 5), overMat)
+  scene.add(overMesh)
 
   /**
    * The shadow of the span as it would be, drawn beside the shadow of the span as it is.
@@ -281,6 +301,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     spanMesh.geometry = tubeAlong(points(line, k), tubeRadius, 6)
     trackMesh.geometry.dispose()
     trackMesh.geometry = tubeAlong(points(track, k), tubeRadius * 0.7, 5)
+    overMesh.geometry.dispose()
+    overMesh.geometry = tubeAlong(points(overTrack, k), tubeRadius * 0.45, 5)
     balls.forEach((ball, i) => {
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
       grabs[i]!.position.copy(ball.position)
@@ -493,9 +515,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       hoverAt = t
       drawHover()
     },
-    setLine(nextLine, nextTrack, nextAnchors) {
+    setLine(nextLine, nextTrack, nextOver, nextAnchors) {
       line = nextLine
       track = nextTrack
+      overTrack = nextOver
       anchors = nextAnchors
       rescale(exaggeration)
     },
@@ -513,14 +536,15 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       controls.dispose()
       for (const g of [
-        ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, ghostMesh.geometry,
-        ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
+        ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
+        ghostMesh.geometry, ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
       ]) {
         g.dispose()
       }
       for (const m of [
-        ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, ghostMat, ballMat,
-        grabMat, hoverBall.material as MeshBasicMaterial, hoverDrop.material as LineDashedMaterial,
+        ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat, ghostMat,
+        ballMat, grabMat, hoverBall.material as MeshBasicMaterial,
+        hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()
       }
