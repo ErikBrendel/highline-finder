@@ -404,6 +404,103 @@ downloads. The deeper question is `sagRatio` itself: a constant fraction of span
 model, and it is what makes long spans impossible here. A catenary would not change the conclusion
 by much, but it would change these numbers.
 
+## Hosting and data delivery
+
+Explored and postponed. The free tiers below were checked in September 2026; they are the numbers
+the whole question turns on, so re-check them before acting rather than trusting this list.
+
+**Where it stands.** GitHub Pages from a public repo. The deployed payload is 16 MB of
+`candidates.json` (3.15 MB gzipped) and 34 MB across 703 OSM blocks held in Git LFS. Pages caps a
+site at 1 GB with a soft 100 GB/month of bandwidth, and serves everything with a fixed
+`max-age=600` that cannot be tuned from this side.
+
+**LFS is the first thing to actually bind.** Every CI checkout pulls the whole 34 MB against a free
+quota of about 1 GB/month, so roughly thirty deploys -- and that is before a second state is
+shipped, never mind the rest of the country.
+
+### R2 for the OSM blocks
+
+Cloudflare R2 gives 10 GB of storage with free egress, 1 M class A and 10 M class B operations a
+month. A Germany-wide block set is estimated at 440-700 MB, area-scaling the ~50 MB that Saxony and
+Sachsen-Anhalt came to with simplification, so it fits several times over.
+
+That removes Git LFS from the project outright: the repository drops to ~20 MB, `lfs: true` and its
+silent-empty-blocks footgun leave the workflow, and blocks are uploaded once rather than
+republished with every deploy. Runtime barely changes -- `keysFor` already fetches blocks lazily,
+so only the URL is different.
+
+It is also the answer to *What stops fitting in one file* above: 790 MB of per-chunk candidate
+files has the same shape and the same home.
+
+### Which is what would let Overpass be deleted
+
+`hoehendaten.covers()` is `nearState('Germany')`, so anywhere in the country is plannable and can
+therefore ask for land cover. A partial extract leaves the fallback alive for everywhere it does
+not reach, so the bar is Germany-wide or nothing -- half measures buy no code back.
+
+What goes is not a backend swap but a whole parallel index: all 219 lines of `overpass.ts`, plus
+`patches`, `patching`, `patchFailed`, `patchesWanted`, `blockUnder` and `patchesUnder` in
+`landcover.ts`, the serialised request queue, the 429 handling, the two-source merge in `coverAlong`
+and `roadsFor`, and the `waterWindows` invalidation that hangs off it. That is precisely where the
+recent bugs lived -- the EMPTY-block "checked, no roads", the 429 storm from six parallel patches,
+and the 3D view holding stale colours. `onCoverChange` stays: that race is about shipped blocks
+arriving and has nothing to do with Overpass.
+
+The cost is that land cover becomes a snapshot with no live fallback -- a gap is fixed by
+regenerating and re-uploading rather than by a query -- and that regenerating means a ~4 GB Germany
+PBF through the three-pass reader. For lakes and roads over a season that is an acceptable trade.
+Sequence matters: ship Germany-wide blocks and verify the coverage *first*, delete second.
+
+### A Worker for CORS, and for nothing else
+
+A server-side fetch has no CORS, which is the entire Saxony problem: GeoSN's WMS renders pictures
+rather than serving values and geocloud sends no ACAO header, so nothing a browser holds can read a
+height there. A proxy makes both moot without waiting on the mail to `servicedesk@geosn.sachsen.de`,
+and promotes the Sachsen-Anhalt Vite dev proxy from a development crutch to a production path.
+
+Two limits shape it. The free plan allows 10 ms of CPU per invocation and 100,000 requests a day;
+network wait does not count toward CPU, so passing bytes through is comfortable but decoding a
+GeoTIFF inside the Worker is not. Static asset requests are free and unlimited, so hosting the site
+there costs nothing against that quota. Basemap tiles must not be proxied -- they would eat the
+daily allowance and gain nothing over the IndexedDB cache that already holds them.
+
+Worth recording why this stays thin: a proxy makes one IP the requester for every user, so upstream
+rate limits stop being spread across users and start aggregating on us. That is a real hazard for
+Overpass, which bans single high-volume addresses faster than it throttles individuals, and it is
+the reason a proxy in front of it would have to be cache-first with write-through rather than a
+pass-through. Delete Overpass first and the hazard never arises.
+
+### The pipeline on CI: GitHub Actions, not Cloudflare
+
+Workers Builds has a 20-minute build timeout and 3,000 minutes a month. Brandenburg alone is
+6,170 s, so this is not close. Actions on a public repository is free and unlimited with a 6 h cap
+per job, which is the right shape: shard a matrix job per region, matching the existing per-region
+output rewrite, and merge artefacts afterwards.
+
+The binding constraint is not compute but the 6.3 GB raster cache, against an Actions cache of
+10 GB per repository that evicts after seven days idle. R2 is the better backend for it, and CI
+writes are class A operations at 1 M free a month.
+
+One honest risk: pulling rasters from the state WCS servers at rotating CI addresses on a schedule
+is exactly the traffic pattern those portals throttle. A laptop run once per state is less likely
+to get us blocked than a nightly cloud one.
+
+### Moving the site itself is the smallest win
+
+Pages is already a CDN with gzip and working 304s. The only real gain is a `_headers` file --
+`immutable` on the hashed assets, and a sane max-age on `candidates.json` instead of the fixed ten
+minutes. Worth having, not worth migrating for on its own, though same-origin hosting does put
+`/api/*` beside the app with no preflight.
+
+**Alternatives considered and rejected.** Netlify is Cloudflare-minus with no storage story; Vercel's
+Hobby tier forbids commercial use and has no object storage; Backblaze B2 through the Bandwidth
+Alliance is equivalent to R2 with more moving parts. Zenodo is worth knowing for archiving an
+extract with a DOI, but it is not a CDN.
+
+**Order, if this is picked up.** R2 for the blocks; then Germany-wide blocks and the deletion of
+Overpass; then the CORS Worker; then the pipeline onto Actions. Site migration whenever it is
+convenient.
+
 ## Viewer
 
 - 3D terrain view with the line drawn in space.
