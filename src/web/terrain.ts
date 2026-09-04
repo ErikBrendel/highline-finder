@@ -82,6 +82,23 @@ const inFlight = new Map<string, Promise<void>>()
 
 const keyOf = (tx: number, ty: number) => `${tx}_${ty}`
 
+/**
+ * Which window an easting and a northing are read from -- and northing rounds the other way.
+ *
+ * A window is named by its south-west corner, so its column is the floor of the easting. But the
+ * grid inside it is read from its *north-west* corner: `nearest` indexes rows downwards from `n1`,
+ * so row 0 is the first metre below the north edge and the southern edge belongs to the window
+ * underneath. Flooring the northing too -- the obvious thing, and what this did -- hands every
+ * exact multiple of WINDOW to the window whose grid starts one row past its last, and the answer
+ * comes back NaN.
+ *
+ * On screen that was a one-metre black line across the terrain at every 256 m seam, wherever a
+ * sample lattice happened to land exactly on one. Easting has no such case: its cells are indexed
+ * from the same edge the window is named after, so the two already agree.
+ */
+const colAt = (e: number) => Math.floor(e / WINDOW)
+const rowAt = (n: number) => Math.ceil(n / WINDOW) - 1
+
 /** The UTM 33N square one window covers, for drawing it on the map. */
 export function windowBounds(tx: number, ty: number): { e0: number; n0: number; size: number } {
   return { e0: tx * WINDOW, n0: ty * WINDOW, size: WINDOW }
@@ -253,10 +270,10 @@ export function windowsFor(a: Pos, b: Pos, margin = WINDOW): [number, number][] 
     const t = steps === 0 ? 0 : i / steps
     const e = a.e + (b.e - a.e) * t
     const n = a.n + (b.n - a.n) * t
-    const x1 = Math.floor((e + margin) / WINDOW)
-    const y1 = Math.floor((n + margin) / WINDOW)
-    for (let cx = Math.floor((e - margin) / WINDOW); cx <= x1; cx++) {
-      for (let cy = Math.floor((n - margin) / WINDOW); cy <= y1; cy++) {
+    const x1 = colAt(e + margin)
+    const y1 = rowAt(n + margin)
+    for (let cx = colAt(e - margin); cx <= x1; cx++) {
+      for (let cy = rowAt(n - margin); cy <= y1; cy++) {
         out.set(`${cx}_${cy}`, [cx, cy])
       }
     }
@@ -312,7 +329,7 @@ export async function ensureTerrain(a: Pos, b: Pos, margin = WINDOW): Promise<bo
  * across it, and matches the smoothing the terrain already gets.
  */
 function cellOf(layer: Layer, e: number, n: number): number {
-  const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
+  const win = loaded.get(keyOf(colAt(e), rowAt(n)))
   if (!win) return NaN
   return layer === 'ground' ? standingGround(win, e, n) : win.surface.nearest(e, n)
 }
@@ -338,7 +355,7 @@ export function standingGround(
 
 /** Whether a point stands on a building. False where the window has not arrived. */
 export function onBuilding(e: number, n: number): boolean {
-  const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
+  const win = loaded.get(keyOf(colAt(e), rowAt(n)))
   return !!win && !Number.isNaN(win.roof.nearest(e, n))
 }
 
@@ -356,7 +373,7 @@ export const roofs: Roofs = { covers: onBuilding }
  * rather than as one going down forever.
  */
 export function bareGround(e: number, n: number): number {
-  const win = loaded.get(keyOf(Math.floor(e / WINDOW), Math.floor(n / WINDOW)))
+  const win = loaded.get(keyOf(colAt(e), rowAt(n)))
   return win ? win.ground.nearest(e, n) : NaN
 }
 

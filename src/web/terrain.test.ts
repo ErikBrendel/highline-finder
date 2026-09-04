@@ -3,7 +3,15 @@ import { standingGround, windowsFor } from './terrain.js'
 import { Grid } from '../shared/grid.js'
 
 const TILE = 256
-const windowOf = (e: number, n: number) => `${Math.floor(e / TILE)}_${Math.floor(n / TILE)}`
+/**
+ * The window a point is actually read from.
+ *
+ * A window is named by its south-west corner but its grid is indexed from the north-west one, so a
+ * northing exactly on a seam belongs to the window below. Flooring both -- which is what this
+ * helper and the code it checks both used to do -- disagrees with the reader at every multiple of
+ * the window size, and the reader answers NaN there.
+ */
+const windowOf = (e: number, n: number) => `${Math.floor(e / TILE)}_${Math.ceil(n / TILE) - 1}`
 
 describe('windowsFor', () => {
   it('covers every point along the line', () => {
@@ -54,6 +62,20 @@ describe('windowsFor', () => {
         expect(keys).toContain(windowOf(e - dy * off, n + dx * off))
       }
     }
+  })
+
+  it('reads a northing on a seam from the window below it, the one holding that row', () => {
+    const seam = 22_598 * TILE
+    const at = { e: 400_000, n: seam }
+    expect(windowsFor(at, at, 0)).toEqual([[Math.floor(400_000 / TILE), 22_597]])
+  })
+
+  it('covers a corridor running along a seam', () => {
+    const seam = 22_598 * TILE
+    const a = { e: 400_000, n: seam }
+    const b = { e: 400_600, n: seam }
+    const keys = new Set(windowsFor(a, b, 1).map(([tx, ty]) => `${tx}_${ty}`))
+    for (let e = a.e; e <= b.e; e += 10) expect(keys).toContain(windowOf(e, seam))
   })
 })
 
