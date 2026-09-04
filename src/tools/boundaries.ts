@@ -54,6 +54,101 @@ const coarsen = (ring: number[][]): number[][] =>
   ])
 
 /**
+ * Metres per degree of latitude, and the same for longitude at the latitude in question.
+ *
+ * A local flat-earth metric, which is all the trimming below needs: it compares distances of a few
+ * kilometres between points a few kilometres apart, and the question it answers is only whether two
+ * lines are the same line. Reusing the UTM projection would be worse, not better -- the national
+ * outline reaches to Aachen, five zones west of the one this project works in.
+ */
+const M_PER_DEGREE = 111_320
+
+const flat = (lon: number, lat: number, cosLat: number): [number, number] => [
+  lon * cosLat * M_PER_DEGREE,
+  lat * M_PER_DEGREE,
+]
+
+/** Distance from `p` to segment `a`-`b`, and the point on it that is nearest. */
+function toSegment(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number],
+): { at: number; t: number } {
+  const vx = b[0] - a[0]
+  const vy = b[1] - a[1]
+  const len = vx * vx + vy * vy
+  const t = len ? Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / len)) : 0
+  return { at: Math.hypot(p[0] - a[0] - t * vx, p[1] - a[1] - t * vy), t }
+}
+
+/**
+ * The national outline with every stretch a state border already draws taken out.
+ *
+ * Brandenburg runs along the Oder and Saxony along the Neisse and the Erzgebirge, so a fifth of the
+ * country's edge is a line this map is drawing twice -- once solid as a survey boundary and once
+ * dashed underneath it, which reads as a rendering fault rather than as two facts.
+ *
+ * The threshold is the tolerance the ring was simplified at, which is the honest one: a point can
+ * sit that far from where the border truly runs purely because of the simplification, so anything
+ * inside it is not a second border but the same one drawn worse.
+ *
+ * Each surviving chain is carried one point past the last one it keeps and then onto the state
+ * border itself, so the dash ends where the solid line begins instead of stopping short of it. That
+ * final vertex is the only thing here that is not a point of the ring -- the join is drawn, not
+ * measured, and everything the source registry tests against stays exactly as it was.
+ */
+function trimToStates(ring: number[][], borders: number[][][], within: number): number[][][] {
+  const cosLat = Math.cos(
+    ((ring.reduce((sum, [, lat]) => sum + lat!, 0) / ring.length) * Math.PI) / 180,
+  )
+  const segments: [[number, number], [number, number], number[], number[]][] = []
+  for (const border of borders) {
+    for (let i = 1; i < border.length; i++) {
+      const [a, b] = [border[i - 1]!, border[i]!]
+      segments.push([flat(a[0]!, a[1]!, cosLat), flat(b[0]!, b[1]!, cosLat), a, b])
+    }
+  }
+
+  /** The nearest point on any state border, in degrees, and how far away it is. */
+  const nearest = (point: number[]) => {
+    const p = flat(point[0]!, point[1]!, cosLat)
+    let best = { at: Infinity, on: point }
+    for (const [a, b, da, db] of segments) {
+      const { at, t } = toSegment(p, a, b)
+      if (at >= best.at) continue
+      // At the precision of the border it lands on, since that is the line it has to meet.
+      const on = (i: number) => Math.round((da[i]! + (db[i]! - da[i]!) * t) * 1e5) / 1e5
+      best = { at, on: [on(0), on(1)] }
+    }
+    return best
+  }
+
+  // A closed ring's repeated last point would otherwise start a chain of its own.
+  const points = ring.slice(0, -1)
+  const near = points.map(nearest)
+  const drop = near.map((n) => n.at <= within)
+  if (!drop.some(Boolean)) return [ring]
+  if (drop.every(Boolean)) return []
+
+  // Rotated to start on a dropped point, so a chain running across the ring's own seam stays whole.
+  const start = drop.indexOf(true)
+  const at = (i: number) => (start + i) % points.length
+  const chains: number[][][] = []
+  let chain: number[][] | null = null
+  for (let i = 0; i <= points.length; i++) {
+    const here = at(i % points.length)
+    if (i < points.length && !drop[here]) {
+      chain ??= [near[at(i - 1)]!.on, points[at(i - 1)]!]
+      chain.push(points[here]!)
+      continue
+    }
+    if (chain) chains.push([...chain, points[here]!, near[here]!.on])
+    chain = null
+  }
+  return chains
+}
+
+/**
  * Which relations to trace, and which extract holds each.
  *
  * The list is the ground the planner can measure: Brandenburg and Berlin because the search covers
@@ -305,15 +400,26 @@ async function main() {
    *
    * One ring for both files rather than the same tolerance applied twice, because those are not the
    * same thing: coarsening an already-coarse ring drops a few more points, and the drawn line would
-   * end up promising ground the registry declines.
+   * end up promising ground the registry declines. What is drawn is then that ring with the
+   * stretches a state border already covers removed -- a subset of it, so every drawn point is still
+   * a point the registry agrees with. See `trimToStates`.
    */
   const germanyRing = coarsen(await germany())
+  const drawn = trimToStates(
+    germanyRing,
+    states.flatMap((f) => f.geometry.coordinates),
+    COARSE_TOLERANCE,
+  )
+  console.log(
+    `  drawn as ${drawn.length} chain(s), ${drawn.reduce((n, c) => n + c.length, 0)} of ` +
+      `${germanyRing.length} points -- the rest is already a state border`,
+  )
   const features = [
     ...states,
     {
       type: 'Feature' as const,
       properties: { name: 'Germany' },
-      geometry: { type: 'MultiLineString' as const, coordinates: [germanyRing] },
+      geometry: { type: 'MultiLineString' as const, coordinates: drawn },
     },
   ]
 
