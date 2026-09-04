@@ -150,12 +150,10 @@ describe('the two mesh layers', () => {
     expect(new Set(ys)).toEqual(new Set([50]))
   })
 
-  it('puts the canopy sheet on the treetops', () => {
+  it('puts the canopy sheet on the treetops, and closes its edges down to the earth', () => {
     const canopy = meshOf(wooded, 0, 'canopy')
-    const used = new Set(
-      [...canopy.indices].map((v) => canopy.positions[v * 3 + 1]),
-    )
-    expect(used).toEqual(new Set([60]))
+    const used = new Set([...canopy.indices].map((v) => canopy.positions[v * 3 + 1]))
+    expect(used).toEqual(new Set([60, 50]))
   })
 
   it('draws no canopy where nothing is standing', () => {
@@ -171,10 +169,18 @@ describe('the two mesh layers', () => {
     expect(meshOf(built, 0, 'canopy').indices).toHaveLength(0)
   })
 
-  it('hangs no green skirt from the treetops to the field beside them', () => {
-    // The edge column is half wood and half open, so its quads belong to neither sheet whole.
+  /**
+   * The wall drops straight down from the sheet. A quad sloping from the treetops to the field
+   * beside them would reach the ground at a point the sheet does not stand over, which is the older
+   * bug this also still guards.
+   */
+  it('drops every wall vertex straight down from one on the sheet', () => {
     const canopy = meshOf(wooded, 0, 'canopy')
-    const solid = meshOf(wooded, 0)
-    expect(canopy.indices.length).toBeLessThan(solid.indices.length)
+    const where = (v: number) => `${canopy.positions[v * 3]},${canopy.positions[v * 3 + 2]}`
+    const used = [...new Set(canopy.indices)]
+    const tops = new Set(used.filter((v) => canopy.positions[v * 3 + 1] === 60).map(where))
+    const feet = used.filter((v) => canopy.positions[v * 3 + 1] === 50)
+    expect(feet).not.toHaveLength(0)
+    expect(feet.every((v) => tops.has(where(v)))).toBe(true)
   })
 })

@@ -213,6 +213,7 @@ export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): Mes
   }
 
   const indices: number[] = []
+  const drawn = new Uint8Array((side - 1) * (side - 1))
   for (let row = 0; row + 1 < side; row++) {
     for (let col = 0; col + 1 < side; col++) {
       const a = row * side + col
@@ -221,10 +222,79 @@ export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): Mes
       const d = c + 1
       if (Number.isNaN(at(a) + at(b) + at(c) + at(d))) continue
       // The canopy sheet covers only cells that are all four of them canopy. A quad with one foot
-      // on open ground would hang a green skirt from the treetops down to the field beside them.
+      // on open ground would slope from the treetops down to the field beside them, which is a
+      // hillside that is not there. Where it stops instead, `skirt` closes it with a vertical wall.
       if (layer === 'canopy' && [a, b, c, d].some((k) => cover[k] !== COVER.canopy)) continue
+      drawn[row * (side - 1) + col] = 1
       indices.push(a, c, b, b, c, d)
     }
   }
+  if (layer !== 'canopy') return { positions, colors, indices: Uint32Array.from(indices) }
+  return skirt(patch, positions, colors, indices, drawn, datum)
+}
+
+/**
+ * Closes the open edges of the canopy sheet with a wall down to the earth under them.
+ *
+ * The sheet is a skin at treetop height with nothing beneath it, so a camera low enough to see its
+ * underside sees straight in -- and does so most where it matters, at the edge of the model and
+ * wherever a stand of tall trees simply stops. Thirty metres of canopy ending in mid-air reads as a
+ * hole in the world rather than as the edge of a wood.
+ *
+ * Down to bare earth rather than to some clearance above it, because anything short of the ground
+ * leaves a gap that a low enough camera finds, and the number would have to be guessed. It is also
+ * what a wood looks like from outside: a wall of foliage, not a canopy on stilts.
+ *
+ * Vertical, and that is the point. The wall drops from a vertex of the sheet to the same easting
+ * and northing on the ground, so it says the trees stop *here* -- where a sloped quad would have
+ * claimed they thin out gradually into the field, which is the thing the sheet is careful not to
+ * say. Bare earth is known wherever canopy is, since a cell is only canopy when both were measured.
+ */
+function skirt(
+  patch: Patch,
+  sheet: Float32Array,
+  sheetColors: Float32Array,
+  indices: number[],
+  drawn: Uint8Array,
+  datum: number,
+): MeshData {
+  const { side, ground } = patch
+  const feet: number[] = []
+  const footColors: number[] = []
+  const below = new Map<number, number>()
+  const green = COVER_RGB[COVER.canopy]
+
+  /** The same point again, on the ground. One per sheet vertex however many walls meet there. */
+  const under = (i: number): number => {
+    const had = below.get(i)
+    if (had !== undefined) return had
+    const at = side * side + feet.length / 3
+    feet.push(sheet[i * 3]!, ground[i]! - datum, sheet[i * 3 + 2]!)
+    footColors.push(green[0], green[1], green[2])
+    below.set(i, at)
+    return at
+  }
+
+  const covered = (row: number, col: number) =>
+    row >= 0 && col >= 0 && row + 1 < side && col + 1 < side && drawn[row * (side - 1) + col]
+  const wall = (u: number, v: number) => indices.push(u, under(u), v, v, under(u), under(v))
+
+  for (let row = 0; row + 1 < side; row++) {
+    for (let col = 0; col + 1 < side; col++) {
+      if (!drawn[row * (side - 1) + col]) continue
+      const a = row * side + col
+      if (!covered(row - 1, col)) wall(a, a + 1)
+      if (!covered(row + 1, col)) wall(a + side, a + side + 1)
+      if (!covered(row, col - 1)) wall(a, a + side)
+      if (!covered(row, col + 1)) wall(a + 1, a + side + 1)
+    }
+  }
+
+  const positions = new Float32Array(sheet.length + feet.length)
+  positions.set(sheet)
+  positions.set(feet, sheet.length)
+  const colors = new Float32Array(sheetColors.length + footColors.length)
+  colors.set(sheetColors)
+  colors.set(footColors, sheetColors.length)
   return { positions, colors, indices: Uint32Array.from(indices) }
 }
