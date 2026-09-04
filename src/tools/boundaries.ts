@@ -41,6 +41,19 @@ const COARSE_OUT = new URL('../web/outlines.json', import.meta.url).pathname
 const COARSE_TOLERANCE = 2500
 
 /**
+ * A ring at the coarse tolerance, rounded to about a hundred metres.
+ *
+ * Shared because the same ring goes into both files for Germany: what is drawn for it and what the
+ * source registry tests against are the same shape, and having one produce the other is what keeps
+ * the line on the map from promising ground the registry would decline.
+ */
+const coarsen = (ring: number[][]): number[][] =>
+  simplify(ring, COARSE_TOLERANCE / 111_320).map(([lon, lat]) => [
+    Math.round(lon! * 1e3) / 1e3,
+    Math.round(lat! * 1e3) / 1e3,
+  ])
+
+/**
  * Which relations to trace, and which extract holds each.
  *
  * The list is the ground the planner can measure: Brandenburg and Berlin because the search covers
@@ -274,27 +287,43 @@ async function germany(): Promise<[number, number][]> {
 }
 
 async function main() {
-  const features = []
+  const states = []
   for (const { extract, names } of STATES) {
     console.log(`\n== ${names.join(', ')}`)
-    features.push(...(await trace(extract, names)))
+    states.push(...(await trace(extract, names)))
   }
 
+  /**
+   * Germany is drawn at the coarse tolerance, unlike the states, and from the very same ring the
+   * source registry tests against.
+   *
+   * It says something weaker than a state outline does, and should look like it. A state border
+   * means a survey answers here at full quality; this one means only that the republisher might
+   * hold something, terrain and no canopy. It is Geofabrik's clipping polygon rather than the
+   * political border, so detail it does not deserve would be detail invented -- and at full
+   * resolution the coastline and the islands are most of the file for a line nobody plans against.
+   *
+   * One ring for both files rather than the same tolerance applied twice, because those are not the
+   * same thing: coarsening an already-coarse ring drops a few more points, and the drawn line would
+   * end up promising ground the registry declines.
+   */
+  const germanyRing = coarsen(await germany())
+  const features = [
+    ...states,
+    {
+      type: 'Feature' as const,
+      properties: { name: 'Germany' },
+      geometry: { type: 'MultiLineString' as const, coordinates: [germanyRing] },
+    },
+  ]
+
   const coarse = [
-    ...features.map((f) => ({
+    ...states.map((f) => ({
       name: f.properties.name,
-      rings: f.geometry.coordinates.map((r) => r.map(([lon, lat]) => [lon!, lat!])),
+      rings: f.geometry.coordinates.map((r) => coarsen(r.map(([lon, lat]) => [lon!, lat!]))),
     })),
-    { name: 'Germany', rings: [await germany()] },
-  ].map((f) => ({
-    name: f.name,
-    rings: f.rings.map((ring) =>
-      simplify(ring as number[][], COARSE_TOLERANCE / 111_320).map(([lon, lat]) => [
-        Math.round(lon! * 1e3) / 1e3,
-        Math.round(lat! * 1e3) / 1e3,
-      ]),
-    ),
-  }))
+    { name: 'Germany', rings: [germanyRing] },
+  ]
   const coarseText = JSON.stringify(coarse)
   await writeFile(COARSE_OUT, `${coarseText}\n`)
   console.log(

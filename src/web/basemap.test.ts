@@ -12,7 +12,7 @@ import {
   lineWidth,
   stopAt,
 } from './MapView.js'
-import { SHADE_BASELINE, applyShading, normaliseShade } from './shadeMath.js'
+import { SHADE_BASELINE, applyShading, makeOpaque, normaliseShade } from './shadeMath.js'
 import { toUtm33, toWgs84 } from '../shared/geo.js'
 
 const n = BLEND_STOPS.length
@@ -274,5 +274,17 @@ describe('normaliseShade', () => {
     const data = new Uint8ClampedArray([10, 200, 250, 7])
     normaliseShade(data, SHADE_BASELINE, SHADE_BASELINE)
     expect([...data]).toEqual([10, 200, 250, 7])
+  })
+})
+
+/**
+ * Saxony-Anhalt renders its relief at 80 % alpha, so drawn as it arrives a fifth of the flat grey
+ * beneath it mixes into every hillside and flattens the relief by that much.
+ */
+describe('makeOpaque', () => {
+  it('takes a survey at its word where it has ground, and leaves the rest to the next one', () => {
+    const data = new Uint8ClampedArray([90, 90, 90, 205, 40, 40, 40, 0])
+    makeOpaque(data)
+    expect([...data]).toEqual([90, 90, 90, 255, 40, 40, 40, 0])
   })
 })

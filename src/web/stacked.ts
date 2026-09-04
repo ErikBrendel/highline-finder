@@ -1,6 +1,6 @@
 import maplibregl from 'maplibre-gl'
 import { fetchCached } from './tileCache.js'
-import { normaliseShade, SHADE_BASELINE } from './shadeMath.js'
+import { makeOpaque, normaliseShade, SHADE_BASELINE } from './shadeMath.js'
 import { report } from './report.js'
 
 /**
@@ -38,6 +38,12 @@ export interface StackLayer {
    * about what flat looks like still stack into one map. See `normaliseShade`.
    */
   baseline?: number
+  /**
+   * Whether this survey draws itself semi-transparent, and should not.
+   *
+   * Saxony-Anhalt's relief arrives at 80 % alpha everywhere it has ground. See `makeOpaque`.
+   */
+  opaque?: boolean
 }
 
 export interface Stack {
@@ -125,19 +131,21 @@ async function paint(url: string, signal: AbortSignal): Promise<OffscreenCanvas>
   }
   tiles.forEach((tile, i) => {
     if (!tile) return
-    const from = wanted[i]!.baseline
-    if (from === undefined || from === SHADE_BASELINE) {
+    const layer = wanted[i]!
+    const rebase = layer.baseline !== undefined && layer.baseline !== SHADE_BASELINE
+    if (!rebase && !layer.opaque) {
       ctx.drawImage(tile, 0, 0, size, size)
       return
     }
-    // Rebased in its own scratch canvas, so reading its pixels back does not pick up whatever this
+    // Fixed up in its own scratch canvas, so reading its pixels back does not pick up whatever this
     // tile already has underneath it.
     const own = new OffscreenCanvas(size, size)
     const octx = own.getContext('2d')
     if (!octx) return
     octx.drawImage(tile, 0, 0, size, size)
     const pixels = octx.getImageData(0, 0, size, size)
-    normaliseShade(pixels.data, from, SHADE_BASELINE)
+    if (rebase) normaliseShade(pixels.data, layer.baseline!, SHADE_BASELINE)
+    if (layer.opaque) makeOpaque(pixels.data)
     octx.putImageData(pixels, 0, 0)
     ctx.drawImage(own, 0, 0)
   })

@@ -55,10 +55,16 @@ const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR]
 const wms = (path: string, layer: string) =>
   anyWms(`https://isk.geobasis-bb.de/mapproxy/${path}/service/wms`, layer)
 
-/** A WMS anywhere, in the shape MapLibre's raster template needs. Transparent, so stacks work. */
-const anyWms = (base: string, layer: string) =>
+/**
+ * A WMS anywhere, in the shape MapLibre's raster template needs. Transparent, so stacks work.
+ *
+ * `crs` because not every service admits to knowing Web Mercator by its current name. Saxony-Anhalt
+ * advertises only `EPSG:900913`, the deprecated alias, and answers `InvalidCRS` to the modern one --
+ * same projection, same bounding box numbers, different label.
+ */
+const anyWms = (base: string, layer: string, crs = 'EPSG:3857') =>
   `${reachable(base)}${base.includes('?') ? '&' : '?'}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap` +
-  `&LAYERS=${layer}&STYLES=&CRS=EPSG:3857&WIDTH=256&HEIGHT=256` +
+  `&LAYERS=${layer}&STYLES=&CRS=${crs}&WIDTH=256&HEIGHT=256` +
   `&FORMAT=image/png&TRANSPARENT=true&BBOX={bbox-epsg-3857}`
 
 /** Where each survey has imagery: west, south, east, north. Only used to skip pointless requests. */
@@ -95,19 +101,35 @@ const ORTHO = stackedUrl('ortho', {
  * The relief, with the flat-ground grey underneath it.
  *
  * Painted rather than left transparent because the shaded composites divide by that grey: ground
- * no survey has shaded has to come out unchanged, not black. Saxony-Anhalt publishes no relief
- * product a browser can reach, so its ground is exactly that case.
+ * no survey has shaded has to come out unchanged, not black. That is what any ground outside these
+ * three states gets.
+ *
+ * All three disagree about what flat looks like, so each says so and is rebased on the way in --
+ * otherwise a state border is a step in brightness across an unbroken field, and the shaded
+ * composites brighten or darken everything the odd one out covers.
  */
 const SHADE = stackedUrl('shade', {
   under: '#c4c4c4',
   layers: [
-    // Saxony renders flat ground at #dddddd where Brandenburg uses #c4c4c4, so it is rebased on the
-    // way in -- otherwise the state border is a step in brightness across an unbroken field, and
-    // the shaded composites brighten everything Saxony covers.
+    { url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'), bbox: SN_BOX, baseline: 0xdd },
+    /**
+     * Saxony-Anhalt, which took the longest to find because it answers to the wrong name.
+     *
+     * Two things make it unlike the other two. It only knows Web Mercator as `EPSG:900913`, so it
+     * is asked for that; and it renders itself at 80 % alpha, so it is forced opaque -- see
+     * `makeOpaque`. Its relief is derived from the DGM5 at 25 m2 a pixel, coarser than Brandenburg's
+     * and visible as such at the border, which is a difference in detail rather than in brightness
+     * and is the honest way for it to show.
+     */
     {
-      url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'),
-      bbox: SN_BOX,
-      baseline: 0xdd,
+      url: anyWms(
+        'https://geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_DGM5_Relief_OpenData/guest',
+        'lvermgeo_dgm5_schummerung',
+        'EPSG:900913',
+      ),
+      bbox: ST_BOX,
+      baseline: 0xb3,
+      opaque: true,
     },
     { url: wms('dgm', 'dgmshade'), bbox: BB_BOX },
   ],
@@ -999,17 +1021,23 @@ export function MapView({
       })
 
       /**
-       * The two state borders, always on.
+       * Where the answers stop, always on.
        *
-       * Not a debug view and not a filter: everything in this dataset is inside Brandenburg, so the
-       * border is where the answers stop -- and the hole in the middle of it is Berlin, which the
+       * Not a debug view and not a filter: everything in this dataset is inside Brandenburg, so its
+       * border is where the found lines end -- and the hole in the middle of it is Berlin, which the
        * city model does not cover, so a line there is natural whatever the urban rectangles say.
-       * Both facts are ones you want on screen without having asked for them.
+       * Saxony and Saxony-Anhalt are drawn for what a planned line can measure rather than what the
+       * search found. All of it is context you want on screen without having asked for it.
        *
-       * Loaded rather than bundled, and small enough not to care: 38 KB for both, simplified to
-       * 100 m by `npm run boundaries`. A failure is left silent, which is the one place in this file
-       * that is right -- the border is context, and a map that refuses to draw because it could not
-       * decorate itself would be worse than one without the decoration.
+       * Two layers, because the outlines say two different things. A state border is a survey that
+       * answers here at full quality; Germany is only the ground the republisher might hold, terrain
+       * and no canopy, and it is Geofabrik's clipping polygon rather than the political border. So
+       * it is drawn dashed and fainter -- an edge that is approximate, and a promise that is weaker.
+       *
+       * Loaded rather than bundled, and small enough not to care, simplified by `npm run boundaries`.
+       * A failure is left silent, which is the one place in this file that is right -- the border is
+       * context, and a map that refuses to draw because it could not decorate itself would be worse
+       * than one without the decoration.
        */
       m.addSource('borders', {
         type: 'geojson',
@@ -1019,7 +1047,20 @@ export function MapView({
         id: 'borders',
         type: 'line',
         source: 'borders',
+        filter: ['!=', ['get', 'name'], 'Germany'],
         paint: { 'line-color': '#cbd5e1', 'line-width': 3, 'line-opacity': 0.55 },
+      })
+      m.addLayer({
+        id: 'borders-outer',
+        type: 'line',
+        source: 'borders',
+        filter: ['==', ['get', 'name'], 'Germany'],
+        paint: {
+          'line-color': '#cbd5e1',
+          'line-width': 2,
+          'line-opacity': 0.3,
+          'line-dasharray': [3, 3],
+        },
       })
       fetch(`${import.meta.env.BASE_URL}boundaries.json`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))

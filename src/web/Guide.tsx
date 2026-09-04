@@ -56,9 +56,9 @@ export function Guide({ onClose }: { onClose: () => void }) {
           <ul>
             <li>Terrain, canopy and buildings, published free and open by the state.</li>
             <li>
-              Searched in Berlin and Brandenburg only &mdash; the grey outlines are where that
+              Searched in Berlin and Brandenburg only &mdash; the solid outlines are where that
               stops. Past them you can still place two anchors by hand and have the line measured,
-              wherever a state survey covers the ground.
+              out to the dashed line, though with less to measure it against.
             </li>
           </ul>
 

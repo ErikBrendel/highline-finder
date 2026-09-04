@@ -1,5 +1,5 @@
 /**
- * The two pieces of arithmetic every basemap composite is built from.
+ * The pieces of arithmetic every basemap composite is built from.
  *
  * In their own module because both of the modules that need them would otherwise have to import
  * each other: a stack of surveys has to rebase each one's relief, and a shaded basemap is a stack
@@ -42,6 +42,24 @@ export function normaliseShade(data: Uint8ClampedArray, from: number, to: number
       data[i + c] = v <= from ? v * below : to + (v - from) * above
     }
   }
+}
+
+/**
+ * Full alpha wherever a survey has anything, none where it has not.
+ *
+ * Saxony-Anhalt renders its relief at 80 % alpha -- the layer declares `opaque="0"` and every pixel
+ * it holds comes back at 205. Drawn as it arrives, four fifths of its hillsides and one fifth of
+ * the flat grey underneath would be mixed together, which flattens its relief by a fifth and is not
+ * what any of the other surveys do. A stack shows the topmost layer that has data for a tile; a
+ * survey rendering itself semi-transparent is not asking for something different, it is a property
+ * of the picture rather than a statement about the ground.
+ *
+ * The threshold is deliberate rather than a scale. This service's alpha is binary -- 205 where it
+ * has ground and 0 where it has none, with nothing in between even on a tile straddling the state
+ * border -- so anything partial is an edge and belongs on the side it is nearer.
+ */
+export function makeOpaque(data: Uint8ClampedArray): void {
+  for (let i = 3; i < data.length; i += 4) data[i] = data[i]! >= 128 ? 255 : 0
 }
 
 /**
