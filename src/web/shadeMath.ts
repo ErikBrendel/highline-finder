@@ -9,11 +9,16 @@
 /**
  * Grey the shaded-relief product renders flat ground at, as a channel value.
  *
- * #c4c4c4. Fixed rather than measured per tile: a per-tile baseline would make the same hillside
- * lighter or darker depending on what else happened to be in frame, which is exactly the artefact
- * this is meant to remove.
+ * Brandenburg's, because that is the survey the dataset is in and the one every other is read
+ * against. Measured rather than taken from the documentation, which says #c4c4c4 and so would have
+ * put this at 196: over flat ground the service actually returns 193 at a metre a pixel and 195
+ * from five metres out, the drift being its own downsampling. 195 is what it renders at the
+ * resolutions relief is looked at.
+ *
+ * Fixed rather than measured per tile: a per-tile baseline would make the same hillside lighter or
+ * darker depending on what else happened to be in frame, which is the artefact this removes.
  */
-export const SHADE_BASELINE = 196
+export const SHADE_BASELINE = 195
 
 /**
  * Rebases one survey's shaded relief onto the grey every other one is read against.
@@ -29,17 +34,31 @@ export const SHADE_BASELINE = 196
  * points -- black stays black, white stays white, flat ground lands on the common grey -- and
  * stretches each half between them.
  *
+ * `contrast` is the second half of the job, and the rebase alone is not enough without it: agreeing
+ * about flat ground says nothing about how far from it a given hillside is drawn. Saxony renders
+ * roughly twice Brandenburg's relief for the same slope and Saxony-Anhalt about a third of it, so
+ * three maps that now share a grey still do not look like one map. Applied after the rebase and
+ * about the baseline, so it changes how far a slope departs from flat without moving flat itself.
+ * `Uint8ClampedArray` handles the ends; at the fitted factors that costs Saxony-Anhalt 0.14 % of its
+ * pixels and the others none.
+ *
  * Alpha is untouched: what a survey has no data for stays transparent, which is what lets the next
  * one show through.
  */
-export function normaliseShade(data: Uint8ClampedArray, from: number, to: number): void {
-  if (from === to) return
+export function normaliseShade(
+  data: Uint8ClampedArray,
+  from: number,
+  to: number,
+  contrast = 1,
+): void {
+  if (from === to && contrast === 1) return
   const below = to / from
   const above = (255 - to) / (255 - from)
   for (let i = 0; i < data.length; i += 4) {
     for (let c = 0; c < 3; c++) {
       const v = data[i + c]!
-      data[i + c] = v <= from ? v * below : to + (v - from) * above
+      const rebased = v <= from ? v * below : to + (v - from) * above
+      data[i + c] = to + (rebased - to) * contrast
     }
   }
 }

@@ -275,6 +275,34 @@ describe('normaliseShade', () => {
     normaliseShade(data, SHADE_BASELINE, SHADE_BASELINE)
     expect([...data]).toEqual([10, 200, 250, 7])
   })
+
+  /**
+   * Agreeing about flat ground says nothing about how far from it a hillside is drawn. Saxony
+   * renders about twice Brandenburg's relief for the same slope and Saxony-Anhalt about a third.
+   */
+  describe('contrast', () => {
+    const at = (v: number, contrast: number) => {
+      const data = new Uint8ClampedArray([v, v, v, 255])
+      normaliseShade(data, SHADE_BASELINE, SHADE_BASELINE, contrast)
+      return data[0]!
+    }
+
+    it('leaves flat ground exactly where it is, whatever the factor', () => {
+      expect(at(SHADE_BASELINE, 0.52)).toBe(SHADE_BASELINE)
+      expect(at(SHADE_BASELINE, 3.05)).toBe(SHADE_BASELINE)
+    })
+
+    it('scales how far a slope departs from flat, both ways', () => {
+      expect(at(SHADE_BASELINE - 20, 0.5)).toBe(SHADE_BASELINE - 10)
+      expect(at(SHADE_BASELINE + 20, 0.5)).toBe(SHADE_BASELINE + 10)
+      expect(at(SHADE_BASELINE - 10, 3)).toBe(SHADE_BASELINE - 30)
+    })
+
+    it('clamps rather than wrapping where a lifted survey runs out of room', () => {
+      expect(at(255, 3)).toBe(255)
+      expect(at(0, 3)).toBe(0)
+    })
+  })
 })
 
 /**

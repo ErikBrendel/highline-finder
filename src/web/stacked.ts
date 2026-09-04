@@ -39,6 +39,14 @@ export interface StackLayer {
    */
   baseline?: number
   /**
+   * How much of its own relief this survey draws, against Brandenburg's.
+   *
+   * The factor its deviations from flat are multiplied by, so under 1 flattens a survey that
+   * overdraws and over 1 lifts one that underdraws. See `normaliseShade`, and the SHADE stack for
+   * where the numbers were measured.
+   */
+  contrast?: number
+  /**
    * Whether this survey draws itself semi-transparent, and should not.
    *
    * Saxony-Anhalt's relief arrives at 80 % alpha everywhere it has ground. See `makeOpaque`.
@@ -132,7 +140,9 @@ async function paint(url: string, signal: AbortSignal): Promise<OffscreenCanvas>
   tiles.forEach((tile, i) => {
     if (!tile) return
     const layer = wanted[i]!
-    const rebase = layer.baseline !== undefined && layer.baseline !== SHADE_BASELINE
+    const rebase =
+      (layer.baseline !== undefined && layer.baseline !== SHADE_BASELINE) ||
+      (layer.contrast !== undefined && layer.contrast !== 1)
     if (!rebase && !layer.opaque) {
       ctx.drawImage(tile, 0, 0, size, size)
       return
@@ -144,7 +154,7 @@ async function paint(url: string, signal: AbortSignal): Promise<OffscreenCanvas>
     if (!octx) return
     octx.drawImage(tile, 0, 0, size, size)
     const pixels = octx.getImageData(0, 0, size, size)
-    if (rebase) normaliseShade(pixels.data, layer.baseline!, SHADE_BASELINE)
+    if (rebase) normaliseShade(pixels.data, layer.baseline ?? SHADE_BASELINE, SHADE_BASELINE, layer.contrast)
     if (layer.opaque) makeOpaque(pixels.data)
     octx.putImageData(pixels, 0, 0)
     ctx.drawImage(own, 0, 0)

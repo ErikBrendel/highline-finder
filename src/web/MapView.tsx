@@ -102,16 +102,32 @@ const ORTHO = stackedUrl('ortho', {
  *
  * Painted rather than left transparent because the shaded composites divide by that grey: ground
  * no survey has shaded has to come out unchanged, not black. That is what any ground outside these
- * three states gets.
+ * three states gets, and it is `SHADE_BASELINE` written as a colour -- the two have to agree or
+ * unshaded ground is quietly tinted.
  *
- * All three disagree about what flat looks like, so each says so and is rebased on the way in --
- * otherwise a state border is a step in brightness across an unbroken field, and the shaded
- * composites brighten or darken everything the odd one out covers.
+ * All three disagree about two separate things, and each says so.
+ *
+ * What flat ground looks like: 195, 221 and 179 respectively, measured. Left alone, a state border
+ * is a step in brightness across an unbroken field, and the composites below brighten or darken
+ * everything the odd one out covers.
+ *
+ * And how much relief they draw for the same hillside, which agreeing about flat says nothing
+ * about. Measured two ways that agree: on the ground the surveys share, since each renders a few
+ * kilometres past its own border, and against a hillshade computed from one DGM across the whole
+ * range of German terrain, which the shared ground could not give because all of it is flat. Saxony
+ * draws about 1.9x Brandenburg's relief and Saxony-Anhalt about a third of it -- so Saxony's darks
+ * are far heavier than any hillside warrants and Saxony-Anhalt is nearly a blank grey. Both are
+ * scaled back onto Brandenburg's, which is the survey the dataset is in.
  */
 const SHADE = stackedUrl('shade', {
-  under: '#c4c4c4',
+  under: '#c3c3c3',
   layers: [
-    { url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'), bbox: SN_BOX, baseline: 0xdd },
+    {
+      url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'),
+      bbox: SN_BOX,
+      baseline: 0xdd,
+      contrast: 0.52,
+    },
     /**
      * Saxony-Anhalt, which took the longest to find because it answers to the wrong name.
      *
@@ -129,6 +145,10 @@ const SHADE = stackedUrl('shade', {
       ),
       bbox: ST_BOX,
       baseline: 0xb3,
+      // The one factor that is resolution-dependent, since this is a DGM5 product against two DGM1
+      // ones: measured 2.7 from ten metres a pixel out, rising as far as 6.6 at two, where it has
+      // no detail left to show and the relief hardly matters. Fitted where relief is read.
+      contrast: 3.05,
       opaque: true,
     },
     { url: wms('dgm', 'dgmshade'), bbox: BB_BOX },
