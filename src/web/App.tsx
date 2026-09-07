@@ -440,7 +440,16 @@ export function App() {
    * A failure switches the toggle back off rather than latching, so pressing it again is a retry --
    * the one thing MapLibre's own control will not do once a prompt has been refused.
    */
-  const [locating, setLocating] = useState(false)
+  /**
+   * Remembered, because it is a choice about the workspace rather than about the map -- the same
+   * reason the guide and the filter panel are, and the same reason it is not in the URL: a shared
+   * link should not switch on the recipient's location.
+   *
+   * Restoring it re-prompts where permission was never granted, and that is the honest behaviour:
+   * the effect below switches the toggle back off on refusal, so a remembered "on" that the browser
+   * declines costs one prompt and lands in the same place as never having asked.
+   */
+  const [locating, setLocating] = useRemembered('highline-finder.locating', false)
   const [fix, setFix] = useState<Fix | null>(null)
   const [locateError, setLocateError] = useState<string | null>(null)
 
@@ -806,22 +815,6 @@ export function App() {
       },
       true,
     )
-  }
-
-  /**
-   * An anchor let go of in the 3D view: move it there, then let it find the top of the hill it
-   * landed on.
-   *
-   * The drop is a rough gesture -- a fingertip on a hillside seen at an angle -- and the settling
-   * afterwards is what turns it into a position. Careful reach, because the point of having placed
-   * it by eye is that it is roughly right already.
-   */
-  const dropAnchor = (which: 'a' | 'b', at: LatLon) => {
-    moveAnchor(which, at)
-    setOptimizeOnly(which)
-    setReach(1)
-    setOffer(null)
-    setOptimizing(true)
   }
 
   /**
@@ -1277,6 +1270,26 @@ export function App() {
         }
       : null
 
+  /**
+   * How many of the filter panel's controls are narrowing what is on the map.
+   *
+   * On the closed button, because a panel that is shut can still be hiding most of the dataset and
+   * "why is there nothing here" is otherwise unanswerable without opening it. Counted against each
+   * control's most permissive setting rather than against its initial one: a filter is active when
+   * it is throwing something away, and the two differ for sag, whose floor is whatever the dataset
+   * was generated at.
+   *
+   * Sag and the anchor classes count, for that reason -- both drop lines from the map as surely as
+   * the sliders under the Filters heading do, whichever heading they sit under.
+   */
+  const activeFilters = useMemo(() => {
+    const moved = movedFilters({
+      minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
+    })
+    const tighterSag = !!bounds && sagPct !== null && sagPct > bounds.sagFloor + 1e-9
+    return Object.keys(moved).length + (tighterSag ? 1 : 0) + (kinds.size < LINE_KINDS.length ? 1 : 0)
+  }, [minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel, bounds, sagPct, kinds])
+
   return (
     <>
       <header ref={header}>
@@ -1387,8 +1400,17 @@ export function App() {
                 {meta ? `${regions.length} areas` : 'areas'}
               </button>
             )}
-            <button data-active={showFilters} onClick={() => setShowFilters(!showFilters)}>
+            <button
+              data-active={showFilters || activeFilters > 0}
+              onClick={() => setShowFilters(!showFilters)}
+              title={
+                activeFilters > 0
+                  ? `${activeFilters} filter${activeFilters === 1 ? '' : 's'} narrowing the map`
+                  : 'Nothing is being filtered out'
+              }
+            >
               filters
+              {activeFilters > 0 && <span className="count">{activeFilters}</span>}
             </button>
           </div>
           {layerError && <div className="togglenote">{layerError}</div>}
@@ -1574,7 +1596,10 @@ export function App() {
               onSag={setSagPct}
               full={full}
               onFull={setFull}
-              onMoveAnchor={dropAnchor}
+              /* A drop in the scene is a move and nothing more. It used to settle the anchor
+                 afterwards, which took the position away from the hand that had just chosen it --
+                 the optimise button is still there for anyone who wants that. */
+              onMoveAnchor={moveAnchor}
               rig={rig}
               onRig={(next) => {
                 forkSelected()

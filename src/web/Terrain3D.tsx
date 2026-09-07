@@ -6,6 +6,7 @@ import {
   bareGround, ensureTerrain, missingWindows, onBuilding, onWindowActivity, surfaceSampler,
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
+import { useRemembered } from './remembered.js'
 import { coverOf, meshOf, samplePatch, type Patch, type Readers } from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
@@ -138,6 +139,20 @@ export function Terrain3D({
   /** Whether the roads and water for the whole square are still on their way. */
   const [coverPending, setCoverPending] = useState(false)
   const [exaggeration, setExaggeration] = useState(preferred)
+  /**
+   * Whether the camera circles on its own, remembered between visits.
+   *
+   * A slow orbit is what makes a still picture of a hillside readable, and it is also the thing that
+   * makes a view impossible to sit and look at. Which of those it is depends on the person, so it is
+   * theirs to set -- and it is a choice about the workspace, so it is remembered rather than shared
+   * in a link.
+   */
+  const [spin, setSpin] = useRemembered('highline-finder.spin3d', true)
+  const spinRef = useRef(spin)
+  spinRef.current = spin
+  useEffect(() => {
+    scene.current?.setSpin(spin)
+  }, [spin])
   /** Bumped when the ground under the view has to be read again. */
   const [epoch, setEpoch] = useState(0)
 
@@ -280,6 +295,7 @@ export function Terrain3D({
         exaggeration: preferred,
         sagRatio,
         offset,
+        spin: spinRef.current,
         onAnchorMoved: (which, x, z) => {
           const { lat, lon } = toWgs84(g.centre.e + x, g.centre.n - z)
           moveRef.current?.(which === 0 ? 'a' : 'b', { lat, lon })
@@ -408,6 +424,17 @@ export function Terrain3D({
         <div className="scenenote" data-bad="true">
           <span>No 3D view &mdash; {failed}</span>
         </div>
+      )}
+      {state === 'ready' && (
+        <button
+          className="spin3d"
+          data-on={spin || undefined}
+          onClick={() => setSpin(!spin)}
+          title={spin ? 'Stop the camera circling' : 'Let the camera circle on its own'}
+          aria-label={spin ? 'Stop the camera circling' : 'Let the camera circle on its own'}
+        >
+          &#x27f3;
+        </button>
       )}
       {state === 'ready' && (
         <div className="scenelegend">

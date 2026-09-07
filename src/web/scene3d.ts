@@ -61,6 +61,8 @@ export interface SceneInput {
    * between a view you are working in and one that keeps starting over.
    */
   offset?: [number, number, number]
+  /** Whether the camera circles on its own. Carried in so a rebuilt scene keeps the last choice. */
+  spin?: boolean
 }
 
 export interface Scene3D {
@@ -83,6 +85,8 @@ export interface Scene3D {
   setHover(t: number | null): void
   /** Where the camera stands relative to its target, to hand to whatever replaces this scene. */
   viewOffset(): [number, number, number]
+  /** Starts or stops the camera circling on its own. */
+  setSpin(on: boolean): void
   /**
    * Repaints the ground without rebuilding it.
    *
@@ -363,7 +367,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const camera = new PerspectiveCamera(50, 1, 1, input.radius * 8)
   const controls = new OrbitControls(camera, canvas)
   controls.enableDamping = true
-  controls.autoRotate = true
+  let spinning = input.spin ?? true
+  controls.autoRotate = spinning
   controls.autoRotateSpeed = 0.45
   // Never below the horizon: under the terrain there is nothing but the back of it.
   controls.maxPolarAngle = Math.PI / 2 - 0.05
@@ -386,10 +391,12 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     controls.autoRotate = false
     clearTimeout(idle)
   }
+  // Back to whatever the viewer asked for rather than to turning: a scene switched off by hand must
+  // not start again by itself the moment it is let go of.
   const resumeLater = () => {
     clearTimeout(idle)
     idle = setTimeout(() => {
-      controls.autoRotate = true
+      controls.autoRotate = spinning
     }, RESUME_AFTER_MS)
   }
   controls.addEventListener('start', pause)
@@ -555,6 +562,11 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         old.dispose()
       }
       canopy.visible = !!next && next.indices.length > 0
+    },
+    setSpin(on) {
+      spinning = on
+      controls.autoRotate = on
+      clearTimeout(idle)
     },
     viewOffset() {
       const o = camera.position.clone().sub(controls.target)

@@ -105,6 +105,18 @@ header[data-measuring] .spacer { flex: none; }
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+/* A count of what a shut panel is hiding. Beside the word rather than in it, so the label stays
+   the label and the number reads as a badge. */
+.toggles button .count {
+  display: inline-block;
+  min-width: 13px;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
 .toggles button {
   flex: 1;
   padding: 6px 2px;
@@ -305,7 +317,10 @@ header[data-measuring] .spacer { flex: none; }
 .guidewrap {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  /* Above the full-screen line view, which is itself above everything else on the page. A shared
+     link can open straight into that view, and on a first visit the guide has to be readable over
+     it -- at 10 it was behind it, so a first-time reader following a link saw nothing. */
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -691,6 +706,27 @@ header[data-measuring] .spacer { flex: none; }
   padding: 0 20px;
 }
 .scenenote[data-bad='true'] { color: #fca5a5; }
+/* Top right, opposite the legend, and out of the way of a drag that starts anywhere in the middle
+   of the scene. Off by default in appearance rather than in position: the glyph stays put and only
+   its colour says which way the switch is set. */
+.spin3d {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 5px;
+  background: rgba(15, 17, 21, 0.72);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.spin3d:hover { color: var(--text); border-color: var(--muted); }
+.spin3d[data-on] { color: var(--accent); border-color: var(--accent); }
+
 .scenelegend {
   position: absolute;
   left: 10px;
