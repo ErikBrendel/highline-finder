@@ -624,7 +624,10 @@ header[data-measuring] .spacer { flex: none; }
 .details[data-full='true'] .violations,
 .details[data-full='true'] .anchors,
 .details[data-full='true'] .body > .note { max-width: 820px; }
-.details[data-full='true'] .rig { max-width: 420px; }
+/* The rig is the exception to the reading width above: it is two banded tracks that have to be
+   read against a thumb, not a column of prose, so it takes the whole page and each end takes half
+   of it. It was capped at 420 px when it was a pair of plain sliders and needed no more. */
+.details[data-full='true'] .rig { max-width: none; }
 /* The one filter that belongs beside the chart it changes, at the width of a control rather than
    the width of the window. */
 .details[data-full='true'] .sagbar { max-width: 420px; margin-bottom: 6px; }
