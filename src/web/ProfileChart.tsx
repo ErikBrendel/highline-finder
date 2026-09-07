@@ -661,6 +661,40 @@ export function ProfileChart({ c, profile, wings, cover, params, fetching, onHov
         </text>
       )}
 
+      {/*
+        * What holds each end up.
+        *
+        * A line rigged twelve metres up a pine starts, on this chart, in mid-air -- and mid-air is
+        * exactly what it must not look like. So the anchor gets a stem down to the ground it stands
+        * on, in two parts and for the same reason the rig slider has bands: as far as what is
+        * standing there reaches, the stem is that thing, and above it the stem is something brought
+        * in and put up. `surface` is clamped never to fall below `ground`, so the split is the
+        * canopy top where there is one and the ground itself where there is not.
+        *
+        * Drawn only where there is a stem worth drawing. Every line has an anchor a few centimetres
+        * up and a mark for it would be noise on every chart.
+        */}
+      {(['a', 'b'] as const).map((end) => {
+        const at = end === 'a' ? 0 : c.length
+        const s = end === 'a' ? p[0]! : p[p.length - 1]!
+        if (!Number.isFinite(s.ground) || s.line - s.ground < 0.3) return null
+        const held = Math.min(s.line, s.surface)
+        const wooded = s.surface - s.ground > 0.3
+        return (
+          <g key={end}>
+            <line
+              x1={x(at)} x2={x(at)} y1={y(s.ground)} y2={y(held)}
+              stroke={wooded ? 'var(--canopy)' : 'var(--ground)'} strokeWidth="2.5"
+            />
+            {s.line > s.surface + 0.05 && (
+              <line
+                x1={x(at)} x2={x(at)} y1={y(held)} y2={y(s.line)}
+                stroke="var(--brought)" strokeWidth="2.5" strokeDasharray="3 2"
+              />
+            )}
+          </g>
+        )
+      })}
       <path d={path('line')} stroke="var(--line)" strokeWidth="2" fill="none" />
       <circle cx={x(0)} cy={y(p[0]!.line)} r="3.5" fill="#f43f5e" />
       <circle cx={x(c.length)} cy={y(p[p.length - 1]!.line)} r="3.5" fill="#f43f5e" />

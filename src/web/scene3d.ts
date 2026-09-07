@@ -235,6 +235,59 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     return input.mesh.positions[(row * side + col) * 3 + 1]!
   }
 
+  /**
+   * What holds each end up, as a post from the ground to the anchor.
+   *
+   * Without it a line rigged twelve metres up a pine begins in mid-air, and mid-air is the one thing
+   * it must not look like. Split in two for the same reason the rig slider has bands: up to where
+   * what is standing there reaches, the post *is* that thing, and above it the post is something
+   * carried in and put up. The two heights are already in the scene -- `track` follows the bare
+   * earth under the span and `overTrack` its skin -- so the ends of those are the ground and the
+   * treetop at each anchor, and nothing new has to be sampled.
+   */
+  const stemMat = {
+    held: new MeshBasicMaterial({ color: '#4a7a4a' }),
+    brought: new MeshBasicMaterial({ color: '#a8763f' }),
+  }
+  const stems: Mesh[] = []
+  for (let i = 0; i < 4; i++) {
+    const stem = new Mesh(new BufferGeometry(), i % 2 ? stemMat.brought : stemMat.held)
+    stem.visible = false
+    scene.add(stem)
+    stems.push(stem)
+  }
+
+  /** Where one end's polyline starts or finishes, which is where its anchor stands. */
+  const endOf = (a: Float32Array, end: 0 | 1, k: number): Vector3 => {
+    const i = end === 0 ? 0 : a.length / 3 - 1
+    return new Vector3(a[i * 3]!, a[i * 3 + 1]! * k, a[i * 3 + 2]!)
+  }
+
+  const drawStems = (k: number) => {
+    ;([0, 1] as const).forEach((end) => {
+      const post = anchors[end]
+      const held = stems[end * 2]!
+      const brought = stems[end * 2 + 1]!
+      held.visible = brought.visible = false
+      if (!post) return
+      const top = new Vector3(post[0], post[1] * k, post[2])
+      const foot = endOf(track, end, k)
+      const skin = endOf(overTrack, end, k)
+      // A stem shorter than the tube is thicker than it is long, and every line has an anchor a few
+      // centimetres up: a post for that is noise on every scene rather than information on one.
+      if (top.y - foot.y < tubeRadius * 4) return
+      const split = new Vector3(top.x, Math.min(top.y, skin.y), top.z)
+      const part = (mesh: Mesh, from: Vector3, to: Vector3) => {
+        if (to.y - from.y < tubeRadius) return
+        mesh.geometry.dispose()
+        mesh.geometry = tubeAlong([from, to], tubeRadius * 0.8, 5)
+        mesh.visible = true
+      }
+      part(held, foot, split)
+      part(brought, split, top)
+    })
+  }
+
   const ballGeom = new SphereGeometry(tubeRadius * 3, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
   // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
@@ -307,6 +360,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
       grabs[i]!.position.copy(ball.position)
     })
+    drawStems(k)
     drawHover()
   }
   rescale(exaggeration)
@@ -538,12 +592,13 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       for (const g of [
         ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
         ghostMesh.geometry, ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
+        ...stems.map((m) => m.geometry),
       ]) {
         g.dispose()
       }
       for (const m of [
         ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat, ghostMat,
-        ballMat, grabMat, hoverBall.material as MeshBasicMaterial,
+        ballMat, grabMat, stemMat.held, stemMat.brought, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()
