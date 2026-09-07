@@ -2,10 +2,11 @@ import {
   AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
   DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
-  Vector3, WebGLRenderer,
+  Vector3, WebGLRenderer, Group,
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { MeshData } from './terrainMesh.js'
+import { disposeProps, referenceProps } from './props3d.js'
 
 /**
  * The 3D view of one site, and the only module in the app that knows three.js exists.
@@ -63,6 +64,13 @@ export interface SceneInput {
   offset?: [number, number, number]
   /** Whether the camera circles on its own. Carried in so a rebuilt scene keeps the last choice. */
   spin?: boolean
+  /**
+   * Where to stand the size references, in the patch's own metres, or omit for none.
+   *
+   * Chosen by the caller, which is the only thing that has the ground to choose from. See
+   * `referenceSpot` in Terrain3D.
+   */
+  props?: { x: number; y: number; z: number }
 }
 
 export interface Scene3D {
@@ -287,6 +295,21 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     })
   }
 
+  /**
+   * A figure and a car, standing on the flattest ground beside the line.
+   *
+   * Stretched by the height factor along with everything else, which looks wrong and is right: at
+   * five times the relief, a person drawn at their true height would make a twenty-metre cliff read
+   * as a hundred-metre one. The reference has to be distorted exactly as much as the thing it is a
+   * reference for. At the default factor of one there is no distortion and the question does not
+   * arise.
+   */
+  const propsRoot = new Group()
+  if (input.props) {
+    propsRoot.add(referenceProps())
+    scene.add(propsRoot)
+  }
+
   const ballGeom = new SphereGeometry(tubeRadius * 3, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
   // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
@@ -355,6 +378,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     trackMesh.geometry = tubeAlong(points(track, k), tubeRadius * 0.7, 5)
     overMesh.geometry.dispose()
     overMesh.geometry = tubeAlong(points(overTrack, k), tubeRadius * 0.45, 5)
+    if (input.props) {
+      propsRoot.position.set(input.props.x, input.props.y * k, input.props.z)
+      propsRoot.scale.y = k
+    }
     balls.forEach((ball, i) => {
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
       grabs[i]!.position.copy(ball.position)
@@ -596,6 +623,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         canvas.removeEventListener(type, fn, { capture: true })
       }
       controls.dispose()
+      disposeProps(propsRoot)
       for (const g of [
         ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
         ghostMesh.geometry, ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COVER, COVER_RGB, colorsOf, coverOf, meshOf, samplePatch, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, colorsOf, coverOf, groundAround, meshOf, samplePatch, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -182,5 +182,49 @@ describe('the two mesh layers', () => {
     const feet = used.filter((v) => canopy.positions[v * 3 + 1] === 50)
     expect(feet).not.toHaveLength(0)
     expect(feet.every((v) => tops.has(where(v)))).toBe(true)
+  })
+})
+
+/**
+ * Which end of a line the size references stand at. Smaller relief is flatter, and the answer has
+ * to be "nowhere" rather than "here" over ground the survey has not covered.
+ */
+describe('groundAround', () => {
+  /** A step: level at 50 to the west of the middle, and a ramp climbing away to the east. */
+  const stepped = samplePatch(centre, 60, 121, flat({
+    ground: (e) => (e < centre.e ? 50 : 50 + (e - centre.e) * 0.5),
+    surface: (e) => (e < centre.e ? 50 : 50 + (e - centre.e) * 0.5),
+  }))
+
+  it('reads the level side as flat and the ramp as not', () => {
+    const west = groundAround(stepped, -30, 0, 6)
+    const east = groundAround(stepped, 30, 0, 6)
+    expect(west.relief).toBeCloseTo(0, 5)
+    expect(west.top).toBeCloseTo(50, 5)
+    expect(east.relief).toBeGreaterThan(5)
+    // The highest of the circle, not its middle: something standing here stands on that.
+    expect(east.top).toBeGreaterThan(65)
+  })
+
+  it('says nothing where the survey has not covered enough of the circle', () => {
+    const holed = samplePatch(centre, 60, 121, flat({
+      ground: (e) => (e < centre.e ? NaN : 50),
+      surface: () => 50,
+    }))
+    expect(groundAround(holed, -30, 0, 6).relief).toBeNaN()
+    expect(groundAround(holed, 30, 0, 6).relief).toBeCloseTo(0, 5)
+  })
+
+  it('says nothing outside the patch, rather than reporting the edge as level', () => {
+    expect(groundAround(stepped, -400, 0, 6).relief).toBeNaN()
+  })
+
+  it('reports how much of the circle has trees over it', () => {
+    const wood = samplePatch(centre, 60, 121, flat({
+      ground: () => 50,
+      surface: (e) => (e < centre.e ? 68 : 50),
+    }))
+    expect(groundAround(wood, -30, 0, 6).canopy).toBeCloseTo(1, 2)
+    expect(groundAround(wood, 30, 0, 6).canopy).toBeCloseTo(0, 2)
   })
 })

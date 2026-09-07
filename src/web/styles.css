@@ -775,6 +775,10 @@ header[data-measuring] .spacer { flex: none; }
 .spin3d:hover { color: var(--text); border-color: var(--muted); }
 .spin3d[data-on] { color: var(--accent); border-color: var(--accent); }
 
+/* Says what the two shapes on the ground are, since a few pixels of silhouette is not always
+   self-evident and a reader who has not spotted them gets nothing from them. */
+.scenelegend .ref { color: var(--muted); }
+
 .scenelegend {
   position: absolute;
   left: 10px;

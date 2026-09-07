@@ -102,6 +102,54 @@ export function samplePatch(centre: Pos, halfSide: number, side: number, read: R
 }
 
 /**
+ * What the ground is like over a circle of a patch: how level, how high, and how wooded.
+ *
+ * `relief` is the spread of bare earth within `radius`, so smaller is flatter. `top` is the highest
+ * of it, which is where something standing on it has to stand -- the middle would bury whatever it
+ * is up to the axles on the high side. `canopy` is the fraction of the circle with trees over it.
+ *
+ * NaN throughout where the survey has not covered enough of that circle to say, and "not enough" is
+ * deliberately most of it: a couple of measured cells in a hole would report a suspiciously flat and
+ * suspiciously clear spot.
+ *
+ * Bare earth rather than the skin, because what this is asked for is somewhere to stand and a
+ * treetop is level in a way nobody can use.
+ */
+export function groundAround(
+  patch: Patch,
+  x: number,
+  z: number,
+  radius: number,
+): { relief: number; top: number; canopy: number } {
+  const { side, step, ground, cover } = patch
+  const half = ((side - 1) * step) / 2
+  const reach = Math.ceil(radius / step)
+  const col0 = Math.round((x + half) / step)
+  const row0 = Math.round((z + half) / step)
+  let low = Infinity
+  let high = -Infinity
+  let seen = 0
+  let asked = 0
+  let wooded = 0
+  for (let row = row0 - reach; row <= row0 + reach; row++) {
+    for (let col = col0 - reach; col <= col0 + reach; col++) {
+      if (Math.hypot(col - col0, row - row0) * step > radius) continue
+      asked++
+      if (row < 0 || col < 0 || row >= side || col >= side) continue
+      const i = row * side + col
+      const v = ground[i]!
+      if (Number.isNaN(v)) continue
+      seen++
+      if (cover[i] === COVER.canopy) wooded++
+      if (v < low) low = v
+      if (v > high) high = v
+    }
+  }
+  if (!asked || seen < asked * 0.75) return { relief: NaN, top: NaN, canopy: NaN }
+  return { relief: high - low, top: high, canopy: wooded / seen }
+}
+
+/**
  * The cover classes again, over a patch already read.
  *
  * Land cover outside Brandenburg is fetched from Overpass as the view is opened, and arrives some

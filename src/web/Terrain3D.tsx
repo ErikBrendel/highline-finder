@@ -7,7 +7,7 @@ import {
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
-import { coverOf, meshOf, samplePatch, type Patch, type Readers } from './terrainMesh.js'
+import { coverOf, groundAround, meshOf, samplePatch, type Patch, type Readers } from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Scene3D } from './scene3d.js'
@@ -49,6 +49,15 @@ const MIN_SIDE = 128
  * is there in a frame or two, the fine one replaces it a moment later, and because both are
  * measured from the coarse pass's own floor the swap does not move anything.
  */
+/** The circle the size references occupy, which is what is tested for being flat and open. */
+const REFERENCE_RADIUS = 5
+/** How far from an anchor to look for somewhere to put them, clear of its stem. */
+const REFERENCE_REACH = [9, 14, 20]
+/** What a fully wooded spot is worth in metres of relief, when choosing between two. */
+const WOOD_COSTS = 25
+/** And what each metre of height difference from the anchor is worth. See `referenceSpot`. */
+const OFF_LEVEL_COSTS = 2.5
+
 const ROUGH_SIDE = 72
 
 /**
@@ -184,6 +193,55 @@ export function Terrain3D({
   }, [a.e, a.n, b.e, b.n])
 
   /** The span and its shadow, in the scene's coordinates. Cheap: a hundred samples. */
+  /**
+   * Where to stand the size references: the best patch of ground within reach of either anchor.
+   *
+   * Not a fixed offset from the anchor, which is how this started and which put them over the edge
+   * as often as not -- an anchor is usually *on* the lip of something, and the ground a few metres
+   * one way is a cliff face while a few metres the other way is a meadow. So a ring of candidate
+   * spots around each end is scored and the best one wins.
+   *
+   * Three things make a spot good, and the weights say what they are worth against each other:
+   * level ground, because they have to look like they are standing on it rather than sunk into it;
+   * open ground, because a van in a wood is a van nobody can see and suggests it drove there; and
+   * ground at about the anchor's own height, which is what keeps them off the cliff and out of the
+   * gully. The last is the one that does the work: a flat clearing thirty metres below the anchor
+   * is a fine spot for a picnic and a useless one for judging how big the drop is.
+   *
+   * Anything within a wide cone towards the far anchor is skipped, so they never stand under the
+   * span. Decided once per ground patch and left alone while an anchor is nudged: the references are
+   * a scale for the scene rather than a marker on the line, and having them hop about mid-drag would
+   * be motion that means nothing. A drag far enough to matter rebuilds the patch anyway.
+   */
+  const referenceSpot = (patch: Patch, g: Ground) => {
+    const local = (p: Pos) => ({ x: p.e - g.centre.e, z: -(p.n - g.centre.n) })
+    const spots: { x: number; z: number; y: number; cost: number }[] = []
+    for (const [at, away] of [[local(a), local(b)], [local(b), local(a)]] as const) {
+      const here = groundAround(patch, at.x, at.z, 2)
+      const toFar = Math.atan2(away.z - at.z, away.x - at.x)
+      for (const radius of REFERENCE_REACH) {
+        for (let step = 0; step < 12; step++) {
+          const angle = (step / 12) * Math.PI * 2
+          // A wide cone towards the other end, so nothing ever stands beneath the line.
+          const off = Math.abs(((angle - toFar + Math.PI * 3) % (Math.PI * 2)) - Math.PI)
+          if (off < Math.PI / 3) continue
+          const x = at.x + Math.cos(angle) * radius
+          const z = at.z + Math.sin(angle) * radius
+          const ground = groundAround(patch, x, z, REFERENCE_RADIUS)
+          if (!Number.isFinite(ground.relief)) continue
+          const drop = Number.isFinite(here.top) ? Math.abs(ground.top - here.top) : 0
+          spots.push({
+            x,
+            z,
+            y: ground.top - g.datum,
+            cost: ground.relief + ground.canopy * WOOD_COSTS + drop * OFF_LEVEL_COSTS,
+          })
+        }
+      }
+    }
+    return spots.sort((p, q) => p.cost - q.cost)[0]
+  }
+
   const spanOf = (g: Ground) => {
     const length = Math.hypot(b.e - a.e, b.n - a.n)
     const sag = sagRatio * length
@@ -296,6 +354,7 @@ export function Terrain3D({
         sagRatio,
         offset,
         spin: spinRef.current,
+        props: referenceSpot(rough, g),
         onAnchorMoved: (which, x, z) => {
           const { lat, lon } = toWgs84(g.centre.e + x, g.centre.n - z)
           moveRef.current?.(which === 0 ? 'a' : 'b', { lat, lon })
@@ -438,6 +497,7 @@ export function Terrain3D({
       )}
       {state === 'ready' && (
         <div className="scenelegend">
+          <span className="ref">for scale: a person, and a 7 m camper</span>
           <span className="heights">
             heights
             {FACTORS.map((k) => (
