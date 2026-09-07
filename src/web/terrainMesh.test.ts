@@ -219,6 +219,32 @@ describe('groundAround', () => {
     expect(groundAround(stepped, -400, 0, 6).relief).toBeNaN()
   })
 
+  it('stands on the roof where there is a building, since a roof is a floor', () => {
+    const town = samplePatch(centre, 60, 121, flat({
+      ground: () => 50,
+      surface: (e) => (e < centre.e ? 62 : 50),
+      building: (e) => e < centre.e,
+    }))
+    const roof = groundAround(town, -30, 0, 6)
+    expect(roof.building).toBeCloseTo(1, 2)
+    // The drawn height, not the street underneath it -- anything placed at 50 would be inside it.
+    expect(roof.top).toBeCloseTo(62, 5)
+    expect(groundAround(town, 30, 0, 6).building).toBeCloseTo(0, 2)
+  })
+
+  /**
+   * The rough patch of a 300 m line has cells eight metres across, so a radius of five sampled
+   * exactly one of them and called every spot in the county perfectly flat.
+   */
+  it('widens its circle to the cell size, rather than reading a single cell', () => {
+    const coarse = samplePatch(centre, 400, 101, flat({
+      ground: (e) => (e < centre.e ? 50 : 90),
+      surface: (e) => (e < centre.e ? 50 : 90),
+    }))
+    expect(coarse.step).toBeGreaterThan(6)
+    expect(groundAround(coarse, 0, 0, 5).relief).toBeGreaterThan(30)
+  })
+
   it('reports how much of the circle has trees over it', () => {
     const wood = samplePatch(centre, 60, 121, flat({
       ground: () => 50,

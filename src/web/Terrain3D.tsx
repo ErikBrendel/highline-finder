@@ -55,6 +55,8 @@ const REFERENCE_RADIUS = 5
 const REFERENCE_REACH = [9, 14, 20]
 /** What a fully wooded spot is worth in metres of relief, when choosing between two. */
 const WOOD_COSTS = 25
+/** And a spot on a roof, which is not somewhere anybody parks. */
+const ROOF_COSTS = 60
 /** And what each metre of height difference from the anchor is worth. See `referenceSpot`. */
 const OFF_LEVEL_COSTS = 2.5
 
@@ -203,10 +205,11 @@ export function Terrain3D({
    *
    * Three things make a spot good, and the weights say what they are worth against each other:
    * level ground, because they have to look like they are standing on it rather than sunk into it;
-   * open ground, because a van in a wood is a van nobody can see and suggests it drove there; and
-   * ground at about the anchor's own height, which is what keeps them off the cliff and out of the
-   * gully. The last is the one that does the work: a flat clearing thirty metres below the anchor
-   * is a fine spot for a picnic and a useless one for judging how big the drop is.
+   * ground that is not a wood and not a rooftop, because a van in either is a van nobody believes
+   * and, in a town, one drawn underneath the roof above it; and ground at about the anchor's own
+   * height, which is what keeps them off the cliff and out of the gully. That last does the work:
+   * a flat clearing thirty metres below the anchor is a fine spot for a picnic and a useless one
+   * for judging how big the drop is.
    *
    * Anything within a wide cone towards the far anchor is skipped, so they never stand under the
    * span. Decided once per ground patch and left alone while an anchor is nudged: the references are
@@ -234,7 +237,11 @@ export function Terrain3D({
             x,
             z,
             y: ground.top - g.datum,
-            cost: ground.relief + ground.canopy * WOOD_COSTS + drop * OFF_LEVEL_COSTS,
+            cost:
+              ground.relief +
+              ground.canopy * WOOD_COSTS +
+              ground.building * ROOF_COSTS +
+              drop * OFF_LEVEL_COSTS,
           })
         }
       }

@@ -102,28 +102,34 @@ export function samplePatch(centre: Pos, halfSide: number, side: number, read: R
 }
 
 /**
- * What the ground is like over a circle of a patch: how level, how high, and how wooded.
+ * What the ground is like over a circle of a patch: how level, how high, and what is on it.
  *
- * `relief` is the spread of bare earth within `radius`, so smaller is flatter. `top` is the highest
- * of it, which is where something standing on it has to stand -- the middle would bury whatever it
- * is up to the axles on the high side. `canopy` is the fraction of the circle with trees over it.
+ * Measured over the surface a thing would actually *stand* on, which is the same surface `meshOf`
+ * draws as solid -- bare earth, or the roof where there is a building, because a roof is a floor.
+ * Reading bare earth here instead put a van at street level inside a building's footprint, under a
+ * roof drawn ten metres above it, where nothing could be seen of it at all.
  *
- * NaN throughout where the survey has not covered enough of that circle to say, and "not enough" is
+ * `relief` is the spread of that surface within `radius`, so smaller is flatter, and around the edge
+ * of a building it is correctly enormous. `top` is the highest of it, which is where something
+ * standing there has to stand -- the middle would bury it on the high side. `canopy` and `building`
+ * are the fractions of the circle under trees and over a roof.
+ *
+ * NaN throughout where the survey has not covered enough of the circle to say, and "not enough" is
  * deliberately most of it: a couple of measured cells in a hole would report a suspiciously flat and
  * suspiciously clear spot.
- *
- * Bare earth rather than the skin, because what this is asked for is somewhere to stand and a
- * treetop is level in a way nobody can use.
  */
 export function groundAround(
   patch: Patch,
   x: number,
   z: number,
   radius: number,
-): { relief: number; top: number; canopy: number } {
-  const { side, step, ground, cover } = patch
+): { relief: number; top: number; canopy: number; building: number } {
+  const { side, step, ground, height, cover } = patch
   const half = ((side - 1) * step) / 2
-  const reach = Math.ceil(radius / step)
+  // At least a cell and a half, or a patch coarser than the radius samples one cell and reports
+  // every spot as perfectly flat -- which is what the rough patch of a 300 m line did.
+  const reach = Math.max(1, Math.ceil(Math.max(radius, step * 1.5) / step))
+  const span = Math.max(radius, step * 1.5)
   const col0 = Math.round((x + half) / step)
   const row0 = Math.round((z + half) / step)
   let low = Infinity
@@ -131,22 +137,27 @@ export function groundAround(
   let seen = 0
   let asked = 0
   let wooded = 0
+  let roofed = 0
   for (let row = row0 - reach; row <= row0 + reach; row++) {
     for (let col = col0 - reach; col <= col0 + reach; col++) {
-      if (Math.hypot(col - col0, row - row0) * step > radius) continue
+      if (Math.hypot(col - col0, row - row0) * step > span) continue
       asked++
       if (row < 0 || col < 0 || row >= side || col >= side) continue
       const i = row * side + col
-      const v = ground[i]!
+      const roof = cover[i] === COVER.building
+      const v = roof ? height[i]! : ground[i]!
       if (Number.isNaN(v)) continue
       seen++
       if (cover[i] === COVER.canopy) wooded++
+      if (roof) roofed++
       if (v < low) low = v
       if (v > high) high = v
     }
   }
-  if (!asked || seen < asked * 0.75) return { relief: NaN, top: NaN, canopy: NaN }
-  return { relief: high - low, top: high, canopy: wooded / seen }
+  if (!asked || seen < asked * 0.75) {
+    return { relief: NaN, top: NaN, canopy: NaN, building: NaN }
+  }
+  return { relief: high - low, top: high, canopy: wooded / seen, building: roofed / seen }
 }
 
 /**
