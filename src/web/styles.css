@@ -205,10 +205,40 @@ header[data-measuring] .spacer { flex: none; }
   border-radius: 3px; overflow: hidden;
 }
 .banded .bands span { position: absolute; top: 0; height: 100%; }
+
+/*
+ * The input over the bands, with every part of the browser's own slider taken away except the thumb.
+ *
+ * `background: none` is not enough and never was: the track is drawn by a pseudo-element, and the
+ * filled part of it by `accent-color`, so on a phone the bands sat under a grey rail with a blue
+ * stretch across them. Both have to be made transparent by name -- and `appearance: none` then
+ * takes the thumb with them, so the thumb is drawn here instead.
+ *
+ * Sizes are tied to the 22 px row and the 6 px band strip: the thumb is centred on the strip by
+ * margin, which is the only way WebKit will do it, so the three numbers have to stay in step.
+ */
 .banded input[type=range] {
-  position: absolute; left: 0; top: 0; width: 100%; margin: 0; background: none;
+  position: absolute; left: 0; top: 0; width: 100%; height: 22px; margin: 0;
+  -webkit-appearance: none; appearance: none;
+  background: transparent;
+  accent-color: auto;
 }
-.banded input[type=range]::-moz-range-track { background: none; }
+.banded input[type=range]::-webkit-slider-runnable-track {
+  height: 22px; background: transparent; border: none;
+}
+.banded input[type=range]::-moz-range-track { height: 22px; background: transparent; border: none; }
+.banded input[type=range]::-moz-range-progress { background: transparent; }
+.banded input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: 4px;
+  border-radius: 50%; background: var(--text);
+  border: 2px solid var(--bg); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.banded input[type=range]::-moz-range-thumb {
+  width: 14px; height: 14px;
+  border-radius: 50%; background: var(--text);
+  border: 2px solid var(--bg); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
 
 .rangefill {
   position: absolute;
