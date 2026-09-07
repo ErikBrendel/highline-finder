@@ -1634,6 +1634,7 @@ export function App() {
                  the optimise button is still there for anyone who wants that. */
               onMoveAnchor={moveAnchor}
               onFlip={flipAnchors}
+              onGuide={guide.show}
               rig={rig}
               onRig={(next) => {
                 forkSelected()

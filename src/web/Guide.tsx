@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRemembered } from './remembered.js'
 
 /**
@@ -23,26 +23,40 @@ export function useGuide(): { open: boolean; show: () => void; close: () => void
 }
 
 export function Guide({ onClose }: { onClose: () => void }) {
+  /**
+   * Kept on the page until it has finished leaving.
+   *
+   * CSS cannot animate an element that is being removed, so closing sets a flag instead of
+   * unmounting, the stylesheet plays the arrival backwards, and `onClose` is called when that
+   * animation ends. Every way out goes through `leave` for that reason -- the backdrop, the button
+   * and Escape -- so none of them can skip the flight back to the corner the guide came from.
+   */
+  const [closing, setClosing] = useState(false)
+  const leave = () => setClosing(true)
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') leave()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [])
 
   return (
-    <div className="guidewrap" onClick={onClose}>
+    <div className="guidewrap" data-closing={closing || undefined} onClick={leave}>
       <div
         className="guide"
         role="dialog"
         aria-modal="true"
         aria-label="About Highline Finder"
         onClick={(e) => e.stopPropagation()}
+        // On the card rather than the backdrop: the card is what moves, and the two animations are
+        // not the same length. Guarded, because the arrival ends here too.
+        onAnimationEnd={() => closing && onClose()}
       >
         <div className="head">
           <strong>Highline Finder</strong>
-          <button className="close" onClick={onClose}>
+          <button className="close" onClick={leave}>
             close
           </button>
         </div>

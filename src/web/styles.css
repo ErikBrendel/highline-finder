@@ -326,8 +326,34 @@ header[data-measuring] .spacer { flex: none; }
   justify-content: center;
   padding: 24px;
   background: rgba(9, 10, 13, 0.6);
+  animation: guide-fade 170ms ease-out;
+}
+/*
+ * Up and to the right, because that is where the "i" is: at the end of the header bar, and in the
+ * head of the full-screen view for the same reason. Stylised rather than measured -- the card is
+ * centred and the button's position depends on how the header has collapsed, so an exact flight
+ * would mean measuring on every open. What this has to say is only "it went up there".
+ *
+ * Leaving is the same keyframes run backwards, held at the end so the card does not flash back into
+ * place for the frame before it is unmounted. The dialog stays mounted until the animation ends;
+ * see Guide.
+ */
+.guidewrap[data-closing] {
+  animation: guide-fade 170ms ease-in reverse forwards;
+}
+.guidewrap[data-closing] .guide {
+  animation: guide-arrive 190ms cubic-bezier(0.3, 0, 0.7, 0.3) reverse forwards;
+}
+@keyframes guide-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes guide-arrive {
+  from { transform: translate(38%, -58%) scale(0.35); opacity: 0; }
+  to { transform: none; opacity: 1; }
 }
 .guide {
+  animation: guide-arrive 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
   width: min(600px, 100%);
   max-height: 100%;
   display: flex;
@@ -631,14 +657,36 @@ header[data-measuring] .spacer { flex: none; }
   box-shadow: none;
   background: var(--bg);
   transform-origin: bottom left;
-  animation: details-grow 220ms cubic-bezier(0.2, 0.7, 0.3, 1);
 }
+/*
+ * Only a change of size is animated, never the first paint.
+ *
+ * The animation used to sit on the full-screen rule itself, so a shared link opening straight into
+ * that view played an expansion of a card that had never existed. `data-sizing` is set by the panel
+ * when `full` actually changes, and cleared when the animation ends -- see Details.
+ *
+ * The way back is played on the small card rather than on the departing window, because CSS cannot
+ * animate an element that is being removed: the card arrives at a scale it shrinks out of, which
+ * reads as the window collapsing into the corner it lives in.
+ */
+.details[data-sizing] { transform-origin: bottom left; }
+.details[data-sizing='grow'] { animation: details-grow 220ms cubic-bezier(0.2, 0.7, 0.3, 1); }
+.details[data-sizing='shrink'] { animation: details-shrink 200ms cubic-bezier(0.2, 0.7, 0.3, 1); }
 @keyframes details-grow {
   from { transform: scale(0.55) translate(-8%, 16%); opacity: 0.2; }
   to { transform: none; opacity: 1; }
 }
+@keyframes details-shrink {
+  from { transform: scale(1.7) translate(6%, -12%); opacity: 0.25; }
+  to { transform: none; opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .details[data-full='true'] { animation-duration: 1ms; }
+  .details[data-sizing] { animation-duration: 1ms; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guidewrap, .guidewrap .guide, .guidewrap[data-closing], .guidewrap[data-closing] .guide {
+    animation-duration: 1ms;
+  }
 }
 .details[data-full='true'] .grip { display: none; }
 /* No padding above the head, because the head is the thing pinned to the top of this box: `top: 0`

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { TRUNK_FRACTION, rigMeans, rigRange, type Standing } from '../shared/anchoring.js'
@@ -252,6 +252,8 @@ interface Props {
   onRig: (r: RigHeights | null) => void
   /** Swap which end is A. See flipAnchors in App. */
   onFlip: () => void
+  /** Open the guide, which the full view otherwise covers up. */
+  onGuide: () => void
   onClose: () => void
 }
 
@@ -277,7 +279,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
   canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onClose,
+  rig, onRig, onFlip, onGuide, onClose,
 }: Props) {
   /**
    * The full-screen view of one line.
@@ -389,6 +391,27 @@ export function Details({
       window.removeEventListener('keyup', stop)
     }
   }, [dragging])
+
+  /**
+   * Which way the panel is changing size, or nothing.
+   *
+   * The grow used to be an animation on the full-screen rule itself, which meant it also ran on the
+   * first paint -- so a shared link opening straight into that view played an expansion of a card
+   * that had never been there. Only a *change* is worth animating, so the first paint is compared
+   * against nothing and set aside.
+   *
+   * The way back is animated on the small card, since an element leaving the page cannot be
+   * animated by CSS at all: what plays is the card arriving at a scale it shrinks out of, which
+   * reads as the window collapsing into it.
+   */
+  const wasFull = useRef<boolean | null>(null)
+  const [sizing, setSizing] = useState<'grow' | 'shrink' | null>(null)
+  useEffect(() => {
+    const before = wasFull.current
+    wasFull.current = full
+    if (before === null || before === full) return
+    setSizing(full ? 'grow' : 'shrink')
+  }, [full])
 
   const [hoverAt, setHoverAt] = useState<number | null>(null)
 
@@ -522,7 +545,13 @@ export function Details({
   ]
 
   return (
-    <div className="details" data-full={full || undefined} style={widthVar}>
+    <div
+      className="details"
+      data-full={full || undefined}
+      data-sizing={sizing ?? undefined}
+      onAnimationEnd={() => setSizing(null)}
+      style={widthVar}
+    >
       <div
         className="grip"
         role="separator"
@@ -566,6 +595,18 @@ export function Details({
           </span>
         )}
         <span className="headbtns">
+          {/* The header carries this everywhere else, and the full view covers the header. Without
+              it there is no way back to the guide from a link that opens straight into this. */}
+          {full && (
+            <button
+              className="guidebtn"
+              onClick={onGuide}
+              title="What this is, where the data comes from, and how to use it"
+              aria-label="About Highline Finder"
+            >
+              i
+            </button>
+          )}
           {!full && (
             <button
               className="close"
