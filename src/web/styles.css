@@ -366,13 +366,28 @@ header[data-measuring] .spacer { flex: none; }
   from { opacity: 1; }
   to { opacity: 0; }
 }
+/*
+ * Shrunk to a point at the corner rather than faded away in the middle of the screen.
+ *
+ * The distance is in `vw`/`vh` rather than in per cent of the card, because per cent of the card is
+ * a different distance on every screen -- the card is 600 px wide until the window is narrower than
+ * that, so the same figure aimed at the corner on a laptop and somewhere near the middle on a
+ * phone. Half the viewport from the centre is the corner, whatever the card happens to be.
+ *
+ * Opacity is held almost to the end. Fading is what a thing does when it is gone; shrinking to a
+ * point is what it does when it has been put somewhere, and the second one is the message. So the
+ * card stays solid while it is still big enough to follow with the eye and only gives up in the
+ * last fifth, when it is already a few pixels across.
+ */
 @keyframes guide-arrive {
-  from { transform: translate(38%, -58%) scale(0.35); opacity: 0; }
+  from { transform: translate(44vw, -42vh) scale(0.04); opacity: 0; }
+  25% { opacity: 1; }
   to { transform: none; opacity: 1; }
 }
 @keyframes guide-leave {
   from { transform: none; opacity: 1; }
-  to { transform: translate(38%, -58%) scale(0.3); opacity: 0; }
+  80% { opacity: 0.9; }
+  to { transform: translate(44vw, -42vh) scale(0.04); opacity: 0; }
 }
 .guide {
   animation: guide-arrive 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
