@@ -57,12 +57,24 @@ const REFERENCE_RADIUS = 5
 const REFERENCE_FOOTPRINT = 4
 /** How far from an anchor to look for somewhere to put them, clear of its stem. */
 const REFERENCE_REACH = [9, 14, 20]
-/** What a fully wooded spot is worth in metres of relief, when choosing between two. */
-const WOOD_COSTS = 25
-/** And a spot on a roof, which is not somewhere anybody parks. */
-const ROOF_COSTS = 60
-/** And what each metre of height difference from the anchor is worth. See `referenceSpot`. */
+/*
+ * What each fault in a spot is worth, in metres of relief, and the order matters more than the
+ * numbers do.
+ *
+ * A roof outranks everything. A van on a roof is not a scale, it is a mistake -- and the height
+ * term used to beat it outright: an anchor on a church tower made a rooftop at the same height cost
+ * 60 while the street thirty metres below cost 75, so it parked on the roof every time. Real ground
+ * has to win that argument even when it is a long way down.
+ *
+ * Which is why the height term is capped. It exists to keep the pair off the cliff face and out of
+ * the gully *beside* the anchor; once they are a dozen metres below it they are simply somewhere
+ * else, and the next twenty metres of drop say nothing further. Uncapped it grew without bound and
+ * swamped every other consideration on exactly the tall lines where the others matter most.
+ */
+const WOOD_COSTS = 45
+const ROOF_COSTS = 120
 const OFF_LEVEL_COSTS = 2.5
+const OFF_LEVEL_CAP = 12
 
 const ROUGH_SIDE = 72
 
@@ -208,12 +220,10 @@ export function Terrain3D({
    * spots around each end is scored and the best one wins.
    *
    * Three things make a spot good, and the weights say what they are worth against each other:
-   * level ground, because they have to look like they are standing on it rather than sunk into it;
-   * ground that is not a wood and not a rooftop, because a van in either is a van nobody believes
-   * and, in a town, one drawn underneath the roof above it; and ground at about the anchor's own
-   * height, which is what keeps them off the cliff and out of the gully. That last does the work:
-   * a flat clearing thirty metres below the anchor is a fine spot for a picnic and a useless one
-   * for judging how big the drop is.
+   * ground rather than a rooftop above all else, because a van on a roof is not a scale but a
+   * mistake; then out of the trees, where nobody would see it; then level; then at about the
+   * anchor's own height, which is what keeps them off the cliff face and out of the gully beside
+   * it. See the weights above for why that last one is ranked where it is and capped where it is.
    *
    * Anything within a wide cone towards the far anchor is skipped, so they never stand under the
    * span. Decided once per ground patch and left alone while an anchor is nudged: the references are
@@ -239,7 +249,9 @@ export function Terrain3D({
           // Standing height over what they cover, not over the wider circle they were judged on.
           const stand = standingHeight(patch, x, z, REFERENCE_FOOTPRINT)
           if (Number.isNaN(stand)) continue
-          const drop = Number.isFinite(here.top) ? Math.abs(stand - here.top) : 0
+          const drop = Number.isFinite(here.top)
+            ? Math.min(Math.abs(stand - here.top), OFF_LEVEL_CAP)
+            : 0
           spots.push({
             x,
             z,
