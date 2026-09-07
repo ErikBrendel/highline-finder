@@ -11,11 +11,23 @@ anchors only, one AOI, static viewer.
   people actually do here. Needs trunk detection rather than canopy height: the `als` classified
   LAZ point clouds can distinguish trunk from crown, and OSM `natural=tree` cross-checks isolated
   trees. Usable anchor height is roughly 80 % of trunk height.
-- **No-fall-zone allowance.** Canopy intersection is acceptable close to the anchors — the walker
-  is not going to fall there and the branches can be cleared — but must be strict through the
-  bulk of the span. Model as a tolerance window of `max(5 m, 2 % of length)` at each end, inside
-  which canopy is ignored, and enforce canopy clearance as a hard constraint outside it. This is
-  what turns the canopy column from a score into a real filter.
+- **A measured no-fall zone, instead of a constant one.** The allowance itself exists:
+  `anchorZone` is 10 m, and inside it neither terrain clearance nor canopy is required — the loop in
+  `rawMetricsAt` skips both, charging only `anchorZoneDeficit` so that being buried is still worth
+  knowing about. What is constant is the *width*, and that is the part worth replacing.
+
+  Two reasons it should not be a constant. It does not scale: 10 m of a 500 m span is nothing, and
+  of a 50 m span is a fifth of it, so the same number is lenient for short lines and strict for long
+  ones. And the real quantity is not a distance along the ground at all — it is where a fall stops
+  being survivable, which depends on the sag, the height at that station and what is underneath.
+  Measuring that per line and scoring it would replace a tuned constant with the thing the constant
+  is standing in for.
+
+  Worth knowing what the constant costs today: it is enough for a tree anchor at the *edge* of a
+  wood, where the span leaves over open ground or a gully, and not enough for one running *through*
+  a stand — ten metres out the canopy is still full height and the line is below it. So the
+  free-height work is not blocked by this, but the lines it cannot describe are exactly the ones a
+  measured zone would.
 - **Buildings in the coarse pre-pass.** The search now stands on roofs — LoD1 CityGML rasterised
   per 1 km tile, see `src/pipeline/buildings.ts` — but the pre-pass that decides which tiles are
   worth loading at all still measures bare terrain. A flat tile with a thirty-metre building on it
