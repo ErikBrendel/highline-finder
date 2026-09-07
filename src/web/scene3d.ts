@@ -2,7 +2,7 @@ import {
   AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
   DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
-  Vector3, WebGLRenderer, Group,
+  Vector3, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture,
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { MeshData } from './terrainMesh.js'
@@ -310,6 +310,43 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     scene.add(propsRoot)
   }
 
+  /**
+   * "A" and "B", floating over their anchors.
+   *
+   * Sprites drawn on a canvas, rather than text geometry: a letter as geometry needs a font file
+   * fetched and parsed, and this needs two glyphs. A sprite also always faces the camera, which is
+   * the whole requirement for a label in a view that spends its time slowly turning.
+   *
+   * Held at a constant size on screen instead of shrinking with distance, because a label is not
+   * part of the scenery -- it has to stay legible at whatever zoom the terrain is being read at.
+   * And drawn over everything rather than depth-tested: an anchor on the far side of a hill is
+   * exactly when knowing which end it is matters, and a hidden label would say nothing at all.
+   */
+  const labelOf = (text: string): Sprite => {
+    const px = 64
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = px
+    const ctx = canvas.getContext('2d')
+    if (ctx) {
+      ctx.font = `bold ${px * 0.66}px ui-sans-serif, system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      // A dark rim first, so the letter reads against pale rock and dark wood alike.
+      ctx.lineWidth = px * 0.13
+      ctx.strokeStyle = 'rgba(9, 10, 13, 0.85)'
+      ctx.strokeText(text, px / 2, px * 0.54)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(text, px / 2, px * 0.54)
+    }
+    const texture = new CanvasTexture(canvas)
+    const sprite = new Sprite(new SpriteMaterial({ map: texture, sizeAttenuation: false, depthTest: false }))
+    sprite.scale.set(0.032, 0.032, 1)
+    sprite.renderOrder = 10
+    return sprite
+  }
+  const labels = ['A', 'B'].map(labelOf)
+  scene.add(...labels)
+
   const ballGeom = new SphereGeometry(tubeRadius * 3, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
   // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
@@ -385,6 +422,11 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     balls.forEach((ball, i) => {
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
       grabs[i]!.position.copy(ball.position)
+      // Clear of the ball rather than on it, so the letter never sits over the thing it names.
+      labels[i]?.position.set(ball.position.x, ball.position.y + tubeRadius * 9, ball.position.z)
+    })
+    labels.forEach((l, i) => {
+      l.visible = !!anchors[i]
     })
     drawStems(k)
     drawHover()
@@ -630,6 +672,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         ...stems.map((m) => m.geometry),
       ]) {
         g.dispose()
+      }
+      for (const l of labels) {
+        ;(l.material as SpriteMaterial).map?.dispose()
+        ;(l.material as SpriteMaterial).dispose()
       }
       for (const m of [
         ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat, ghostMat,
