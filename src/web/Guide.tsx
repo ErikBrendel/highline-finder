@@ -34,6 +34,20 @@ export function Guide({ onClose }: { onClose: () => void }) {
   const [closing, setClosing] = useState(false)
   const leave = () => setClosing(true)
 
+  /**
+   * A backstop, because the failure this guards against is one that has already happened once.
+   *
+   * Unmounting hangs off `animationend`, and an animation that never runs never ends -- the first
+   * version of the leaving animation reused the arrival's name, so the browser did not restart it,
+   * nothing fired, and the invisible backdrop stayed over the page eating clicks. Whatever the
+   * stylesheet does or fails to do, the dialog goes after this.
+   */
+  useEffect(() => {
+    if (!closing) return
+    const late = setTimeout(onClose, 900)
+    return () => clearTimeout(late)
+  }, [closing, onClose])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') leave()

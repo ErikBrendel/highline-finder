@@ -338,19 +338,41 @@ header[data-measuring] .spacer { flex: none; }
  * place for the frame before it is unmounted. The dialog stays mounted until the animation ends;
  * see Guide.
  */
+/*
+ * Leaving has keyframes of its own rather than the arrival run backwards.
+ *
+ * Reversing looked tidier and did not work at all: an animation restarts only when its *name*
+ * changes, so setting the same name again with `reverse` on it left the finished arrival finished.
+ * Nothing moved, and -- worse -- no second `animationend` ever fired, so the dialog was never told
+ * to unmount and its backdrop sat over the page swallowing every click.
+ *
+ * Slower going than coming, because this is the direction carrying information: arriving, the card
+ * is the thing you are about to read, and leaving, the flight is the only thing that says where it
+ * went and how to get it back.
+ */
 .guidewrap[data-closing] {
-  animation: guide-fade 170ms ease-in reverse forwards;
+  animation: guide-unfade 400ms ease-in forwards;
+  /* Let the page underneath be used while the card is still flying off it. */
+  pointer-events: none;
 }
 .guidewrap[data-closing] .guide {
-  animation: guide-arrive 190ms cubic-bezier(0.3, 0, 0.7, 0.3) reverse forwards;
+  animation: guide-leave 430ms cubic-bezier(0.4, 0, 0.75, 0.5) forwards;
 }
 @keyframes guide-fade {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes guide-unfade {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 @keyframes guide-arrive {
   from { transform: translate(38%, -58%) scale(0.35); opacity: 0; }
   to { transform: none; opacity: 1; }
+}
+@keyframes guide-leave {
+  from { transform: none; opacity: 1; }
+  to { transform: translate(38%, -58%) scale(0.3); opacity: 0; }
 }
 .guide {
   animation: guide-arrive 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
