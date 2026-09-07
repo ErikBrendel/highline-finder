@@ -738,6 +738,27 @@ header[data-measuring] .spacer { flex: none; }
 .rig .rigend .filter { margin-bottom: 0; }
 .rig .rigauto { flex: 0 0 auto; margin-top: 22px; }
 .rig .note { margin: 4px 0 0; }
+
+/*
+ * The named heights, and a box for the ones that are not.
+ *
+ * Wraps rather than scrolls: which buttons appear depends on what is standing at that anchor, so
+ * the row has no fixed width and a narrow panel has to be able to take two lines of it.
+ */
+.rigpresets { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 5px; }
+.rigpresets button {
+  padding: 1px 6px; font-size: 10px; cursor: pointer;
+  background: var(--panel-2); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 3px;
+}
+.rigpresets button:hover { color: var(--text); border-color: var(--muted); }
+.rigpresets button[data-on] { color: var(--accent); border-color: var(--accent); }
+.rigpresets input[type=number] {
+  width: 4.6em; padding: 1px 4px; font-size: 10px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
 /* What the height under the thumb would take, tinted to match the band it is standing in. Only the
    two that mean extra work are tinted: the rest of the scale needs no warning. */
 .note[data-means=trunk] { color: var(--crown); }

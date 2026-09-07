@@ -95,6 +95,42 @@ function rigWords(height: number, s: Standing, p: Params): string | null {
   }
 }
 
+/**
+ * The heights worth a button at one end, given what is standing there.
+ *
+ * Only what exists: a roof has no A-frame to offer and an open field has no trunk, and a button
+ * that sets the same height as the one beside it teaches nothing. `level` comes last because it is
+ * the only one that depends on the far end rather than on this ground.
+ */
+function rigPresets(
+  which: 'a' | 'b',
+  s: Standing,
+  p: Params,
+  level: number | null,
+): { label: string; to: number; title: string }[] {
+  const free = rigRange(s.onRoof, p).max
+  const out = [
+    { label: s.onRoof ? 'roof' : 'ground', to: 0, title: 'Rigged off what it stands on' },
+  ]
+  if (free > 0) {
+    out.push({ label: 'frame', to: free, title: `${free} m — the tallest A-frame worth carrying in` })
+  }
+  // A canopy barely taller than the frame has no climb in it worth naming.
+  if (s.canopy > free + 2) {
+    const trunk = TRUNK_FRACTION * s.canopy
+    out.push({ label: 'trunk', to: trunk, title: `${trunk.toFixed(1)} m — half of a ${s.canopy.toFixed(0)} m canopy` })
+    out.push({ label: 'top', to: s.canopy, title: `${s.canopy.toFixed(0)} m — the top of the canopy here` })
+  }
+  if (level !== null) {
+    out.push({
+      label: 'level',
+      to: level,
+      title: `${level.toFixed(1)} m — puts this anchor level with ${which === 'a' ? 'B' : 'A'}`,
+    })
+  }
+  return out
+}
+
 function optimizeHelp(offer: number | null): string {
   const reach = offer ?? 1
   const spacing = PLANNED_REFINE_START * reach
@@ -286,6 +322,33 @@ export function Details({
    * those are a decision rather than a measurement and are known whatever the terrain is doing.
    */
   const rigAt = (end: 'a' | 'b') => rig?.[end] ?? c?.[end].aFrame ?? NaN
+
+  /**
+   * Sets one end's height, keeping the other where it is.
+   *
+   * Touching any of these controls is taking the heights by hand, so an end whose own height was
+   * never measurable becomes a plain zero rather than staying unknown -- a pair with a NaN in it is
+   * not a rig, and every reader of it would have to guess what half of one means.
+   */
+  const setEnd = (which: 'a' | 'b', v: number) => {
+    const other = rigAt(which === 'a' ? 'b' : 'a')
+    const kept = Number.isFinite(other) ? other : 0
+    onRig(which === 'a' ? { a: v, b: kept } : { a: kept, b: v })
+  }
+
+  /**
+   * The height that would put this end level with the other one, or null.
+   *
+   * Offlevel is scored, and levelling two independent sliders by hand is a game of nudging one and
+   * watching a third number. Null where it cannot be had by *raising* this end: if the far anchor
+   * is the lower of the two, the end that has to move is that one, and offering to drag this one
+   * below its own ground would be offering nonsense.
+   */
+  const levelWith = (which: 'a' | 'b'): number | null => {
+    const other = which === 'a' ? 'b' : 'a'
+    const want = (c?.[other].anchor ?? NaN) - (c?.[which].ground ?? NaN)
+    return Number.isFinite(want) && want > 0 ? want : null
+  }
 
   /**
    * The top of each slider's scale, frozen while a thumb is being dragged.
@@ -625,14 +688,43 @@ export function Details({
                   unit={measured ? ' m' : ''}
                   format={() => (measured ? here.toFixed(1) : DASH)}
                   derived={rig === null}
-                  // Touching either slider is taking the heights by hand, so an end whose own
-                  // height was never measurable becomes a plain zero rather than staying unknown.
-                  onChange={(v) => {
-                    const other = rigAt(which === 'a' ? 'b' : 'a')
-                    const kept = Number.isFinite(other) ? other : 0
-                    onRig(which === 'a' ? { a: v, b: kept } : { a: kept, b: v })
-                  }}
+                  onChange={(v) => setEnd(which, v)}
                 />
+                  {/*
+                    * The named heights, and a box for the ones that are not.
+                    *
+                    * Planning happens in these terms -- on the ground, on a frame, up the trunk, at
+                    * the top -- far more often than at some particular number of metres, and a
+                    * button is one action where finding a value on a track is several. What is
+                    * offered depends on what is there: no frame on a roof, no trunk in a field.
+                    *
+                    * The box is what makes the control unbounded in practice. A crane is fifty
+                    * metres and dragging to fifty on a track that ends at thirty is a fight, where
+                    * typing it is two keystrokes -- and the scale then grows to include it.
+                    */}
+                  <div className="rigpresets">
+                    {rigPresets(which, stands, params, levelWith(which)).map((preset) => (
+                      <button
+                        key={preset.label}
+                        title={preset.title}
+                        data-on={Math.abs(preset.to - here) < 0.05 || undefined}
+                        onClick={() => setEnd(which, Math.round(preset.to * 10) / 10)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      aria-label={`Rig height ${which.toUpperCase()} in metres`}
+                      value={measured ? Math.round(here * 10) / 10 : ''}
+                      onChange={(e) => {
+                        const v = Number(e.target.value)
+                        if (e.target.value !== '' && Number.isFinite(v) && v >= 0) setEnd(which, v)
+                      }}
+                    />
+                  </div>
                   {/* Attached to its own slider rather than collected below both, so on a phone --
                       where the two stack -- the sentence stays with the thumb it is about. Only the
                       ends that need one get one: a rig inside the A-frame is the ordinary case. */}
