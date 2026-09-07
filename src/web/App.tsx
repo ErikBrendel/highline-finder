@@ -818,6 +818,32 @@ export function App() {
   }
 
   /**
+   * Swaps which end is called A.
+   *
+   * The line does not move: the profile is read from the other end, the chart's left becomes its
+   * right and the bearing turns through 180 degrees. Worth a button because which end is A decides
+   * how the whole view is laid out, and there is no other way to choose it -- on a found line it
+   * was decided by whichever anchor the search happened to reach first.
+   *
+   * Forks a found line, like every other edit. The rig heights are carried across swapped, and
+   * seeded from the found line's own where the planner has not set any, so that flipping leaves the
+   * physical line exactly as it was rather than handing it back to the auto-rigger to re-choose.
+   */
+  const flipAnchors = () => {
+    const found = selected && selected.id !== PLANNED_ID ? selected : null
+    const from = found
+      ? {
+          a: { lat: found.a.lat, lon: found.a.lon },
+          b: { lat: found.b.lat, lon: found.b.lon },
+        }
+      : custom
+    if (!from.a || !from.b) return
+    const held = rig ?? (found ? { a: found.a.aFrame, b: found.b.aFrame } : null)
+    commit({ a: from.b, b: from.a }, true)
+    setRig(held && Number.isFinite(held.a) && Number.isFinite(held.b) ? { a: held.b, b: held.a } : null)
+  }
+
+  /**
    * Debug overlay of every anchor the openness scan kept. Development only: anchors.json is
    * gitignored and never deployed, and this is diagnostics for the scan rather than a feature.
    * Fetched on first use so the normal load never pays for ~25k points.
@@ -1607,6 +1633,7 @@ export function App() {
                  afterwards, which took the position away from the hand that had just chosen it --
                  the optimise button is still there for anyone who wants that. */
               onMoveAnchor={moveAnchor}
+              onFlip={flipAnchors}
               rig={rig}
               onRig={(next) => {
                 forkSelected()

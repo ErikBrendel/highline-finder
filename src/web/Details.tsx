@@ -250,6 +250,8 @@ interface Props {
   onOptimize: () => void
   rig: RigHeights | null
   onRig: (r: RigHeights | null) => void
+  /** Swap which end is A. See flipAnchors in App. */
+  onFlip: () => void
   onClose: () => void
 }
 

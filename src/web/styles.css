@@ -788,6 +788,17 @@ header[data-measuring] .spacer { flex: none; }
 .anchors { font-size: 11px; color: var(--muted); margin-top: 8px; font-variant-numeric: tabular-nums; }
 .anchors a { color: var(--accent); text-decoration: none; }
 .anchors a:hover { text-decoration: underline; }
+.anchors .flip {
+  margin-right: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.anchors .flip:hover { color: var(--text); border-color: var(--muted); }
 
 .loading { padding: 40px; color: var(--muted); font-size: 13px; }
 
