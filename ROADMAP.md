@@ -322,7 +322,8 @@ One refinement for later: halo anchors are re-scanned by each neighbouring chunk
 8 km). Persisting the per-chunk anchor table and letting neighbours read it removes that; the tables
 are ~7 MB per chunk.
 - **Other German states.** Each runs its own portal with its own tiling, formats and licence.
-  NRW, Bavaria, Saxony and Thuringia all publish comparable 1 m models.
+  NRW, Bavaria and Thuringia all publish comparable 1 m models. Saxony and Saxony-Anhalt have been
+  measured rather than assumed -- see *Beyond Brandenburg* at the end of this section.
 - **WCS instead of tile downloads.** `bb_dgm` serves arbitrary bounding boxes, which avoids
   fetching whole tiles for a small AOI.
 - **Vector tiles for candidates.** One JSON stops working somewhere around 10⁴ candidates.
@@ -500,6 +501,68 @@ extract with a DOI, but it is not a CDN.
 **Order, if this is picked up.** R2 for the blocks; then Germany-wide blocks and the deletion of
 Overpass; then the CORS Worker; then the pipeline onto Actions. Site migration whenever it is
 convenient.
+
+### Beyond Brandenburg: what Saxony and Saxony-Anhalt would need
+
+Measured rather than guessed, September 2026, by fetching real tiles. The short answer is that
+**Saxony is close and Saxony-Anhalt is not**, and that the distance is smaller than the shape of the
+pipeline suggests.
+
+**Saxony publishes everything this project uses, per tile, without authentication.** Its batch
+portal is a form, but underneath it hands out flat WebDAV URLs with a deterministic name:
+
+    https://geocloud.landesvermessung.sachsen.de/public.php/dav/files/{share}/dgm1_33408_5652_2_sn_tiff.zip
+
+`{share}` is a per-product id carried in the page's own configuration -- `JCcXyifaNdLDnxZ` for DGM1
+and `S6wwnFwX7882sZm` for DOM1. A plain GET works; sending credentials is what produces a 401.
+Tiles are 2x2 km, 2000x2000 float32, and **EPSG:25833, the same zone Brandenburg is in**, so the
+anchor lattice needs no reprojection. DGM1, DOM1, LoD1 and LoD2 CityGML and classified laser scans
+are all on the same mechanism, which is more than Brandenburg offers -- LoD2 is what the facade
+anchors under Anchors above would need.
+
+Two measurements worth carrying forward. Saxony's surface model is **3.9 MB per km2 against
+Brandenburg's bDOM at about 32 MB**, so the layer that dominates the cost of a run is roughly eight
+times cheaper there. And it is a 1 m LiDAR DOM rather than a 0.2 m photogrammetric one, which is a
+different instrument and not just a coarser one: bDOM bridges small gaps rather than seeing through
+them and this does the opposite. Canopy figures will not be comparable between the two states, which
+matters because the scoring is shared.
+
+**Saxony-Anhalt is the awkward one.** Its tile picker is a job-based basket -- five tiles at a time,
+EPSG:4647 -- rather than flat URLs. What it does have is the statewide DGM1 as four zips, of which
+part one is 11.5 GB so the set is near 39 GB, and **no statewide DOM at all**, which means no canopy.
+The usable path is its INSPIRE WCS, the one the browser planner already reads: it serves 2x2 km at
+1 m for both DGM and DOM in about twelve seconds a request. That is a different access pattern from
+bulk tiles, and the state is **UTM zone 32**, so every tile has to be carried into the zone 33
+lattice. `blitGeoTiff` already takes a `project` callback for exactly this, but it resamples twice.
+
+**What is in the way, in the code.**
+
+- `cache.ts` holds one hard-coded `BASE`, the products `dgm` and `bdom`, 1 km tiles and the name
+  `{product}_{tile}.zip`. It needs the shape `src/web/sources.ts` already has on the browser side.
+- `raster.ts` names tiles `33{e}-{n}` on a 1 km grid. Saxony's are 2 km, so the grid has to become a
+  property of the source rather than a constant.
+- `coarse.ts` runs the statewide pre-pass off Brandenburg's WCS. **Saxony has no WCS at all** -- six
+  plausible endpoint names all answer 403, and only the WMS exists, which renders pictures. This is
+  the one gap with no drop-in answer.
+- `buildings.ts` is Brandenburg's LoD1. Not blocking: `URBAN_AREAS` is empty, so a natural-only run
+  never asks.
+- Already fine: `extract.ts` downloads any state's OpenStreetMap extract and both are cached, and
+  boundaries.json and outlines.json already carry both states.
+
+**The order that avoids the blocker.** Run named chunks rather than a state sweep. The chunk
+mechanism already works with no areas of interest at all, so a Saxony run needs no coarse pass, and
+the one thing without an answer stops mattering. That is a source abstraction in `cache.ts`, a
+per-source tile grid, and Saxony's URL scheme -- and the obvious first target is the
+Elbsandsteingebirge, which is real relief and genuinely good highline ground, against a state whose
+entire relief is 151 m.
+
+Statewide Saxony needs the coarse pass solved first. The candidate is the federal DGM200, nationwide
+and open, as a first-cut filter at 200 m before the real 16 m rule -- paid for by fetching some
+tiles that turn out barren, which is a rate this project has already measured at 88 of 336 for
+Brandenburg rather than an unknown.
+
+Saxony-Anhalt is worth deferring: WCS fetching and zone-32 reprojection are two new mechanisms at
+once, for a state whose best ground is one massif.
 
 ## Viewer
 
