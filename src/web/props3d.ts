@@ -99,22 +99,37 @@ function van(): Group {
   const glass = new MeshLambertMaterial({ color: GLASS })
   const rubber = new MeshLambertMaterial({ color: TYRE })
   const { length, width, height } = REFERENCE.van
-  const floor = 0.72
-  const nose = length / 2
+  const bevel = 0.09
+  // The bevel grows the shape outward on every side, so the profile is drawn that much inside the
+  // real dimensions and comes out at exactly them.
+  const nose = length / 2 - bevel
+  const roof = height - bevel
+  const floor = 0.72 + bevel
 
-  // Rear to front, in metres from the middle of the vehicle and up from the ground.
+  /**
+   * The side, rear to front, in metres from the middle of the vehicle and up from the ground.
+   *
+   * The alcove is the whole reason this outline is not a box, and it has to be short and steep: a
+   * bunk hanging over the cab, its nose the furthest-forward point of the vehicle, overhanging the
+   * windscreen by about a third of a metre. Drawn long and shallow -- which it was, running 1.75 m
+   * forward while dropping 0.42 -- it stops being an alcove and becomes a sloped roof over the front
+   * quarter, which is a different vehicle entirely.
+   *
+   * And the windscreen rakes the way a windscreen does, its top tucked back under the alcove lip and
+   * its base forward at the bonnet. It used to run 1.12 m *backwards* from the nose before the
+   * bonnet jutted forward again, which is not a notch but a gash.
+   */
   const side = new Shape()
   side.moveTo(-nose, floor)
-  side.lineTo(-nose, height)
-  side.lineTo(nose * 0.42, height)
-  side.lineTo(nose * 0.92, height - 0.42)
-  side.lineTo(nose, height - 1.05)
-  side.lineTo(nose * 0.68, floor + 0.62)
-  side.lineTo(nose * 0.90, floor + 0.28)
-  side.lineTo(nose * 0.90, floor)
+  side.lineTo(-nose, roof)
+  side.lineTo(nose * 0.86, roof)
+  side.lineTo(nose, roof - 0.55)
+  side.lineTo(nose * 0.90, roof - 1.05)
+  side.lineTo(nose * 0.97, floor + 0.55)
+  side.lineTo(nose, floor + 0.35)
+  side.lineTo(nose * 0.98, floor)
   side.closePath()
 
-  const bevel = 0.09
   const body = new Mesh(
     new ExtrudeGeometry(side, {
       depth: width - bevel * 2,
@@ -138,8 +153,8 @@ function van(): Group {
       g.add(m)
     }
   }
-  stick(new BoxGeometry(length * 0.34, 0.52, 0.04), glass, -length * 0.14, height - 0.62)
-  stick(new BoxGeometry(length * 0.70, 0.10, 0.05), trim, -length * 0.10, floor + 0.10)
+  stick(new BoxGeometry(length * 0.34, 0.52, 0.04), glass, -length * 0.14, roof - 0.62)
+  stick(new BoxGeometry(length * 0.70, 0.10, 0.05), trim, -length * 0.10, floor + 0.06)
 
   const wheel = new CylinderGeometry(0.42, 0.42, 0.24, 14)
   for (const x of [length * 0.30, -length * 0.24]) {
