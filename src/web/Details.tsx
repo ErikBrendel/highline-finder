@@ -277,7 +277,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
   canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onClose,
+  rig, onRig, onFlip, onClose,
 }: Props) {
   /**
    * The full-screen view of one line.
@@ -865,6 +865,15 @@ export function Details({
 
       {ends && (
         <div className="anchors">
+          {/* With the rest of the editing, in the row that names the two ends. Which end is A
+              decides how this whole panel is laid out, and on a found line it was settled by
+              whichever anchor the search reached first -- so it is worth being able to say
+              otherwise. */}
+          {full && (
+            <button className="flip" onClick={onFlip} title="Swap which end is A">
+              &#8646; flip A/B
+            </button>
+          )}
           A{' '}
           <a href={`geo:${ends.a.lat},${ends.a.lon}`}>
             {ends.a.lat.toFixed(6)}, {ends.a.lon.toFixed(6)}
