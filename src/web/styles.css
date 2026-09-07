@@ -10,6 +10,10 @@
   --canopy: #3f7d3f;
   --building: #9aa4b8;
   --water: #2f6f9e;
+  /* Rig-height bands: the thin top of a tree, and anything above what is standing there. The
+     ground and the trunk reuse --ground and --canopy, since they are the same two things. */
+  --crown: #6d9a55;
+  --brought: #a8763f;
   --line: #f43f5e;
   /* Roads and railways in the profile: the carriageway slab, its icon and the clearance it wants. */
   --road: #c9b458;
@@ -191,6 +195,19 @@ header[data-measuring] .spacer { flex: none; }
 .range input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
 .range input[type=range]::-moz-range-thumb { pointer-events: auto; }
 .range input[type=range]::-moz-range-track { background: none; }
+/* A single-thumb track painted in stretches, so a height is read against what it would take to
+   reach it. Taller than .rangefill: here the colour is the point rather than a progress hint. */
+.banded { position: relative; height: 22px; }
+.banded .bands {
+  position: absolute; left: 0; right: 0; top: 8px; height: 6px;
+  border-radius: 3px; overflow: hidden;
+}
+.banded .bands span { position: absolute; top: 0; height: 100%; }
+.banded input[type=range] {
+  position: absolute; left: 0; top: 0; width: 100%; margin: 0; background: none;
+}
+.banded input[type=range]::-moz-range-track { background: none; }
+
 .rangefill {
   position: absolute;
   top: 9px;
@@ -706,6 +723,11 @@ header[data-measuring] .spacer { flex: none; }
 
 /* Rig-height controls, only on the planned line: two sliders side by side with a reset. */
 .rig { display: flex; align-items: flex-end; gap: 12px; margin-top: 10px; }
+/* What the height under the thumb would take, tinted to match the band it is standing in. Only the
+   two that mean extra work are tinted: the rest of the scale needs no warning. */
+.note[data-means=trunk] { color: var(--crown); }
+.note[data-means=crown],
+.note[data-means=brought] { color: var(--road); }
 .rig .filter { flex: 1; margin-bottom: 0; }
 .rig button {
   background: transparent; border: 1px solid var(--border); color: var(--muted);

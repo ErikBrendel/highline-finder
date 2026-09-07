@@ -1,10 +1,10 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
 import { PLANNED_ID, type PlannedLine, type RigHeights } from '../shared/plan.js'
-import type { Standing } from '../shared/anchoring.js'
+import { TRUNK_FRACTION, rigMeans, rigRange, type Standing } from '../shared/anchoring.js'
 import type { Cover } from './landcover.js'
 import { ProfileChart, type Wings } from './ProfileChart.js'
-import { Slider } from './Slider.js'
+import { Slider, type SliderBand } from './Slider.js'
 import {
   NEIGHBOURHOOD,
   PLANNED_REFINE_RADIUS,
@@ -45,6 +45,54 @@ function rigCeiling(s: Standing, value: number): number {
   const top = Math.max(RIG_FLOOR, s.canopy * 1.25, Number.isFinite(value) ? value : 0)
   // To a whole metre, so the track's own scale does not jitter as an anchor is dragged.
   return Math.ceil(top)
+}
+
+/**
+ * The track's stretches, in the same colours the profile and the 3D scene use for the same things.
+ *
+ * Four of them, and any may be empty: a roof has no trunk and no crown, an open field has neither
+ * either, and where there is no surface model the canopy is unknown and reads as none. An empty band
+ * takes no width, which is the honest picture -- there is nothing to climb there.
+ */
+function rigBands(s: Standing, p: Params, max: number): SliderBand[] {
+  const free = rigRange(s.onRoof, p).max
+  const trunk = Math.max(free, TRUNK_FRACTION * s.canopy)
+  const crown = Math.max(trunk, s.canopy)
+  return [
+    { to: free, color: 'var(--ground)' },
+    { to: trunk, color: 'var(--canopy)' },
+    { to: crown, color: 'var(--crown)' },
+    { to: max, color: 'var(--brought)' },
+  ]
+}
+
+/**
+ * What the height under the thumb would take, in words, with the figure that justifies it.
+ *
+ * The colour says which band; this says why that band is where it is. "Twelve metres" means nothing
+ * without the twenty-four metre canopy it is half of, and on ground with nothing standing on it the
+ * useful sentence is that there is nothing standing on it.
+ */
+function rigWords(height: number, s: Standing, p: Params): string | null {
+  if (!Number.isFinite(height)) return null
+  const h = height.toFixed(1)
+  const canopy = s.canopy.toFixed(0)
+  switch (rigMeans(height, s, p)) {
+    case 'edge':
+      return null
+    case 'aFrame':
+      return null
+    case 'trunk':
+      return `${h} m up — inside the lower half of a ${canopy} m canopy, so a trunk to climb`
+    case 'crown':
+      return `${h} m up — the thin top of a ${canopy} m canopy, where a trunk may not hold`
+    default:
+      return s.onRoof
+        ? `${h} m above the roof — something you would build up there`
+        : s.canopy > 0
+          ? `${h} m up — above the ${canopy} m standing here, so a mast rather than a tree`
+          : `${h} m up with nothing standing here — a mast, scaffold or crane`
+  }
 }
 
 function optimizeHelp(offer: number | null): string {
@@ -507,29 +555,33 @@ export function Details({
         </dl>
       </div>
 
-      {full && c && (
+      {full && c && (() => {
+        /**
+         * How high one end is rigged, or nothing.
+         *
+         * `aFrame` is measured against the ground the survey actually read, and over ground it has
+         * not read there is none -- so it is NaN, and handing NaN to a range input is both a React
+         * warning and a thumb in an arbitrary place. The set rig heights are preferred where there
+         * are any, since those are a decision rather than a measurement and are known whatever the
+         * terrain is doing.
+         */
+        const known = (end: 'a' | 'b') => rig?.[end] ?? c[end].aFrame
+        return (
         <>
           <div className="rig">
             {(['a', 'b'] as const).map((which) => {
-              /**
-               * How high this end is rigged, or nothing.
-               *
-               * `aFrame` is measured against the ground the survey actually read, and over ground
-               * it has not read there is none -- so it is NaN, and handing NaN to a range input is
-               * both a React warning and a thumb in an arbitrary place. The set rig heights are
-               * preferred where there are any, since those are a decision rather than a
-               * measurement and are known whatever the terrain is doing.
-               */
-              const known = (end: 'a' | 'b') => rig?.[end] ?? c[end].aFrame
               const here = known(which)
               const measured = Number.isFinite(here)
+              const stands = standingAt(which)
+              const ceiling = rigCeiling(stands, here)
               return (
                 <Slider
                   key={which}
                   label={`Rig ${which.toUpperCase()}`}
                   value={measured ? here : 0}
                   min={0}
-                  max={rigCeiling(standingAt(which), here)}
+                  max={ceiling}
+                  bands={rigBands(stands, params, ceiling)}
                   step={0.1}
                   unit={measured ? ' m' : ''}
                   format={() => (measured ? here.toFixed(1) : DASH)}
@@ -552,6 +604,21 @@ export function Details({
               auto
             </button>
           </div>
+          {/* Only the ends that need saying anything. A rig inside what a carried frame reaches is
+              the ordinary case and does not deserve a sentence. */}
+          {(['a', 'b'] as const)
+            .map((which) => ({ which, words: rigWords(known(which), standingAt(which), params) }))
+            .filter((e) => e.words)
+            .map((e) => (
+              <div
+                key={e.which}
+                className="note"
+                data-means={rigMeans(known(e.which), standingAt(e.which), params)}
+                style={{ margin: '4px 0 0' }}
+              >
+                <b>{e.which.toUpperCase()}</b> {e.words}
+              </div>
+            ))}
           {rig === null && (
             <div className="note" style={{ margin: '4px 0 0' }}>
               Rigged as level as the ground allows, then as high &mdash; the same choice the search
@@ -560,7 +627,8 @@ export function Details({
             </div>
           )}
         </>
-      )}
+        )
+      })()}
 
       {/* Same reason as the road banner below, and a stronger one: every figure a partial line
           reports is measured over the ground that was read, so all of them are optimistic in the

@@ -1,15 +1,38 @@
 /**
+ * One stretch of a slider's track, painted so the value is read against what it means.
+ *
+ * For a rig height the bands are the ground, the trunk, the crown and the air above them, and the
+ * thumb's position among them says what reaching that height would take. Without them the control
+ * is a number from nought to some ceiling, and every number on it looks equally sensible.
+ */
+export interface SliderBand {
+  /** Upper bound, in the slider's own units. The band starts where the previous one ended. */
+  to: number
+  color: string
+}
+
+/**
  * `derived` marks a slider whose value is being computed rather than chosen, so it can move on its
  * own -- which looks like a glitch unless the readout says so. Touching it takes over.
  */
 export function Slider({
-  label, value, min, max, step, unit, format, derived, onChange,
+  label, value, min, max, step, unit, format, derived, bands, onChange,
 }: {
   label: string; value: number; min: number; max: number; step: number; unit: string
   format?: (v: number) => string
   derived?: boolean
+  /** Paint the track in stretches. See {@link SliderBand}. */
+  bands?: SliderBand[]
   onChange: (v: number) => void
 }) {
+  const input = (
+    <input
+      type="range" min={min} max={max} step={step} value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+    />
+  )
+  const pct = (v: number) =>
+    max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0
   return (
     <div className="filter">
       <label>
@@ -18,10 +41,30 @@ export function Slider({
           {format ? format(value) : value}{unit}{derived ? ' auto' : ''}
         </span>
       </label>
-      <input
-        type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+      {bands ? (
+        <div className="banded">
+          <div className="bands">
+            {bands.map((b, i) => {
+              const from = i ? bands[i - 1]!.to : min
+              // A band can be empty -- there is no trunk on a roof and no crown in a field -- and
+              // an empty one simply takes no width rather than being a case to leave out.
+              return (
+                <span
+                  key={b.color}
+                  style={{
+                    left: `${pct(from)}%`,
+                    width: `${Math.max(0, pct(b.to) - pct(from))}%`,
+                    background: b.color,
+                  }}
+                />
+              )
+            })}
+          </div>
+          {input}
+        </div>
+      ) : (
+        input
+      )}
     </div>
   )
 }
