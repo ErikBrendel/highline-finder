@@ -1505,7 +1505,14 @@ export function App() {
                 max={bounds.offLevelCap}
                 step={0.1}
                 unit=" % of span"
-                onChange={setMaxOffLevel}
+                // At the top of the track the filter stops filtering, the way Length does at either
+                // end. The track's ceiling is the cap the pipeline already applied, so a thumb
+                // parked there is asking for every line there is -- and holding 3 rather than the
+                // default kept it in the link and in the count of what is being narrowed, both of
+                // which said something was being filtered out when nothing was.
+                onChange={(v) =>
+                  setMaxOffLevel(v >= bounds.offLevelCap ? FILTER_DEFAULTS.maxOffLevel : v)
+                }
               />
               <div className="note" style={{ marginBottom: 0 }}>
                 Terrain clearance is enforced; canopy is only scored. A line with a high
