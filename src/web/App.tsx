@@ -789,6 +789,26 @@ export function App() {
   }
 
   /**
+   * Seeds the planned line from the selected dataset one, so an edit forks instead of vanishing.
+   *
+   * Dragging an anchor has always done this -- see `moveAnchor`. Setting a rig height or asking for
+   * an optimisation is the same kind of edit and has to fork the same way, or the control would
+   * appear to do nothing at all: a found line's figures come from the dataset and nothing in the
+   * browser can write to them. Forking is what makes every control in the panel mean the same thing
+   * whichever kind of line is open.
+   */
+  const forkSelected = () => {
+    if (!selected || selected.id === PLANNED_ID) return
+    commit(
+      {
+        a: { lat: selected.a.lat, lon: selected.a.lon },
+        b: { lat: selected.b.lat, lon: selected.b.lon },
+      },
+      true,
+    )
+  }
+
+  /**
    * An anchor let go of in the 3D view: move it there, then let it find the top of the hill it
    * landed on.
    *
@@ -1531,12 +1551,13 @@ export function App() {
               wings={wings}
               cover={cover}
               params={meta.params}
-              roadState={selectedId === PLANNED_ID ? roadState : 'ok'}
+              roadState={roadState}
               onRoof={onRoof}
               optimizing={optimizing}
               offer={offer}
               onOptimize={() => {
                 if (optimizing) return endRun()
+                forkSelected()
                 setReach(offer ?? 1)
                 setOffer(null)
                 // The button is the two-ended run, whatever the last 3D drop asked for.
@@ -1555,7 +1576,10 @@ export function App() {
               onFull={setFull}
               onMoveAnchor={dropAnchor}
               rig={rig}
-              onRig={setRig}
+              onRig={(next) => {
+                forkSelected()
+                setRig(next)
+              }}
               onClose={() => setSelectedId(null)}
             />
           )}

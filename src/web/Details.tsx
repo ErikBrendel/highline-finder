@@ -241,8 +241,15 @@ export function Details({
     grip.addEventListener('pointercancel', stop)
   }
 
-  // Only the planned line is ever shown without a measurement; found lines carry their own.
-  const isPlanned = !c || c.id === PLANNED_ID
+  /**
+   * Whether this is still the line the search produced.
+   *
+   * The only thing the panel branches on any more, and it is provenance rather than mode: a dataset
+   * line can say "the search accepted this and a finer measurement disagrees", and a line you made
+   * cannot, because nothing accepted it. Every control is the same either way -- editing a found
+   * line forks it, exactly as dragging its anchor always has, and from then on it is one you made.
+   */
+  const fromDataset = !!c && c.id !== PLANNED_ID
   /** Stations the elevation service has not covered. See planLine's `tolerateGaps`. */
   const unmeasured = profile?.filter((s) => Number.isNaN(s.ground)).length ?? 0
   const pctUnmeasured = profile?.length
@@ -303,10 +310,6 @@ export function Details({
         return `${end(c.a.ground, !!onRoof?.a)} / ${end(c.b.ground, !!onRoof?.b)} m`
       }),
     },
-    // The planned line has sliders for these instead.
-    ...(isPlanned
-      ? []
-      : [{ label: 'Rig height A / B', value: stat((c) => `+${c.a.aFrame.toFixed(1)} / +${c.b.aFrame.toFixed(1)} m`) }]),
     {
       label: 'Score: exp / len / canopy / clear / level',
       value: stat((c) => {
@@ -328,8 +331,7 @@ export function Details({
       />
       <div className="body">
       <div className="head">
-        <strong style={{ color: isPlanned ? '#22c55e' : scoreColor(c!.score) }}>
-          {isPlanned && 'Planned line · '}
+        <strong style={{ color: c && Number.isFinite(c.score) ? scoreColor(c.score) : undefined }}>
           {c && Number.isFinite(c.score)
             ? `Score ${c.score.toFixed(1)}`
             : c
@@ -338,7 +340,7 @@ export function Details({
                 ? 'could not measure'
                 : 'measuring…'}
         </strong>
-        {isPlanned && c && (
+        {c && (
           <button
             className="optimize"
             data-running={optimizing}
@@ -464,7 +466,7 @@ export function Details({
         </dl>
       </div>
 
-      {isPlanned && c && (
+      {c && (
         <>
           <div className="rig">
             {(['a', 'b'] as const).map((which) => {
@@ -567,7 +569,7 @@ export function Details({
 
       {/* Said before the verdict, because it qualifies the verdict: a line can only be called clear
           of the roads under it once we know what they are. */}
-      {isPlanned && roadState !== 'ok' && (
+      {roadState !== 'ok' && (
         <div className="violations" data-tone={roadState === 'loading' ? 'wait' : 'bad'}>
           <b>
             {roadState === 'loading'
@@ -588,7 +590,7 @@ export function Details({
 
       {/* A dataset line, re-measured. The search accepted it at its own resolution; this is what a
           metre apart makes of it, which is occasionally not the same answer. */}
-      {!isPlanned && violations && violations.length > 0 && (
+      {fromDataset && violations && violations.length > 0 && (
         <div className="violations">
           <b>Measured again at 1 m, this line would not qualify:</b>
           <ul>
@@ -603,7 +605,7 @@ export function Details({
         </div>
       )}
 
-      {isPlanned && planned && (
+      {!fromDataset && planned && (
         planned.violations.length > 0 ? (
           <div className="violations">
             <b>
