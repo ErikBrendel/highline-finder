@@ -33,6 +33,80 @@ export function rigRange(onRoof: boolean, p: Params): { min: number; max: number
 }
 
 /**
+ * What is standing where an anchor is placed, measured from the ground it stands on.
+ *
+ * Heights above the *composite* ground -- terrain, or the roof where there is a building -- which is
+ * the same datum `aFrame` has always used. Bare earth would be needed to describe an anchor part way
+ * up a wall, out of a window; nothing else here needs it, so nothing else here asks for it.
+ */
+export interface Standing {
+  onRoof: boolean
+  /** How far vegetation reaches above that ground. Zero where there is none, or none is known. */
+  canopy: number
+}
+
+/**
+ * How high up a tree it is worth calling a trunk.
+ *
+ * Half the canopy, and the number is a judgement rather than a measurement: what the surface model
+ * gives is the height of the crown, and the usable trunk is somewhere below where it thins out.
+ * Half is the optimistic end of what people actually rig -- this is advice to someone standing in
+ * front of the tree, who can see what the survey cannot, so it errs towards letting them decide.
+ * A search would want a third. See ROADMAP: trunk detection from the classified point cloud is what
+ * would replace the guess.
+ */
+export const TRUNK_FRACTION = 0.5
+
+/**
+ * What you would have to bring to rig at this height. Every height is reachable by something.
+ *
+ * The old question was whether a height was allowed, and the answer was a violation. That is the
+ * wrong shape: a line rigged twelve metres up a pine is not an invalid line, it is a line that costs
+ * a climb -- and one on a mast is not invalid either, it is one that costs a crane. So the height is
+ * always accepted and what varies is the means, which is what the panel names and what `rigCost`
+ * charges for.
+ */
+export type RigMeans = 'edge' | 'aFrame' | 'trunk' | 'crown' | 'brought'
+
+export function rigMeans(height: number, s: Standing, p: Params): RigMeans {
+  const free = rigRange(s.onRoof, p).max
+  if (height <= p.aFrameMin) return 'edge'
+  if (height <= free) return 'aFrame'
+  if (height <= TRUNK_FRACTION * s.canopy) return 'trunk'
+  if (height <= s.canopy) return 'crown'
+  return 'brought'
+}
+
+/**
+ * What rigging that high costs the score, in bands rather than tiers.
+ *
+ * Banded because a tier would be a step, and a step is a cliff for the optimiser to fall off: two
+ * anchors a centimetre apart would score points apart, and the hill-climb would chase the boundary
+ * instead of the line. Each metre is charged at the rate of the band it falls in, so the total is
+ * continuous and rises monotonically, and a rig that stays inside what a carried A-frame reaches is
+ * free exactly as before.
+ *
+ * The rates say what the means costs to arrange, which is what the score is being asked to reflect.
+ * Climbing a trunk is cheap and is what people here actually do; the thin top of a crown is dearer
+ * and less certain; anything above what is standing there has to be carried in and put up.
+ */
+export function rigCost(height: number, s: Standing, p: Params): number {
+  const free = rigRange(s.onRoof, p).max
+  const trunk = Math.max(free, TRUNK_FRACTION * s.canopy)
+  const crown = Math.max(trunk, s.canopy)
+  const band = (from: number, to: number, rate: number) =>
+    Math.max(0, Math.min(height, to) - from) * rate
+  return (
+    band(free, trunk, RIG_RATE.trunk) +
+    band(trunk, crown, RIG_RATE.crown) +
+    band(crown, Infinity, RIG_RATE.brought)
+  )
+}
+
+/** Score points per metre, by the band the metre falls in. See `rigCost`. */
+export const RIG_RATE = { trunk: 0.4, crown: 2, brought: 6 } as const
+
+/**
  * What a line is, from its two anchors and nothing else.
  *
  * Anchors, not surroundings. A ground-to-ground line threading between two houses is still a

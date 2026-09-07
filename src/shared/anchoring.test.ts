@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RoofMask, lineKind, rigRange } from './anchoring.js'
+import { RIG_RATE, rigCost, rigMeans, type Standing, RoofMask, lineKind, rigRange } from './anchoring.js'
 import { Grid } from './grid.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 
@@ -67,5 +67,66 @@ describe('RoofMask', () => {
     mask.add(building())
     expect(mask.covers(999, 2005)).toBe(false)
     expect(mask.covers(1005, 2020)).toBe(false)
+  })
+})
+
+/**
+ * Every height is reachable by something, so the question is what by -- and the price is banded so
+ * that two anchors a centimetre apart never score a tier apart.
+ */
+describe('rigMeans and rigCost', () => {
+  const open = (canopy = 0): Standing => ({ onRoof: false, canopy })
+  const roof: Standing = { onRoof: true, canopy: 0 }
+
+  it('names what a height needs, on ground with a wood on it', () => {
+    const wood = open(24)
+    expect(rigMeans(0, wood, p)).toBe('edge')
+    expect(rigMeans(1.2, wood, p)).toBe('aFrame')
+    expect(rigMeans(8, wood, p)).toBe('trunk')
+    expect(rigMeans(12, wood, p)).toBe('trunk')
+    expect(rigMeans(18, wood, p)).toBe('crown')
+    expect(rigMeans(30, wood, p)).toBe('brought')
+  })
+
+  it('has nothing to climb in an open field or on a roof', () => {
+    expect(rigMeans(4, open(), p)).toBe('brought')
+    expect(rigMeans(0, roof, p)).toBe('edge')
+    expect(rigMeans(0.5, roof, p)).toBe('brought')
+  })
+
+  it('charges nothing for what a carried A-frame reaches', () => {
+    expect(rigCost(0, open(24), p)).toBe(0)
+    expect(rigCost(p.aFrameMax, open(24), p)).toBe(0)
+    expect(rigCost(0, roof, p)).toBe(0)
+  })
+
+  it('charges each metre at the rate of the band it falls in', () => {
+    const wood = open(24)
+    expect(rigCost(12, wood, p)).toBeCloseTo(10.5 * RIG_RATE.trunk, 6)
+    expect(rigCost(24, wood, p)).toBeCloseTo(10.5 * RIG_RATE.trunk + 12 * RIG_RATE.crown, 6)
+    expect(rigCost(26, wood, p)).toBeCloseTo(
+      10.5 * RIG_RATE.trunk + 12 * RIG_RATE.crown + 2 * RIG_RATE.brought,
+      6,
+    )
+  })
+
+  it('rises without a step anywhere, so a hill-climb has a downhill to follow', () => {
+    const wood = open(24)
+    let last = -1
+    for (let h = 0; h <= 40; h += 0.05) {
+      const cost = rigCost(h, wood, p)
+      expect(cost).toBeGreaterThanOrEqual(last)
+      last = cost
+    }
+    // No jump larger than one step at the steepest rate: continuity, stated as a number.
+    for (let h = 0; h <= 40; h += 0.05) {
+      expect(rigCost(h + 0.05, wood, p) - rigCost(h, wood, p)).toBeLessThanOrEqual(
+        0.05 * RIG_RATE.brought + 1e-9,
+      )
+    }
+  })
+
+  it('prices a climb far below a mast for the same height', () => {
+    expect(rigCost(8, open(24), p)).toBeLessThan(rigCost(8, open(), p) / 5)
   })
 })

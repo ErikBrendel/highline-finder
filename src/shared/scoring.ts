@@ -454,8 +454,6 @@ const PENALTY = {
   canopy: 20,
   level: 20,
   length: 20,
-  /** Per metre the rig is raised past what an A-frame reaches. Applied by the planner, see plan.ts. */
-  rig: 20,
   /**
    * A road crossing that is too low, charged on the same scale as terrain clearance: a metre short
    * is a metre short, whichever of the two it is short of.
@@ -490,18 +488,6 @@ export function penaltyOf(m: Metrics, length: number, offLevel: number, p: Param
     over(offLevel - budget, budget, PENALTY.level) +
     over(p.minLength - length, p.minLength, PENALTY.length)
   )
-}
-
-/** How high one end is rigged, against how high that anchor allows. See rigRange in anchoring.ts. */
-export interface RigEnd {
-  aFrame: number
-  max: number
-}
-
-/** Points charged for rigging higher than the anchor allows, which no anchor move can fix. */
-export function rigPenalty(a: RigEnd, b: RigEnd): number {
-  const over = (e: RigEnd) => Math.max(0, e.aFrame - e.max)
-  return PENALTY.rig * (over(a) + over(b))
 }
 
 /**

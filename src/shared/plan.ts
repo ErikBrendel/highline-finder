@@ -5,13 +5,11 @@ import {
   maxFeasibleSag,
   penaltyOf,
   rawMetricsAt,
-  rigPenalty,
   scoreOf,
   violationsOf,
   type Metrics,
-  type RigEnd,
 } from './scoring.js'
-import { lineKind, rigRange } from './anchoring.js'
+import { lineKind, rigCost, rigRange, type Standing } from './anchoring.js'
 import type { Scene } from './scene.js'
 import type { Candidate, Params } from './types.js'
 import { toWgs84 } from './geo.js'
@@ -26,7 +24,6 @@ export const PLANNED_ID = 'custom'
  * slightly past that so a taller frame or a low anchor point can be tried by hand; anything over
  * `aFrameMax` is reported as a violation rather than silently accepted.
  */
-export const PLANNED_RIG_MAX = 2
 
 /** Attachment heights above ground at each end, when the user sets them by hand. */
 export interface RigHeights {
@@ -186,11 +183,12 @@ export function planLine(
   const { score, parts } = scoreOf(length, h.offLevel, m, p)
   // The one failure no anchor move can undo, so it is charged here rather than inside scoreOf: it
   // is a property of the rig setting, not of the terrain the search is walking over.
-  const ends: [RigEnd, RigEnd] = [
-    { aFrame: h.hA - gA, max: rangeA.max },
-    { aFrame: h.hB - gB, max: rangeB.max },
-  ]
-  const rigCharge = rigPenalty(ends[0], ends[1])
+  // Canopy at the anchor itself, which is what says whether a raised rig is up a tree or up a mast.
+  // Read nearest rather than interpolated, for the reason samplePatch does: two samplings of one
+  // field disagree by metres on a steep slope, and nothing can tell that apart from a stand of trees.
+  const standA: Standing = { onRoof: onRoofA, canopy: canopyAt(a, gA, surface) }
+  const standB: Standing = { onRoof: onRoofB, canopy: canopyAt(b, gB, surface) }
+  const rigCharge = rigCost(h.hA - gA, standA, p) + rigCost(h.hB - gB, standB, p)
   const wa = toWgs84(a.e, a.n)
   const wb = toWgs84(b.e, b.n)
   return {
@@ -219,26 +217,20 @@ export function planLine(
       crossings,
       profile: stored,
     },
-    violations: [...violationsOf(m, length, h.offLevel, p, crossings), ...rigViolations(ends)],
+    violations: violationsOf(m, length, h.offLevel, p, crossings),
     penalty: penaltyOf(m, length, h.offLevel, p) + rigCharge,
   }
 }
 
 /**
- * A rig height the anchor cannot supply, in words.
+ * How far vegetation reaches above the ground an anchor stands on, or zero.
  *
- * Two different sentences because they are two different problems. On the ground the limit is how
- * far a carried frame reaches, and going over it means bringing a bigger one. On a roof the limit
- * is zero and there is nothing to raise the line with -- the parapet is where it attaches -- so
- * quoting "over the 0 m an A-frame reaches" would state the rule and hide the reason.
+ * Zero rather than NaN wherever the answer is not known -- no surface model, or ground the survey
+ * has not covered -- because the question `rigCost` asks it is "is there a tree to climb here", and
+ * "nothing known" has to answer no. Guessing a tree would price a mast as a climb.
  */
-function rigViolations(ends: [RigEnd, RigEnd]): string[] {
-  return (['A', 'B'] as const)
-    .map((label, i) => ({ label, end: ends[i]! }))
-    .filter(({ end }) => end.aFrame > end.max + 1e-9)
-    .map(({ label, end }) =>
-      end.max > 0
-        ? `rigged ${end.aFrame.toFixed(1)} m up at ${label}, over the ${end.max} m an A-frame reaches`
-        : `rigged ${end.aFrame.toFixed(1)} m above the roof at ${label}, which attaches at roof level`,
-    )
+function canopyAt(at: Pos, ground: number, surface: Sampler): number {
+  const top = surface.nearest(at.e, at.n)
+  if (Number.isNaN(top) || Number.isNaN(ground)) return 0
+  return Math.max(0, top - ground)
 }

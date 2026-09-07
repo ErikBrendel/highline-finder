@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { PLANNED_RIG_MAX, planLine } from './plan.js'
+import { planLine } from './plan.js'
 import { Grid } from './grid.js'
 import type { Pos } from './grid.js'
 import type { Scene } from './scene.js'
 import type { Sampler } from './grid.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
+import { RIG_RATE } from './anchoring.js'
 
 const p = DEFAULT_PARAMS
 
@@ -93,11 +94,43 @@ describe('planLine', () => {
     expect(r.candidate.offLevel).toBeCloseTo(0.7, 2)
   })
 
-  it('flags a rig height no A-frame reaches', () => {
+  /**
+   * A height past what a carried frame reaches is a choice with a price, not a failure. Both ends
+   * are raised together so the offlevel -- and with it every other charge -- stays where it was.
+   */
+  it('charges for a rig no A-frame reaches, rather than refusing it', () => {
     const { ground, surface } = terrain(15)
-    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: PLANNED_RIG_MAX, b: PLANNED_RIG_MAX })!
-    expect(r.violations.join(' ')).toMatch(/over the 1.5 m an A-frame reaches/)
-    expect(r.candidate.clearanceMin).toBeGreaterThan(0)
+    const framed = planLine(a, b, ground, surface, p.sagRatio, p, { a: 1.5, b: 1.5 })!
+    const raised = planLine(a, b, ground, surface, p.sagRatio, p, { a: 4.5, b: 4.5 })!
+    expect(raised.violations).toEqual(framed.violations)
+    // Nothing stands on this ground, so all 3 m past the frame is structure brought in, twice over.
+    expect(raised.penalty - framed.penalty).toBeCloseTo(2 * 3 * RIG_RATE.brought, 4)
+    expect(raised.candidate.score).toBeLessThan(framed.candidate.score)
+  })
+
+  /**
+   * Canopy is read at the anchor, not along the span, so the trees have to be on the rims -- which
+   * is where `terrain` does not put them, since its canopy is what a line flies *through*.
+   */
+  it('charges a climb far less than a mast, where there is a tree to climb', () => {
+    const { ground } = terrain(15)
+    const wooded = Grid.filled(300, 300, 0, 300, 1)
+    for (let row = 0; row < 300; row++) {
+      for (let col = 0; col < 300; col++) {
+        const i = row * 300 + col
+        wooded.data[i] = ground.data[i]! + (col + 0.5 <= 50 || col + 0.5 >= 250 ? 20 : 0)
+      }
+    }
+    const at = { a: 8, b: 8 }
+    const inWood = planLine(a, b, ground, wooded, p.sagRatio, p, at)!
+    const inField = planLine(a, b, ground, ground, p.sagRatio, p, at)!
+    expect(inWood.penalty).toBeLessThan(inField.penalty)
+    // 8 m up a 20 m canopy is inside the trunk half. In the open the same 6.5 m past the frame is
+    // a mast, at both ends -- and nothing else about the two lines differs.
+    expect(inField.penalty - inWood.penalty).toBeCloseTo(
+      2 * 6.5 * (RIG_RATE.brought - RIG_RATE.trunk),
+      4,
+    )
   })
 
   it('takes the A-frame away from an anchor that stands on a roof', () => {
@@ -123,11 +156,14 @@ describe('planLine', () => {
     expect(r.candidate.b.aFrame).toBe(0)
   })
 
-  it('says a rig height above a roof is unreachable in terms of the roof', () => {
+  /** A roof has nothing to climb, so every metre above it is structure somebody put there. */
+  it('charges a rig above a roof at the brought-in rate, and calls it no violation', () => {
     const { ground, surface } = terrain(15)
-    const r = planLine(a, b, ground, surface, p.sagRatio, p, { a: 1, b: 0 }, roofsAt(a))!
-    expect(r.violations.join(' ')).toMatch(/1.0 m above the roof at A/)
-    expect(r.penalty).toBeGreaterThan(0)
+    const at = (aFrame: number) =>
+      planLine(a, b, ground, surface, p.sagRatio, p, { a: aFrame, b: 0 }, roofsAt(a))!
+    const raised = at(1)
+    expect(raised.violations).toEqual([])
+    expect(raised.penalty - at(0).penalty).toBeCloseTo(RIG_RATE.brought, 4)
   })
 
   it('responds to the sag setting the same way the found candidates do', () => {

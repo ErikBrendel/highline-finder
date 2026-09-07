@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
-import { PLANNED_ID, PLANNED_RIG_MAX, type PlannedLine, type RigHeights } from '../shared/plan.js'
+import { PLANNED_ID, type PlannedLine, type RigHeights } from '../shared/plan.js'
+import type { Standing } from '../shared/anchoring.js'
 import type { Cover } from './landcover.js'
 import { ProfileChart, type Wings } from './ProfileChart.js'
 import { Slider } from './Slider.js'
@@ -30,6 +31,22 @@ const DASH = '—'
  * because "optimise" could mean anything from a global search to a single nudge, and this is much
  * closer to the nudge.
  */
+/**
+ * How far the rig slider reaches, which follows what is standing there rather than a constant.
+ *
+ * The old cap was two metres, which is the right range for the only anchor the search knows how to
+ * rig -- and useless for the ones a person can. A wood asks for its own height and a little over,
+ * an open field asks for enough to stand something in, and either way a value already set is inside
+ * the range so a link cannot open on a thumb pinned to the end.
+ */
+const RIG_FLOOR = 3
+
+function rigCeiling(s: Standing, value: number): number {
+  const top = Math.max(RIG_FLOOR, s.canopy * 1.25, Number.isFinite(value) ? value : 0)
+  // To a whole metre, so the track's own scale does not jitter as an anchor is dragged.
+  return Math.ceil(top)
+}
+
 function optimizeHelp(offer: number | null): string {
   const reach = offer ?? 1
   const spacing = PLANNED_REFINE_START * reach
@@ -201,6 +218,17 @@ export function Details({
    * chart says where the pointer is and the scene marks it, and nothing outside this panel has any
    * use for the answer.
    */
+  /**
+   * What is standing at each anchor, which is what decides whether a raised rig is a climb or a
+   * crane. Read from the profile's own first and last stations, since those *are* the anchors --
+   * no extra sampling, and it follows the line as it is dragged.
+   */
+  const standingAt = (end: 'a' | 'b'): Standing => {
+    const s = end === 'a' ? profile?.[0] : profile?.[profile.length - 1]
+    const known = s && Number.isFinite(s.surface) && Number.isFinite(s.ground)
+    return { onRoof: !!onRoof?.[end], canopy: known ? Math.max(0, s.surface - s.ground) : 0 }
+  }
+
   const [hoverAt, setHoverAt] = useState<number | null>(null)
 
   const [width, setWidth] = useState(preferredWidth)
@@ -310,6 +338,19 @@ export function Details({
         return `${end(c.a.ground, !!onRoof?.a)} / ${end(c.b.ground, !!onRoof?.b)} m`
       }),
     },
+    // The full view has sliders for these; here they are a figure like any other.
+    ...(full
+      ? []
+      : [
+          {
+            label: 'Rig height A / B',
+            value: stat((c) => {
+              const at = (end: 'a' | 'b') =>
+                Number.isFinite(c[end].aFrame) ? `+${c[end].aFrame.toFixed(1)}` : DASH
+              return `${at('a')} / ${at('b')} m`
+            }),
+          },
+        ]),
     {
       label: 'Score: exp / len / canopy / clear / level',
       value: stat((c) => {
@@ -466,7 +507,7 @@ export function Details({
         </dl>
       </div>
 
-      {c && (
+      {full && c && (
         <>
           <div className="rig">
             {(['a', 'b'] as const).map((which) => {
@@ -488,7 +529,7 @@ export function Details({
                   label={`Rig ${which.toUpperCase()}`}
                   value={measured ? here : 0}
                   min={0}
-                  max={PLANNED_RIG_MAX}
+                  max={rigCeiling(standingAt(which), here)}
                   step={0.1}
                   unit={measured ? ' m' : ''}
                   format={() => (measured ? here.toFixed(1) : DASH)}
