@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COVER, COVER_RGB, colorsOf, coverOf, groundAround, meshOf, samplePatch, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, colorsOf, coverOf, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -252,5 +252,37 @@ describe('groundAround', () => {
     }))
     expect(groundAround(wood, -30, 0, 6).canopy).toBeCloseTo(1, 2)
     expect(groundAround(wood, 30, 0, 6).canopy).toBeCloseTo(0, 2)
+  })
+})
+
+/**
+ * How high to stand something, as opposed to how good a spot is. The two take different circles:
+ * judging wants a wide one so the spread means something, standing wants only what is covered --
+ * the maximum over a wide circle floats a van above any slope it is parked on.
+ */
+describe('standingHeight', () => {
+  const ramp = samplePatch(centre, 60, 121, flat({
+    ground: (e) => 50 + (e - centre.e) * 0.4,
+    surface: (e) => 50 + (e - centre.e) * 0.4,
+  }))
+
+  it('takes the highest of what the footprint covers, and no more', () => {
+    // A 4 m reach on a 0.4 slope is 1.6 m of rise, so the top is 1.6 above the middle -- not the
+    // 4.8 that the 12 m circle groundAround widens to would have given.
+    expect(standingHeight(ramp, 0, 0, 4) - 50).toBeCloseTo(1.6, 1)
+    expect(standingHeight(ramp, 0, 0, 12) - 50).toBeCloseTo(4.8, 1)
+  })
+
+  it('reads the cell it is on where the footprint is smaller than one', () => {
+    const coarse = samplePatch(centre, 400, 101, flat({ ground: () => 50, surface: () => 50 }))
+    expect(coarse.step).toBeGreaterThan(4)
+    expect(standingHeight(coarse, 0, 0, 4)).toBeCloseTo(50, 5)
+  })
+
+  it('stands on the roof rather than the street under it', () => {
+    const town = samplePatch(centre, 60, 121, flat({
+      ground: () => 50, surface: () => 61, building: () => true,
+    }))
+    expect(standingHeight(town, 0, 0, 4)).toBeCloseTo(61, 5)
   })
 })

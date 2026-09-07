@@ -161,6 +161,40 @@ export function groundAround(
 }
 
 /**
+ * How high to stand something whose footprint reaches `radius` from a point.
+ *
+ * The highest of the drawn solid surface under that footprint, so nothing is buried to the axles on
+ * the high side -- and *only* under that footprint, which is the whole difference between this and
+ * `groundAround`. That one deliberately widens its circle so the spread it measures means something
+ * on a coarse patch; taking the maximum over a widened circle stood a van on the highest ground
+ * within twelve metres of itself, which on any slope is a van floating in the air.
+ *
+ * The centre cell always counts, so a footprint smaller than one cell reads the ground it is on
+ * rather than nothing at all.
+ */
+export function standingHeight(patch: Patch, x: number, z: number, radius: number): number {
+  const { side, step, ground, height, cover } = patch
+  const half = ((side - 1) * step) / 2
+  const reach = Math.floor(radius / step)
+  const col0 = Math.round((x + half) / step)
+  const row0 = Math.round((z + half) / step)
+  let top = NaN
+  for (let row = row0 - reach; row <= row0 + reach; row++) {
+    for (let col = col0 - reach; col <= col0 + reach; col++) {
+      if (row < 0 || col < 0 || row >= side || col >= side) continue
+      if (Math.hypot(col - col0, row - row0) * step > radius && (col !== col0 || row !== row0)) {
+        continue
+      }
+      const i = row * side + col
+      const v = cover[i] === COVER.building ? height[i]! : ground[i]!
+      if (Number.isNaN(v)) continue
+      if (Number.isNaN(top) || v > top) top = v
+    }
+  }
+  return top
+}
+
+/**
  * The cover classes again, over a patch already read.
  *
  * Land cover outside Brandenburg is fetched from Overpass as the view is opened, and arrives some

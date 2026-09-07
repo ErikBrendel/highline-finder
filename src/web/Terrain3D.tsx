@@ -7,7 +7,9 @@ import {
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
-import { coverOf, groundAround, meshOf, samplePatch, type Patch, type Readers } from './terrainMesh.js'
+import {
+  coverOf, groundAround, meshOf, samplePatch, standingHeight, type Patch, type Readers,
+} from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Scene3D } from './scene3d.js'
@@ -49,8 +51,10 @@ const MIN_SIDE = 128
  * is there in a frame or two, the fine one replaces it a moment later, and because both are
  * measured from the coarse pass's own floor the swap does not move anything.
  */
-/** The circle the size references occupy, which is what is tested for being flat and open. */
+/** The circle a spot is judged on for being flat, open and at the right height. */
 const REFERENCE_RADIUS = 5
+/** And how far the pair actually reaches, which is the only ground they have to clear. */
+const REFERENCE_FOOTPRINT = 4
 /** How far from an anchor to look for somewhere to put them, clear of its stem. */
 const REFERENCE_REACH = [9, 14, 20]
 /** What a fully wooded spot is worth in metres of relief, when choosing between two. */
@@ -232,11 +236,14 @@ export function Terrain3D({
           const z = at.z + Math.sin(angle) * radius
           const ground = groundAround(patch, x, z, REFERENCE_RADIUS)
           if (!Number.isFinite(ground.relief)) continue
-          const drop = Number.isFinite(here.top) ? Math.abs(ground.top - here.top) : 0
+          // Standing height over what they cover, not over the wider circle they were judged on.
+          const stand = standingHeight(patch, x, z, REFERENCE_FOOTPRINT)
+          if (Number.isNaN(stand)) continue
+          const drop = Number.isFinite(here.top) ? Math.abs(stand - here.top) : 0
           spots.push({
             x,
             z,
-            y: ground.top - g.datum,
+            y: stand - g.datum,
             cost:
               ground.relief +
               ground.canopy * WOOD_COSTS +
