@@ -239,19 +239,21 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
    * What holds each end up, as a post from the ground to the anchor.
    *
    * Without it a line rigged twelve metres up a pine begins in mid-air, and mid-air is the one thing
-   * it must not look like. Split in two for the same reason the rig slider has bands: up to where
-   * what is standing there reaches, the post *is* that thing, and above it the post is something
-   * carried in and put up. The two heights are already in the scene -- `track` follows the bare
-   * earth under the span and `overTrack` its skin -- so the ends of those are the ground and the
-   * treetop at each anchor, and nothing new has to be sampled.
+   * it must not look like. One post, coloured for what the whole thing would be made of: brown while
+   * it stays inside what is standing there, since an A-frame and a trunk are both wood, and metal
+   * once it reaches past it, because at that height nothing holding the line up was not carried in.
+   *
+   * Both heights are already in the scene -- `track` follows the bare earth under the span and
+   * `overTrack` its skin -- so the ends of those two polylines are the ground and the treetop at
+   * each anchor, and nothing new has to be sampled.
    */
   const stemMat = {
-    held: new MeshBasicMaterial({ color: '#4a7a4a' }),
-    brought: new MeshBasicMaterial({ color: '#a8763f' }),
+    wood: new MeshBasicMaterial({ color: '#6b5847' }),
+    metal: new MeshBasicMaterial({ color: '#b9c0cc' }),
   }
   const stems: Mesh[] = []
-  for (let i = 0; i < 4; i++) {
-    const stem = new Mesh(new BufferGeometry(), i % 2 ? stemMat.brought : stemMat.held)
+  for (let i = 0; i < 2; i++) {
+    const stem = new Mesh(new BufferGeometry(), stemMat.wood)
     stem.visible = false
     scene.add(stem)
     stems.push(stem)
@@ -266,25 +268,18 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const drawStems = (k: number) => {
     ;([0, 1] as const).forEach((end) => {
       const post = anchors[end]
-      const held = stems[end * 2]!
-      const brought = stems[end * 2 + 1]!
-      held.visible = brought.visible = false
+      const stem = stems[end]!
+      stem.visible = false
       if (!post) return
       const top = new Vector3(post[0], post[1] * k, post[2])
       const foot = endOf(track, end, k)
-      const skin = endOf(overTrack, end, k)
       // A stem shorter than the tube is thicker than it is long, and every line has an anchor a few
       // centimetres up: a post for that is noise on every scene rather than information on one.
       if (top.y - foot.y < tubeRadius * 4) return
-      const split = new Vector3(top.x, Math.min(top.y, skin.y), top.z)
-      const part = (mesh: Mesh, from: Vector3, to: Vector3) => {
-        if (to.y - from.y < tubeRadius) return
-        mesh.geometry.dispose()
-        mesh.geometry = tubeAlong([from, to], tubeRadius * 0.8, 5)
-        mesh.visible = true
-      }
-      part(held, foot, split)
-      part(brought, split, top)
+      stem.material = top.y > endOf(overTrack, end, k).y + tubeRadius ? stemMat.metal : stemMat.wood
+      stem.geometry.dispose()
+      stem.geometry = tubeAlong([foot, top], tubeRadius * 0.8, 5)
+      stem.visible = true
     })
   }
 
@@ -598,7 +593,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       for (const m of [
         ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat, ghostMat,
-        ballMat, grabMat, stemMat.held, stemMat.brought, hoverBall.material as MeshBasicMaterial,
+        ballMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()

@@ -716,7 +716,10 @@ export function Details({
                     <input
                       type="number"
                       min={0}
-                      step={0.1}
+                      // Half a metre a click. The arrows are for reaching a very different height
+                      // -- a mast, a crane -- and a tenth of a metre a click is a hundred clicks to
+                      // do it. Typing an off-step figure still works; nothing here submits a form.
+                      step={0.5}
                       aria-label={`Rig height ${which.toUpperCase()} in metres`}
                       value={measured ? Math.round(here * 10) / 10 : ''}
                       onChange={(e) => {

@@ -14,6 +14,8 @@
      ground and the trunk reuse --ground and --canopy, since they are the same two things. */
   --crown: #6d9a55;
   --brought: #a8763f;
+  /* What a stem is made of above everything standing there: not wood, so not brown. */
+  --metal: #b9c0cc;
   --line: #f43f5e;
   /* Roads and railways in the profile: the carriageway slab, its icon and the clearance it wants. */
   --road: #c9b458;
@@ -725,18 +727,16 @@ header[data-measuring] .spacer { flex: none; }
 /*
  * Two rig heights and the button that hands them back to the search.
  *
- * Side by side, because they are one decision with two halves and the pair is what has to come out
- * level. `flex-start` rather than `flex-end`: each end now carries its own sentence underneath, of
- * whatever height that sentence needs, and aligning on the bottom would put the two tracks at
- * different heights depending on how much there was to say about each.
- *
- * The button is nudged down by the height of a slider's own label row so that all three line up on
- * the track rather than on the top of the block.
+ * Stacked, and each the full width of the panel. The track is not a bare scale here -- it carries
+ * the bands that say what reaching a height would take, and half a panel is not enough width to
+ * read four of them against a thumb. Each end keeps its own sentence and its own row of named
+ * heights directly beneath it, which is also what stops the two ends' controls being confused for
+ * each other now that they look alike.
  */
-.rig { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; }
-.rig .rigend { flex: 1 1 0; min-width: 0; }
+.rig { display: flex; flex-direction: column; align-items: stretch; gap: 10px; margin-top: 10px; }
+.rig .rigend { min-width: 0; }
 .rig .rigend .filter { margin-bottom: 0; }
-.rig .rigauto { flex: 0 0 auto; margin-top: 22px; }
+.rig .rigauto { align-self: flex-start; }
 .rig .note { margin: 4px 0 0; }
 
 /*
@@ -861,10 +861,6 @@ header[data-measuring] .spacer { flex: none; }
   .details { width: calc(100% - 20px); max-height: 55%; }
   .details .grip { display: none; }
   .details .cols { gap: 6px; }
-  /* Stacked, so each height gets the panel's full width -- and its sentence stays under the thumb
-     it is about rather than being separated from it by the other end's slider. */
-  .rig { flex-direction: column; align-items: stretch; gap: 10px; }
-  .rig .rigauto { margin-top: 0; align-self: flex-start; }
 }
 
 /*
