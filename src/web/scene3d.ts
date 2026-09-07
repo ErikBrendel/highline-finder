@@ -201,7 +201,21 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
 
   // A tube rather than a line: a one-pixel line disappears against a lit hillside at any distance,
   // and the span is the thing the whole view exists to show.
-  const tubeRadius = Math.max(0.6, input.radius / 320)
+  /**
+   * How thick the span and its shadows are drawn, and how big an anchor is.
+   *
+   * A width in metres is the wrong unit for something whose job is to be *seen*. At the far end of
+   * the zoom the span is a hair against a hillside three hundred metres across, and at the near end
+   * the same tube is a pipe wide enough to hide the ground it is supposed to be measured against.
+   * So the metres are recomputed from how far the camera is standing off -- see `zoomThickness` --
+   * and everything drawn as an annotation rather than as terrain follows them.
+   *
+   * `baseRadius` is what that works out to at the distance the camera starts at, and the scaling is
+   * clamped either side of it: a line should get easier to see as you pull back, not turn into a
+   * causeway, and it should thin down as you close in without vanishing.
+   */
+  const baseRadius = Math.max(0.6, input.radius / 320)
+  let tubeRadius = baseRadius
   const spanMat = new MeshBasicMaterial({ color: '#f43f5e' })
   const spanMesh = new Mesh(tubeAlong(points(line, exaggeration), tubeRadius, 6), spanMat)
   scene.add(spanMesh)
@@ -347,12 +361,14 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const labels = ['A', 'B'].map(labelOf)
   scene.add(...labels)
 
-  const ballGeom = new SphereGeometry(tubeRadius * 3, 14, 10)
+  // Unit spheres, sized by `scale` rather than by geometry: a sphere is the one thing here that can
+  // follow the zoom every frame for nothing, since scaling it uniformly is exactly right.
+  const ballGeom = new SphereGeometry(1, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
   // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
   // across on a patch hundreds of metres wide, which is a few pixels -- fine to look at, impossible
   // to grab, and hopeless with a finger.
-  const grabGeom = new SphereGeometry(tubeRadius * 11, 8, 6)
+  const grabGeom = new SphereGeometry(1, 8, 6)
   const grabMat = new MeshBasicMaterial({ visible: false })
   const balls: Mesh[] = []
   const grabs: Mesh[] = []
@@ -373,7 +389,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
    * position readable: a ball hanging in a picture of a valley could be anywhere along the line of
    * sight, and the foot of a vertical tells you which.
    */
-  const hoverBall = new Mesh(new SphereGeometry(tubeRadius * 4, 14, 10), new MeshBasicMaterial({ color: '#ffffff' }))
+  const hoverBall = new Mesh(new SphereGeometry(1, 14, 10), new MeshBasicMaterial({ color: '#ffffff' }))
   const hoverDrop = new ThreeLine(
     new BufferGeometry(),
     new LineDashedMaterial({ color: '#ffffff', dashSize: tubeRadius * 6, gapSize: tubeRadius * 4 }),
@@ -399,6 +415,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     const top = along(line, hoverAt, exaggeration)
     const foot = along(track, hoverAt, exaggeration)
     hoverBall.position.copy(top)
+    // Follows the zoom with the anchors, or it would out-grow them as the camera comes in.
+    hoverBall.scale.setScalar(tubeRadius * 4)
     hoverDrop.geometry.dispose()
     hoverDrop.geometry = new BufferGeometry().setFromPoints([top, foot])
     // Dashes are measured along the line, so it has to be told how long it is.
@@ -421,7 +439,9 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     }
     balls.forEach((ball, i) => {
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
+      ball.scale.setScalar(tubeRadius * 3)
       grabs[i]!.position.copy(ball.position)
+      grabs[i]!.scale.setScalar(tubeRadius * 11)
       // Clear of the ball rather than on it, so the letter never sits over the thing it names.
       labels[i]?.position.set(ball.position.x, ball.position.y + tubeRadius * 9, ball.position.z)
     })
@@ -593,8 +613,42 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const observer = new ResizeObserver(resize)
   observer.observe(parent)
 
+  /**
+   * The thickness the current camera distance asks for, as a multiple of `baseRadius`.
+   *
+   * Proportional to distance, so the span keeps roughly the same weight on screen however far out
+   * the camera is -- and clamped, because "roughly" is the honest word: past a point a line that
+   * kept growing would start hiding the shape of the ground, which is the thing it is drawn on.
+   */
+  const startedAt = camera.position.distanceTo(controls.target)
+  const zoomThickness = () =>
+    Math.min(2.2, Math.max(0.45, camera.position.distanceTo(controls.target) / startedAt))
+
+  /**
+   * Rebuilt on a step rather than every frame.
+   *
+   * A sphere follows the zoom by scaling, which costs nothing. A tube cannot: its radius is baked
+   * into its vertices, and scaling one uniformly would stretch its length as well. So the tubes are
+   * rebuilt, and rebuilding four of them sixty times a second to chase a number that has moved by a
+   * per cent would be a waste of a frame budget the terrain needs. A sixth either way is below what
+   * the eye catches on a smooth zoom and far above what an idle orbit will trigger.
+   */
+  let builtAt = 1
+  const followZoom = () => {
+    const want = zoomThickness()
+    const dash = hoverDrop.material as LineDashedMaterial
+    dash.dashSize = baseRadius * want * 6
+    dash.gapSize = baseRadius * want * 4
+    balls.forEach((ball) => ball.scale.setScalar(baseRadius * want * 3))
+    if (Math.abs(want / builtAt - 1) < 0.17) return
+    builtAt = want
+    tubeRadius = baseRadius * want
+    rescale(exaggeration)
+  }
+
   let raf = requestAnimationFrame(function frame() {
     raf = requestAnimationFrame(frame)
+    followZoom()
     if (hover && dragging === null) {
       const r = canvas.getBoundingClientRect()
       pointer.set(
