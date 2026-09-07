@@ -722,7 +722,22 @@ header[data-measuring] .spacer { flex: none; }
 
 
 /* Rig-height controls, only on the planned line: two sliders side by side with a reset. */
-.rig { display: flex; align-items: flex-end; gap: 12px; margin-top: 10px; }
+/*
+ * Two rig heights and the button that hands them back to the search.
+ *
+ * Side by side, because they are one decision with two halves and the pair is what has to come out
+ * level. `flex-start` rather than `flex-end`: each end now carries its own sentence underneath, of
+ * whatever height that sentence needs, and aligning on the bottom would put the two tracks at
+ * different heights depending on how much there was to say about each.
+ *
+ * The button is nudged down by the height of a slider's own label row so that all three line up on
+ * the track rather than on the top of the block.
+ */
+.rig { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; }
+.rig .rigend { flex: 1 1 0; min-width: 0; }
+.rig .rigend .filter { margin-bottom: 0; }
+.rig .rigauto { flex: 0 0 auto; margin-top: 22px; }
+.rig .note { margin: 4px 0 0; }
 /* What the height under the thumb would take, tinted to match the band it is standing in. Only the
    two that mean extra work are tinted: the rest of the scale needs no warning. */
 .note[data-means=trunk] { color: var(--crown); }
@@ -825,6 +840,10 @@ header[data-measuring] .spacer { flex: none; }
   .details { width: calc(100% - 20px); max-height: 55%; }
   .details .grip { display: none; }
   .details .cols { gap: 6px; }
+  /* Stacked, so each height gets the panel's full width -- and its sentence stays under the thumb
+     it is about rather than being separated from it by the other end's slider. */
+  .rig { flex-direction: column; align-items: stretch; gap: 10px; }
+  .rig .rigauto { margin-top: 0; align-self: flex-start; }
 }
 
 /*

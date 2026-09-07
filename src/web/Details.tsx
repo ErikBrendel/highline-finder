@@ -273,9 +273,57 @@ export function Details({
    */
   const standingAt = (end: 'a' | 'b'): Standing => {
     const s = end === 'a' ? profile?.[0] : profile?.[profile.length - 1]
-    const known = s && Number.isFinite(s.surface) && Number.isFinite(s.ground)
-    return { onRoof: !!onRoof?.[end], canopy: known ? Math.max(0, s.surface - s.ground) : 0 }
+    const read = s && Number.isFinite(s.surface) && Number.isFinite(s.ground)
+    return { onRoof: !!onRoof?.[end], canopy: read ? Math.max(0, s.surface - s.ground) : 0 }
   }
+
+  /**
+   * How high one end is rigged, or NaN.
+   *
+   * `aFrame` is measured against the ground the survey actually read, and over ground it has not
+   * read there is none -- so it is NaN, and handing NaN to a range input is both a React warning
+   * and a thumb in an arbitrary place. The set rig heights are preferred where there are any, since
+   * those are a decision rather than a measurement and are known whatever the terrain is doing.
+   */
+  const rigAt = (end: 'a' | 'b') => rig?.[end] ?? c?.[end].aFrame ?? NaN
+
+  /**
+   * The top of each slider's scale, frozen while a thumb is being dragged.
+   *
+   * The ceiling follows what is standing there *and* the value already set, so that a link opening
+   * at forty metres is not pinned to the end of its own track. Recomputed live that made the top of
+   * the track run away from the thumb: every metre dragged raised the ceiling, so the end could
+   * never be reached and the scale under the pointer kept changing. So it settles on release, which
+   * is also when a new scale is least disruptive to read.
+   */
+  const [rigTop, setRigTop] = useState({ a: RIG_FLOOR, b: RIG_FLOOR })
+  const [dragging, setDragging] = useState(false)
+  useEffect(() => {
+    if (dragging) return
+    const next = {
+      a: rigCeiling(standingAt('a'), rigAt('a')),
+      b: rigCeiling(standingAt('b'), rigAt('b')),
+    }
+    setRigTop((cur) => (cur.a === next.a && cur.b === next.b ? cur : next))
+  })
+
+  /**
+   * Release is watched on the window rather than on the input: a thumb dragged past the edge of the
+   * panel is let go of somewhere else entirely, and the drag has to end there too. Same reason the
+   * resize grip above does it this way.
+   */
+  useEffect(() => {
+    if (!dragging) return
+    const stop = () => setDragging(false)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    window.addEventListener('keyup', stop)
+    return () => {
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      window.removeEventListener('keyup', stop)
+    }
+  }, [dragging])
 
   const [hoverAt, setHoverAt] = useState<number | null>(null)
 
@@ -555,26 +603,17 @@ export function Details({
         </dl>
       </div>
 
-      {full && c && (() => {
-        /**
-         * How high one end is rigged, or nothing.
-         *
-         * `aFrame` is measured against the ground the survey actually read, and over ground it has
-         * not read there is none -- so it is NaN, and handing NaN to a range input is both a React
-         * warning and a thumb in an arbitrary place. The set rig heights are preferred where there
-         * are any, since those are a decision rather than a measurement and are known whatever the
-         * terrain is doing.
-         */
-        const known = (end: 'a' | 'b') => rig?.[end] ?? c[end].aFrame
-        return (
+      {full && c && (
         <>
-          <div className="rig">
+          <div className="rig" onPointerDown={() => setDragging(true)} onKeyDown={() => setDragging(true)}>
             {(['a', 'b'] as const).map((which) => {
-              const here = known(which)
+              const here = rigAt(which)
               const measured = Number.isFinite(here)
               const stands = standingAt(which)
-              const ceiling = rigCeiling(stands, here)
+              const ceiling = Math.max(rigTop[which], measured ? here : 0)
+              const words = rigWords(here, stands, params)
               return (
+                <div className="rigend" key={which}>
                 <Slider
                   key={which}
                   label={`Rig ${which.toUpperCase()}`}
@@ -589,14 +628,24 @@ export function Details({
                   // Touching either slider is taking the heights by hand, so an end whose own
                   // height was never measurable becomes a plain zero rather than staying unknown.
                   onChange={(v) => {
-                    const other = known(which === 'a' ? 'b' : 'a')
+                    const other = rigAt(which === 'a' ? 'b' : 'a')
                     const kept = Number.isFinite(other) ? other : 0
                     onRig(which === 'a' ? { a: v, b: kept } : { a: kept, b: v })
                   }}
                 />
+                  {/* Attached to its own slider rather than collected below both, so on a phone --
+                      where the two stack -- the sentence stays with the thumb it is about. Only the
+                      ends that need one get one: a rig inside the A-frame is the ordinary case. */}
+                  {words && (
+                    <div className="note" data-means={rigMeans(here, stands, params)}>
+                      {words}
+                    </div>
+                  )}
+                </div>
               )
             })}
             <button
+              className="rigauto"
               disabled={rig === null}
               onClick={() => onRig(null)}
               title="Rig as level and as high as the ground allows, like the search does"
@@ -604,21 +653,6 @@ export function Details({
               auto
             </button>
           </div>
-          {/* Only the ends that need saying anything. A rig inside what a carried frame reaches is
-              the ordinary case and does not deserve a sentence. */}
-          {(['a', 'b'] as const)
-            .map((which) => ({ which, words: rigWords(known(which), standingAt(which), params) }))
-            .filter((e) => e.words)
-            .map((e) => (
-              <div
-                key={e.which}
-                className="note"
-                data-means={rigMeans(known(e.which), standingAt(e.which), params)}
-                style={{ margin: '4px 0 0' }}
-              >
-                <b>{e.which.toUpperCase()}</b> {e.words}
-              </div>
-            ))}
           {rig === null && (
             <div className="note" style={{ margin: '4px 0 0' }}>
               Rigged as level as the ground allows, then as high &mdash; the same choice the search
@@ -627,8 +661,7 @@ export function Details({
             </div>
           )}
         </>
-        )
-      })()}
+      )}
 
       {/* Same reason as the road banner below, and a stronger one: every figure a partial line
           reports is measured over the ground that was read, so all of them are optimistic in the
