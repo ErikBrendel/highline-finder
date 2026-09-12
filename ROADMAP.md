@@ -462,7 +462,7 @@ lattice. `blitGeoTiff` already takes a `project` callback for exactly this, but 
 - `buildings.ts` is Brandenburg's LoD1. Not blocking: `URBAN_AREAS` is empty, so a natural-only run
   never asks.
 - Already fine: `extract.ts` downloads any state's OpenStreetMap extract and both are cached, and
-  boundaries.json and outlines.json already carry both states.
+  boundaries.json and states.json already carry both states.
 
 **The order that avoids the blocker.** Run named chunks rather than a state sweep. The chunk
 mechanism already works with no areas of interest at all, so a Saxony run needs no coarse pass, and
@@ -478,6 +478,53 @@ Brandenburg rather than an unknown.
 
 Saxony-Anhalt is worth deferring: WCS fetching and zone-32 reprojection are two new mechanisms at
 once, for a state whose best ground is one massif.
+
+### What every state now gives the planner, and what it does not
+
+Measured in September 2026 by asking every service, not by reading catalogues. The planner covers
+the whole country; the **pipeline** is still Berlin and Brandenburg and this section is not about
+it. The guide's coverage map is generated from the same facts -- see `integration.ts` -- so this is
+the prose version of a thing the app already says for itself.
+
+**Heights are solved everywhere.** hoehendaten.de republishes the state surveys' own 1 m DGM tiles
+and answered for twelve of thirteen states probed, each with that state's own attribution. The old
+9.5 E cut-off had nothing to do with data and everything to do with a worry about zone 33 geometry,
+which `groundDistance` now answers directly.
+
+**Four surveys can be read from a browser, and only those four give canopy.** Brandenburg + Berlin,
+Saxony-Anhalt, North Rhine-Westphalia and Mecklenburg-Vorpommern publish a WCS with both models and
+send CORS headers. NRW is the fastest of them at about 0.5 s a window against Brandenburg's 2-3,
+and also publishes `nw_ndom` -- the surface model already differenced against the terrain, at half a
+metre. Not used: this app differences the two itself everywhere else, and a pre-differenced source
+at twice the resolution would be a second definition of canopy to keep in step with the first.
+
+**The other twelve have no reachable coverage service at all.** Baden-Wuerttemberg, Bavaria, Bremen,
+Hamburg, Hesse, Lower Saxony, Rhineland-Palatinate, Saarland, Saxony, Schleswig-Holstein and
+Thuringia were each probed under several plausible endpoint names; what they publish is display
+services and bulk downloads. So a line planned there is measured against the ground exactly and
+knows nothing about the trees, which is the difference the coverage map colours in. **This is the
+single biggest gap left**, and the general answer is not sixteen more services: it is the OSM
+building and landuse work already in Anchors, plus a canopy source that is not per-state.
+
+**Hillshade is nationwide** since basemap.de's `de_basemapde_web_raster_hillshade` went in. It needs
+no rebasing -- measured over five stretches of Brandenburg it renders flat ground at exactly the
+same 195 and draws 1.16x the relief -- which made it the only layer in that stack whose flat grey
+was nobody's decision. Five metres a pixel against the states' one.
+
+**Orthophotos: thirteen of sixteen** at 20 cm or better, Bremen's at 10 cm. Missing are Hamburg and
+Hesse, which publish theirs somewhere a browser-side search did not reach, and
+Mecklenburg-Vorpommern, which is reachable and unusable: it renders its own credit into the corner
+of every image, so on 256 px tiles the notice tiles across the whole map. Its relief does the same.
+
+**Two things were found and deliberately not taken.** NRW's 1 m relief is clean, sharp and better
+than the federal layer, but it renders flat ground at 128 with the full range either side; the
+piecewise rebase in `shadeMath` cannot carry that onto 195 without squashing one half and stretching
+the other, and fitted, its shadows land right while its highlights come out at half strength.
+Matching it properly wants a contrast per half -- a change to how every layer is described, for one
+of them. And Saxony's own DGM1/DOM1 file share still has no CORS header, which is the one thing that
+would let the sharpest available data in the best highline ground in the east be read directly
+rather than through the republisher. A request is with GeoSN; if it is granted, Saxony joins the
+four.
 
 ## Hosting and data delivery
 
