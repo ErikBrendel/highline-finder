@@ -1,4 +1,4 @@
-import outlines from './outlines.json'
+import states from './states.json'
 
 /**
  * Which survey's ground a point is on, roughly and without asking anybody.
@@ -9,17 +9,24 @@ import outlines from './outlines.json'
  * then offered to the survey that holds it. That is a wasted round trip on every new area.
  *
  * So each source carries the outline of its state, simplified to a couple of kilometres and
- * bundled with the app -- fifteen kilobytes, no fetch, synchronous. It is a hint and never an
- * authority: a source that is asked about ground it does not hold still declines, and the next one
- * is asked. What it saves is asking a survey four hundred kilometres from its own territory.
+ * bundled with the app -- thirty kilobytes for all sixteen, no fetch, synchronous. It is a hint and
+ * never an authority: a source that is asked about ground it does not hold still declines, and the
+ * next one is asked. What it saves is asking a survey four hundred kilometres from its territory.
+ *
+ * The same outlines answer a second question, which is why every state is here and not only the
+ * four with their own service: what the info map colours in, one square per state. See `STATES`.
  */
 
-interface Outline {
+export interface StateOutline {
+  /** Two letters, as on a licence plate. `DE` is the country rather than a state. */
+  code: string
   name: string
   rings: number[][][]
 }
 
-const byName = new Map((outlines as Outline[]).map((o) => [o.name, o.rings]))
+export const STATES = states as StateOutline[]
+
+const byName = new Map(STATES.map((o) => [o.name, o.rings]))
 
 /**
  * How far outside a coarse outline still counts as inside it.
@@ -68,4 +75,30 @@ export function nearState(name: string, lon: number, lat: number, margin = SOURC
   const rings = byName.get(name)
   if (!rings) return true
   return rings.some((r) => encloses(r, lon, lat) || distanceTo(r, lon, lat) <= margin)
+}
+
+/**
+ * A state's bounding box in degrees -- west, south, east, north -- for skipping pointless requests.
+ *
+ * Derived rather than written down. A map layer only needs to know roughly where its survey has
+ * imagery, and every box that used to be typed into MapView by hand was a second statement of
+ * something these outlines already say -- one that drifts, and that nobody notices has drifted
+ * because a box slightly too small only shows up as missing tiles in one corner of one state.
+ *
+ * Padded by the same margin the coverage test allows, for the same reason: a survey renders a
+ * little way past its own border, and being generous costs one blank tile.
+ */
+export function stateBox(name: string): [number, number, number, number] {
+  const rings = byName.get(name)
+  if (!rings) throw new Error(`no outline named ${name} in states.json`)
+  const points = rings.flat()
+  const lons = points.map((p) => p[0]!)
+  const lats = points.map((p) => p[1]!)
+  const pad = SOURCE_MARGIN / METRES_PER_DEGREE
+  return [
+    Math.min(...lons) - pad,
+    Math.min(...lats) - pad,
+    Math.max(...lons) + pad,
+    Math.max(...lats) + pad,
+  ]
 }

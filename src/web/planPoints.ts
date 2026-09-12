@@ -1,4 +1,4 @@
-import { toUtm33 } from '../shared/geo.js'
+import { toUtm33, groundDistance } from '../shared/geo.js'
 
 /**
  * The planned line's two ends, and the one rule that governs placing them.
@@ -40,7 +40,7 @@ export function spanGeometry(a: LatLon, b: LatLon): { length: number; bearing: n
   const [ae, an] = toUtm33(a.lat, a.lon)
   const [be, bn] = toUtm33(b.lat, b.lon)
   return {
-    length: Math.hypot(be - ae, bn - an),
+    length: groundDistance(ae, an, be, bn),
     bearing: Math.round((Math.atan2(be - ae, bn - an) * 180) / Math.PI + 360) % 360,
   }
 }

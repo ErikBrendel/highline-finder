@@ -17,6 +17,7 @@
     "downsample": "tsx src/pipeline/downsample.ts",
     "osm": "tsx src/tools/osmRefresh.ts",
     "boundaries": "tsx src/tools/boundaries.ts",
+    "states": "tsx src/tools/states.ts",
     "shrink": "tsx src/tools/shrinkCache.ts",
     "reshape": "tsx src/tools/reshapeDataset.ts"
   },

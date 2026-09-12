@@ -55,13 +55,17 @@ interface WcsSpec {
   id: string
   attribution: string
   /**
-   * The state whose outline bounds this service, as named in outlines.json.
+   * The states whose outlines bound this service, as named in states.json.
    *
    * A rough polygon rather than a box, because the boxes overlap badly: Brandenburg's takes in a
    * corner of Saxony-Anhalt, so a window over Halle was offered to Brandenburg first and declined
    * before the survey that holds it was asked. See coverage.ts.
+   *
+   * A list because a survey is not always one state. Berlin is a hole in Brandenburg's outline and
+   * the same survey answers for both, so naming only Brandenburg would decline every window over
+   * the city from the service that holds it.
    */
-  state: string
+  states: string[]
   /** Full URL of each coverage, up to but not including the query string. */
   ground: { url: string; coverage: string }
   surface?: { url: string; coverage: string }
@@ -91,7 +95,7 @@ function wcsSource(spec: WcsSpec): Source {
     hasSurface: !!spec.surface,
     covers(e, n) {
       const { lat, lon } = toWgs84(e, n)
-      return nearState(spec.state, lon, lat)
+      return spec.states.some((name) => nearState(name, lon, lat))
     },
     async load(e0, n0, size, into) {
       const project = spec.zone === 33 ? undefined : toZone32(e0, n0, size)
@@ -188,9 +192,7 @@ function boxIn32(e0: number, n0: number, size: number): [number, number, number,
 export const brandenburg = wcsSource({
   id: 'bb',
   attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
-  // Berlin is a hole in Brandenburg and the same survey answers for both, so either outline will do
-  // and only one of them has to be tested first.
-  state: 'Brandenburg',
+  states: ['Brandenburg', 'Berlin'],
   ground: { url: 'https://isk.geobasis-bb.de/ows/dgm_wcs', coverage: 'bb_dgm' },
   surface: { url: 'https://isk.geobasis-bb.de/ows/bdom_wcs', coverage: 'bb_bdom' },
   zone: 33,
@@ -206,7 +208,7 @@ export const brandenburg = wcsSource({
 export const sachsenAnhalt = wcsSource({
   id: 'st',
   attribution: 'GeoBasis-DE/LVermGeo ST, dl-de/by-2.0',
-  state: 'Sachsen-Anhalt',
+  states: ['Sachsen-Anhalt'],
   ground: {
     url: 'https://geodatenportal.sachsen-anhalt.de/ows_INSPIRE_LVermGeo_ATKIS_EL_DGM_WCS',
     coverage: 'Coverage1',
@@ -218,32 +220,75 @@ export const sachsenAnhalt = wcsSource({
   zone: 32,
 })
 
+/**
+ * North Rhine-Westphalia, the fastest of them and the furthest from home.
+ *
+ * Aachen is nine degrees west of zone 33's central meridian, which is where `pointScale` earns its
+ * keep -- see geo.ts. Everything else here is ordinary: a plain WCS in zone 32, a bare TIFF with no
+ * MIME envelope, and both models answering a 256 m window in about half a second, against two to
+ * three for Brandenburg.
+ *
+ * It also publishes `nw_ndom`, the surface model already differenced against the terrain and at
+ * half a metre. Not used: this app subtracts the two itself everywhere else, and a source that
+ * arrived pre-differenced at twice the resolution would be a second definition of canopy to keep
+ * in step with the first for no measurement gained.
+ */
+export const nordrheinWestfalen = wcsSource({
+  id: 'nw',
+  attribution: 'GeoBasis-DE/NRW, dl-de/zero-2.0',
+  states: ['Nordrhein-Westfalen'],
+  ground: { url: 'https://www.wcs.nrw.de/geobasis/wcs_nw_dgm', coverage: 'nw_dgm' },
+  surface: { url: 'https://www.wcs.nrw.de/geobasis/wcs_nw_dom', coverage: 'nw_dom' },
+  zone: 32,
+})
+
+/** Mecklenburg-Vorpommern, which publishes both models in zone 33 and needs no carrying across. */
+export const mecklenburgVorpommern = wcsSource({
+  id: 'mv',
+  attribution: 'GeoBasis-DE/M-V, dl-de/by-2.0',
+  states: ['Mecklenburg-Vorpommern'],
+  ground: { url: 'https://www.geodaten-mv.de/dienste/dgm_wcs', coverage: 'mv_dgm' },
+  surface: { url: 'https://www.geodaten-mv.de/dienste/dom_wcs', coverage: 'mv_dom1' },
+  zone: 33,
+})
+
 /* ------------------------------------------------------------------------------ the republisher */
 
 const HD_API = 'https://api.hoehendaten.de:14444/v1/rawtif'
 
 /**
- * How far from zone 33 this project's own coordinates stay honest.
+ * How far this project's own coordinates reach, in degrees of longitude.
  *
- * Everything computed here is EPSG:25833, because Brandenburg is. A UTM easting a few degrees
- * outside its own zone is still good to centimetres; far outside it the scale error stops being a
- * rounding error and a line's length would be wrong. Saxony (12.1-15.1 E) is well inside it.
+ * The whole country now, where it used to stop at 9.5 E. Everything computed here is EPSG:25833
+ * because Brandenburg is, and the old limit was the point past which a zone-33 easting was judged
+ * to stop being honest -- which was the right worry and the wrong remedy. A grid metre is worth
+ * 0.14 % less than a ground metre at 9.5 E and 0.46 % less at Aachen, so the error was already
+ * there, unstated, at the very edge that was being defended. It is now taken out where it actually
+ * matters, which is the length of a line and nowhere else. See `groundDistance` in geo.ts.
+ *
+ * What is left is a true limit rather than a chosen one: outside these the projection would be far
+ * enough from its zone for the second-order terms this app ignores to start showing, and no German
+ * survey is out there anyway.
  */
-const USABLE_FROM = 9.5
+const USABLE_FROM = 5.5
 const USABLE_TO = 19
 
 /**
  * Höhendaten für Deutschland, which republishes the state surveys' own 1 m tiles.
  *
- * Last in the list and used where nothing better answers, which today is Saxony: GeoSN publishes
+ * Last in the list and used wherever nothing better answers, which is now most of the country: only
+ * four surveys can be read from a browser at all. Saxony is the sharpest example -- GeoSN publishes
  * DGM1 and DOM1 as open data, but only through a WMS that draws pictures of them and a file share
  * with no CORS headers, so nothing a browser holds can read a height out of either. What comes back
  * from here is the state's own GeoTIFF, unaltered, with that state's attribution attached -- so a
  * figure measured from it is as good as one measured from the source, and is credited to it.
  *
- * Terrain only, whatever the state publishes: the surface model is not republished. It is also a
- * third party rather than a survey office, on a non-standard port and with a rate limit of twelve
- * hundred tiles an hour, which is the other reason it is asked last.
+ * Terrain only, whatever the state publishes: the surface model is not republished. So a line
+ * planned in the twelve states without their own service is measured against the ground exactly and
+ * knows nothing about what is standing on it, which is the difference the info map colours in.
+ *
+ * It is also a third party rather than a survey office, on a non-standard port and with a rate
+ * limit of twelve hundred tiles an hour, which is the other reason it is asked last.
  */
 export const hoehendaten: Source = {
   id: 'hoehendaten',
@@ -364,8 +409,18 @@ function decodeBase64(text: string): ArrayBuffer {
  * rectangle can separate two states that interlock -- so which one answers is settled by asking.
  * The one that holds the ground returns a raster and the others decline, which costs a wasted
  * request at a border and nothing at all after {@link answeredHere} has watched one succeed.
+ *
+ * The four surveys are the ones a browser can read a height out of, and being asked first is not a
+ * preference for the local office: they are the only ones that hold a surface model, so wherever
+ * one answers a line knows what is standing under it and everywhere else it does not.
  */
-export const SOURCES: Source[] = [brandenburg, sachsenAnhalt, hoehendaten]
+export const SOURCES: Source[] = [
+  brandenburg,
+  sachsenAnhalt,
+  nordrheinWestfalen,
+  mecklenburgVorpommern,
+  hoehendaten,
+]
 
 /**
  * Which source last answered for a square kilometre, so a second window there starts with it.

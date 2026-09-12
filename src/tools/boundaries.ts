@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { toUtm33, toWgs84 } from '../shared/geo.js'
 import { MEMBER_WAY, readNodes, readWaysAndRelations } from './osmPbf.js'
 import { ensureExtract } from './extract.js'
+import { simplify } from './simplify.js'
+import states from '../web/states.json'
 
 /**
  * Extracts the state borders of everywhere this app can measure, from OpenStreetMap extracts.
@@ -21,38 +23,6 @@ import { ensureExtract } from './extract.js'
  */
 
 const OUT = new URL('../web/public/boundaries.json', import.meta.url).pathname
-/**
- * A second, much coarser copy, bundled rather than fetched.
- *
- * The drawn outlines are a hundred kilobytes and arrive with the map. The elevation sources need to
- * know which state a point is in *before* anything has loaded, to decide which survey to ask, and
- * they need it synchronously -- so they get their own version, simplified until it is a few dozen
- * points a state and imported as data. It is a hint and not a border: a source that is asked about
- * ground it does not hold declines, and the next one is asked.
- */
-const COARSE_OUT = new URL('../web/outlines.json', import.meta.url).pathname
-/**
- * Tolerance for that copy, in metres.
- *
- * Deliberately far coarser than the drawn outline. What it has to be is smaller than the margin
- * the coverage test allows around it -- see SOURCE_MARGIN -- so that a shortcut across a bend can
- * never put real ground outside the source that holds it.
- */
-const COARSE_TOLERANCE = 2500
-
-/**
- * A ring at the coarse tolerance, rounded to about a hundred metres.
- *
- * Shared because the same ring goes into both files for Germany: what is drawn for it and what the
- * source registry tests against are the same shape, and having one produce the other is what keeps
- * the line on the map from promising ground the registry would decline.
- */
-const coarsen = (ring: number[][]): number[][] =>
-  simplify(ring, COARSE_TOLERANCE / 111_320).map(([lon, lat]) => [
-    Math.round(lon! * 1e3) / 1e3,
-    Math.round(lat! * 1e3) / 1e3,
-  ])
-
 /**
  * Metres per degree of latitude, and the same for longitude at the latitude in question.
  *
@@ -166,47 +136,6 @@ const isState = (tags: Record<string, string>, wanted: string[]) =>
   tags.admin_level === '4' &&
   tags.type === 'boundary' &&
   wanted.includes(tags.name ?? '')
-
-/**
- * Douglas-Peucker, on projected metres so the tolerance means what it says.
- *
- * A state border in OpenStreetMap is surveyed to the field boundary and Brandenburg's runs to a
- * hundred thousand points, which is more than the whole line dataset. At the zoom this is drawn --
- * a border seen against a whole state -- a hundred metres of detour is a fraction of a pixel, so
- * what survives is the shape and none of the surveying.
- */
-function simplify(pts: number[][], tolerance: number): number[][] {
-  if (pts.length < 3) return pts
-  const keep = new Uint8Array(pts.length)
-  keep[0] = 1
-  keep[pts.length - 1] = 1
-  const stack: [number, number][] = [[0, pts.length - 1]]
-  while (stack.length) {
-    const [from, to] = stack.pop()!
-    const [ax, ay] = pts[from] as [number, number]
-    const [bx, by] = pts[to] as [number, number]
-    const dx = bx - ax
-    const dy = by - ay
-    const span = Math.hypot(dx, dy)
-    let worst = -1
-    let at = -1
-    for (let i = from + 1; i < to; i++) {
-      const [px, py] = pts[i] as [number, number]
-      // Distance to the segment, or to the point itself where the segment has no length.
-      const d = span
-        ? Math.abs(dy * px - dx * py + bx * ay - by * ax) / span
-        : Math.hypot(px - ax, py - ay)
-      if (d > worst) {
-        worst = d
-        at = i
-      }
-    }
-    if (worst <= tolerance || at < 0) continue
-    keep[at] = 1
-    stack.push([from, at], [at, to])
-  }
-  return pts.filter((_, i) => keep[i])
-}
 
 /**
  * Joins member ways end to end into the longest chains they will make.
@@ -356,66 +285,53 @@ async function trace(extract: string, WANTED: string[]) {
 }
 
 /**
- * The outline of the ground the German extracts cover, from Geofabrik's own clipping polygon.
+ * The outline of the ground the republisher can hold, read back from `npm run states`.
  *
- * Not a political border and better than one for this purpose: it is the shape that decides what is
- * in a German extract, which is the shape of what the republisher of the state surveys can possibly
- * hold. Forty kilobytes of text and one ring, where the country's real boundary relation is a
- * four-gigabyte download away.
- *
- * The format is a header line, a section name, then coordinate pairs until END.
+ * Not traced here, because it is not this tool's fact. It is Geofabrik's clipping polygon -- the
+ * shape that decides what is in a German extract -- and the source registry tests points against
+ * exactly this ring. Reading the committed ring rather than re-deriving it is what guarantees the
+ * dashed line never promises ground the registry declines: it cannot drift from something it is a
+ * literal subset of.
  */
-const GERMANY_POLY = 'https://download.geofabrik.de/europe/germany.poly'
-
-async function germany(): Promise<[number, number][]> {
-  console.log(`\n== Germany\ndownloading ${GERMANY_POLY}`)
-  const res = await fetch(GERMANY_POLY, { headers: { 'User-Agent': 'highline-finder/0.1' } })
-  if (!res.ok) throw new Error(`germany.poly failed: HTTP ${res.status}`)
-  const ring: [number, number][] = []
-  for (const line of (await res.text()).split('\n')) {
-    const pair = line.trim().split(/\s+/).map(Number)
-    if (pair.length === 2 && pair.every((v) => Number.isFinite(v))) ring.push([pair[0]!, pair[1]!])
-  }
-  if (ring.length < 100) throw new Error(`germany.poly parsed as ${ring.length} points`)
-  console.log(`  ${ring.length.toLocaleString()} points`)
-  return ring
+const germanyRing = (): number[][] => {
+  const found = (states as { name: string; rings: number[][][] }[]).find(
+    (s) => s.name === 'Germany',
+  )
+  if (!found) throw new Error('states.json has no Germany ring -- run `npm run states` first')
+  return found.rings[0]!
 }
 
+/** The tolerance that ring was simplified at. See `trimToStates`, which needs it to match. */
+const COARSE_TOLERANCE = 2500
+
 async function main() {
-  const states = []
+  const traced = []
   for (const { extract, names } of STATES) {
     console.log(`\n== ${names.join(', ')}`)
-    states.push(...(await trace(extract, names)))
+    traced.push(...(await trace(extract, names)))
   }
 
   /**
-   * Germany is drawn at the coarse tolerance, unlike the states, and from the very same ring the
-   * source registry tests against.
+   * Germany is drawn at the coarse tolerance, unlike the states, and says something weaker.
    *
-   * It says something weaker than a state outline does, and should look like it. A state border
-   * means a survey answers here at full quality; this one means only that the republisher might
-   * hold something, terrain and no canopy. It is Geofabrik's clipping polygon rather than the
-   * political border, so detail it does not deserve would be detail invented -- and at full
-   * resolution the coastline and the islands are most of the file for a line nobody plans against.
-   *
-   * One ring for both files rather than the same tolerance applied twice, because those are not the
-   * same thing: coarsening an already-coarse ring drops a few more points, and the drawn line would
-   * end up promising ground the registry declines. What is drawn is then that ring with the
-   * stretches a state border already covers removed -- a subset of it, so every drawn point is still
-   * a point the registry agrees with. See `trimToStates`.
+   * A state border here means a survey answers at full quality, canopy included; this one means
+   * only that the republisher might hold terrain. So it is drawn as the coarse ring with every
+   * stretch a state border already covers taken out -- a subset of the registry's own ring, which
+   * is what keeps the dashed line honest. See `trimToStates`.
    */
-  const germanyRing = coarsen(await germany())
+  const ring = germanyRing()
   const drawn = trimToStates(
-    germanyRing,
-    states.flatMap((f) => f.geometry.coordinates),
+    ring,
+    traced.flatMap((f) => f.geometry.coordinates),
     COARSE_TOLERANCE,
   )
   console.log(
-    `  drawn as ${drawn.length} chain(s), ${drawn.reduce((n, c) => n + c.length, 0)} of ` +
-      `${germanyRing.length} points -- the rest is already a state border`,
+    `\n== Germany\n  drawn as ${drawn.length} chain(s), ` +
+      `${drawn.reduce((n, c) => n + c.length, 0)} of ${ring.length} points -- ` +
+      'the rest is already a state border',
   )
   const features = [
-    ...states,
+    ...traced,
     {
       type: 'Feature' as const,
       properties: { name: 'Germany' },
@@ -423,20 +339,6 @@ async function main() {
     },
   ]
 
-  const coarse = [
-    ...states.map((f) => ({
-      name: f.properties.name,
-      rings: f.geometry.coordinates.map((r) => coarsen(r.map(([lon, lat]) => [lon!, lat!]))),
-    })),
-    { name: 'Germany', rings: [germanyRing] },
-  ]
-  const coarseText = JSON.stringify(coarse)
-  await writeFile(COARSE_OUT, `${coarseText}\n`)
-  console.log(
-    `wrote outlines.json: ${coarse
-      .map((c) => `${c.name} ${c.rings.reduce((n, r) => n + r.length, 0)}`)
-      .join(', ')} points, ${(coarseText.length / 1024).toFixed(1)} KB`,
-  )
   await mkdir(new URL('../web/public/', import.meta.url).pathname, { recursive: true })
   const text = JSON.stringify({ type: 'FeatureCollection', features })
   await writeFile(OUT, text)

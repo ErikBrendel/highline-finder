@@ -10,13 +10,26 @@ import { RIG_RATE } from './anchoring.js'
 const p = DEFAULT_PARAMS
 
 /**
+ * Where on Earth the fixtures below sit: a patch of Brandenburg, in the grid everything here uses.
+ *
+ * It matters now that it did not used to. A line's length is a ground distance and a UTM grid is
+ * not a ruler -- see `groundDistance` -- so a span measured at easting 150 is a span half a
+ * thousand kilometres west of the country, where the grid stretches by a third of a per cent.
+ * Every fixture is written in local metres from this corner, so the terrain builders and the
+ * samplers stay as readable as they were.
+ */
+const E0 = 400_000
+const N0 = 5_800_000
+const at = (e: number, n: number) => ({ e: E0 + e, n: N0 + n })
+
+/**
  * A flat plateau at 50 m with a canyon floor at `floor` between e=50 and e=250. `eastRim` lifts the
  * far side, which is what makes the A-frame do any work: with both rims level the choice of
  * attachment height is free.
  */
 function terrain(floor: number, canopy = 0, eastRim = 50): { ground: Grid; surface: Grid } {
   const make = (fn: (e: number) => number) => {
-    const g = Grid.filled(300, 300, 0, 300, 1)
+    const g = Grid.filled(300, 300, E0, N0 + 300, 1)
     for (let row = 0; row < 300; row++) {
       for (let col = 0; col < 300; col++) g.data[row * 300 + col] = fn(col + 0.5)
     }
@@ -32,8 +45,8 @@ const roofsAt = (...points: Pos[]): Scene => ({
 })
 
 describe('planLine', () => {
-  const a = { e: 45, n: 150 }
-  const b = { e: 255, n: 150 }
+  const a = at(45, 150)
+  const b = at(255, 150)
 
   it('measures a valid line and reports no violations', () => {
     const { ground, surface } = terrain(15)
@@ -55,7 +68,7 @@ describe('planLine', () => {
 
   it('reports offlevel instead of refusing a mismatched pair', () => {
     // Rims 8 m apart in height, far beyond what a 1.5 m A-frame range can level out.
-    const g = Grid.filled(300, 300, 0, 300, 1)
+    const g = Grid.filled(300, 300, E0, N0 + 300, 1)
     for (let row = 0; row < 300; row++) {
       for (let col = 0; col < 300; col++) {
         const e = col + 0.5
@@ -69,7 +82,7 @@ describe('planLine', () => {
 
   it('flags a span outside the length window without discarding it', () => {
     const { ground, surface } = terrain(15)
-    const r = planLine({ e: 45, n: 150 }, { e: 75, n: 150 }, ground, surface, p.sagRatio, p)!
+    const r = planLine(at(45, 150), at(75, 150), ground, surface, p.sagRatio, p)!
     expect(r.candidate.length).toBeCloseTo(30, 0)
     expect(r.violations.join(' ')).toMatch(/under the 50 m minimum/)
   })
@@ -82,7 +95,7 @@ describe('planLine', () => {
   })
 
   it('returns null where there is no elevation data', () => {
-    const empty = Grid.filled(300, 300, 0, 300, 1)
+    const empty = Grid.filled(300, 300, E0, N0 + 300, 1)
     expect(planLine(a, b, empty, empty, p.sagRatio, p)).toBeNull()
   })
 
@@ -114,7 +127,7 @@ describe('planLine', () => {
    */
   it('charges a climb far less than a mast, where there is a tree to climb', () => {
     const { ground } = terrain(15)
-    const wooded = Grid.filled(300, 300, 0, 300, 1)
+    const wooded = Grid.filled(300, 300, E0, N0 + 300, 1)
     for (let row = 0; row < 300; row++) {
       for (let col = 0; col < 300; col++) {
         const i = row * 300 + col
@@ -178,11 +191,14 @@ describe('planLine', () => {
 
 describe('planLine over ground the service has not covered', () => {
   /** Flat terrain with a hole punched through the middle of the span. */
-  const from = (h: (e: number) => number): Sampler => ({ sample: h, nearest: h })
+  const from = (h: (e: number) => number): Sampler => {
+    const local = (e: number) => h(e - E0)
+    return { sample: local, nearest: local }
+  }
   const flat = (e: number) => (e > 120 && e < 180 ? NaN : 50)
   const holed = (): Sampler => from(flat)
 
-  const ends = [{ e: 100, n: 100 }, { e: 200, n: 100 }] as const
+  const ends = [at(100, 100), at(200, 100)] as const
 
   it('refuses by default, which is what keeps the optimiser out of a gap', () => {
     const g = holed()
@@ -213,8 +229,11 @@ describe('planLine over ground the service has not covered', () => {
 
 
 describe('planLine with the anchors themselves unmeasured', () => {
-  const from = (h: (e: number) => number): Sampler => ({ sample: h, nearest: h })
-  const ends = [{ e: 100, n: 100 }, { e: 200, n: 100 }] as const
+  const from = (h: (e: number) => number): Sampler => {
+    const local = (e: number) => h(e - E0)
+    return { sample: local, nearest: local }
+  }
+  const ends = [at(100, 100), at(200, 100)] as const
   const tolerant = (g: Sampler) =>
     planLine(ends[0], ends[1], g, g, 0.05, p, null, {}, { tolerateGaps: true })
 
@@ -249,7 +268,7 @@ describe('planLine with the anchors themselves unmeasured', () => {
     expect(out.candidate.a.anchor).toBe(out.candidate.b.anchor)
     expect(out.candidate.a.anchor).toBeGreaterThanOrEqual(0)
     expect(out.candidate.a.anchor).toBeLessThanOrEqual(p.aFrameMax)
-    expect(out.candidate.length).toBeCloseTo(100, 6)
+    expect(out.candidate.length).toBeCloseTo(100, 1)
     // Unknown, not fine: a zero here would read as a measurement that came out clear.
     expect(Number.isNaN(out.candidate.clearanceMin)).toBe(true)
     expect(Number.isNaN(out.candidate.exposure)).toBe(true)

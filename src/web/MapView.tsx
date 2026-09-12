@@ -17,6 +17,7 @@ import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
 import { stackedUrl } from './stacked.js'
 import { reachable } from './hosts.js'
+import { stateBox } from './coverage.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
@@ -35,12 +36,24 @@ import { sideHalfWidthAt } from '../shared/profile.js'
 const LGB_ATTR = '&copy; GeoBasis-DE/LGB (dl-de/by-2.0)'
 const GEOSN_ATTR = '&copy; GeoBasis-DE/GeoSN (dl-de/by-2.0)'
 const LVERMGEO_ST_ATTR = '&copy; GeoBasis-DE/LVermGeo ST (dl-de/by-2.0)'
+const BKG_ATTR = '&copy; GeoBasis-DE/BKG (dl-de/by-2.0)'
+/** The surveys whose orthophotos the stack reaches for outside the three it started with. */
+const DOP_ATTR = [
+  '&copy; GeoBasis-DE/NRW (dl-de/zero-2.0)',
+  '&copy; Bayerische Vermessungsverwaltung (CC BY 4.0)',
+  '&copy; LGL-BW (dl-de/by-2.0)',
+  '&copy; GeoBasis-DE/LGLN (CC BY 4.0)',
+  '&copy; GDI-Th (dl-de/by-2.0)',
+  '&copy; GeoBasis-DE/LVermGeoRP (dl-de/by-2.0)',
+].join(' &middot; ')
 const S2_ATTR =
   '<a href="https://s2maps.eu" target="_blank" rel="noreferrer">Sentinel-2 cloudless</a> by EOX ' +
   '(modified Copernicus Sentinel data 2020, CC BY 4.0)'
 const OSM_ATTR = '&copy; OpenStreetMap contributors (ODbL)'
 /** Every survey whose imagery can appear in a stacked basemap, since any of them may be on screen. */
-const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, S2_ATTR].join(' &middot; ')
+const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, BKG_ATTR, DOP_ATTR, S2_ATTR].join(
+  ' &middot; ',
+)
 
 /**
  * Attribution for the data behind the measurements, shown whatever basemap is on.
@@ -67,10 +80,23 @@ const anyWms = (base: string, layer: string, crs = 'EPSG:3857') =>
   `&LAYERS=${layer}&STYLES=&CRS=${crs}&WIDTH=256&HEIGHT=256` +
   `&FORMAT=image/png&TRANSPARENT=true&BBOX={bbox-epsg-3857}`
 
-/** Where each survey has imagery: west, south, east, north. Only used to skip pointless requests. */
-const BB_BOX: [number, number, number, number] = [11.2, 51.3, 14.8, 53.6]
-const SN_BOX: [number, number, number, number] = [11.8, 50.1, 15.1, 51.7]
-const ST_BOX: [number, number, number, number] = [10.5, 50.9, 13.4, 53.1]
+/**
+ * Where each survey has imagery, read off the outlines rather than typed in. See `stateBox`.
+ *
+ * Brandenburg's service covers Berlin too, and Berlin is a hole in Brandenburg's outline, so the
+ * two boxes are merged rather than the city being left as a square of Sentinel-2 in the middle.
+ */
+const box = stateBox
+const BB_BOX = merge(box('Brandenburg'), box('Berlin'))
+const SN_BOX = box('Sachsen')
+const ST_BOX = box('Sachsen-Anhalt')
+
+function merge(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): [number, number, number, number] {
+  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]
+}
 
 /**
  * The three basemaps, each assembled from whatever survey covers the ground on screen.
@@ -91,8 +117,21 @@ const ORTHO = stackedUrl('ortho', {
      * Openly licensed and needs no key, which the federal orthophoto coverage does.
      */
     { url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg' },
+    /**
+     * Nine surveys' own orthophotos at twenty centimetres, each ending where its state does.
+     *
+     * Order among them does not matter -- no two overlap -- so they are listed as they were found.
+     * What matters is that they are all above Sentinel-2 and none of them is a fallback for
+     * another: a state without one shows the ten-metre imagery rather than a neighbour's.
+     */
     { url: anyWms('https://geodienste.sachsen.de/wms_geosn_dop-rgb/guest', 'sn_dop_020'), bbox: SN_BOX },
     { url: anyWms('https://geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_DOP_WMS_OpenData/guest', 'lsa_lvermgeo_dop20_2'), bbox: ST_BOX },
+    { url: anyWms('https://www.wms.nrw.de/geobasis/wms_nw_dop', 'nw_dop_rgb'), bbox: box('Nordrhein-Westfalen') },
+    { url: anyWms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', 'by_dop20c'), bbox: box('Bayern') },
+    { url: anyWms('https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_INSP_BW_Orthofoto_DOP20', 'OI.OrthoimageCoverage'), bbox: box('Baden-Württemberg') },
+    { url: anyWms('https://opendata.lgln.niedersachsen.de/doorman/noauth/dop_wms', 'ni_dop20'), bbox: box('Niedersachsen') },
+    { url: anyWms('https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP', 'th_dop'), bbox: box('Thüringen') },
+    { url: anyWms('https://geo4.service24.rlp.de/wms/rp_dop20.fcgi', 'rp_dop20'), bbox: box('Rheinland-Pfalz') },
     { url: wms('dop20c', 'bebb_dop20c'), bbox: BB_BOX },
   ],
 })
@@ -122,6 +161,29 @@ const ORTHO = stackedUrl('ortho', {
 const SHADE = stackedUrl('shade', {
   under: '#c3c3c3',
   layers: [
+    /**
+     * The whole country, underneath the three that are sharper.
+     *
+     * basemap.de's hillshade, from the federal DGM5, and the reason a line can now be planned in
+     * the Eifel against something other than blank grey. Five metres a pixel against the states'
+     * one, so it is softer -- and a great deal better than nothing, which is what the twelve states
+     * without a readable service had before.
+     *
+     * It needs no rebasing at all: measured over five stretches of Brandenburg, from the Spreewald
+     * to the Märkische Schweiz, it renders flat ground at exactly the same 195 and draws 1.16x the
+     * relief for the same hillside. So it is the one layer here whose flat grey was not a decision
+     * anybody had to make, and `contrast` is the whole of its correction.
+     *
+     * Chosen over `combshade`, which mixes slope shading into the hillshade: that one sits at 253
+     * and is a different kind of picture, far too pale to read against any of the state products.
+     */
+    {
+      url: anyWms(
+        'https://sgx.geodatenzentrum.de/wms_basemapde_schummerung',
+        'de_basemapde_web_raster_hillshade',
+      ),
+      contrast: 0.86,
+    },
     {
       url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'),
       bbox: SN_BOX,

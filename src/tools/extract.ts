@@ -8,7 +8,7 @@ import { join } from 'node:path'
  * The OpenStreetMap extract for one German state, downloaded once and kept.
  *
  * Shared by the two tools that read one: `npm run osm`, which builds the roads and water the app
- * ships with, and `npm run boundaries`, which traces the state outlines it draws. Both are run by
+ * ships with, and `npm run boundaries`, which traces the borders it draws. Both are run by
  * hand and rarely, and both would otherwise carry their own copy of this.
  *
  * Cached by presence rather than by age. An extract is a few hundred megabytes and a state border

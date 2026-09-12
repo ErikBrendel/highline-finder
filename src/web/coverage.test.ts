@@ -60,7 +60,7 @@ describe('nearState', () => {
   })
 
   it('has a margin bigger than the simplification it forgives', () => {
-    // outlines.json is cut at 2.5 km; a shortcut across a bend must not exclude real ground.
+    // states.json is cut at 2.5 km; a shortcut across a bend must not exclude real ground.
     expect(SOURCE_MARGIN).toBeGreaterThan(2500)
   })
 })

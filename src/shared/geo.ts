@@ -83,6 +83,42 @@ export function latticeProjector(
   }
 }
 
+/**
+ * What a metre of this grid is worth on the ground, at a given easting.
+ *
+ * A UTM grid is not a ruler. It is exact along two meridians either side of its centre and stretches
+ * everywhere else, by the square of the distance from the middle -- 0.04 % short on the central
+ * meridian, back to true near Leipzig, and 0.46 % long at Aachen. Brandenburg is close enough to the
+ * middle that this was never worth saying; an anchor in the Eifel is 640 km from it, and a 300 m
+ * span there measures 1.4 m longer on the grid than a tape would make it.
+ *
+ * From the easting alone and not from the longitude, because this is called once per candidate line
+ * and a projection would not be. The series is the standard one in `x/R`, and against a Vincenty
+ * geodesic it is within half a centimetre on a 300 m line anywhere in the country at any latitude
+ * -- which is a hundred times finer than the error it removes, and about a thousandth of the error
+ * in deciding by eye where an anchor goes.
+ */
+const K0 = 0.9996
+/** Mean radius of curvature about German latitudes. The series is flat enough not to mind. */
+const R = 6_381_000
+
+export function pointScale(e: number): number {
+  const x = (e - 500_000) / R
+  return K0 * (1 + (x * x) / 2 + ((x * x * x * x) * 5) / 24)
+}
+
+/**
+ * The distance between two points of this grid, in metres of ground rather than metres of grid.
+ *
+ * The one place the difference is allowed to matter. Everything else here works in grid metres and
+ * should: a window is a square of the grid, a station is a fraction along a segment of it, and a
+ * cell is a cell. What is physical is how long the line is -- which is what the webbing has to be,
+ * what the sag is a fraction of, and what every station is labelled with.
+ */
+export function groundDistance(ae: number, an: number, be: number, bn: number): number {
+  return Math.hypot(be - ae, bn - an) / pointScale((ae + be) / 2)
+}
+
 export function tileId(e: number, n: number): string {
   return `33${Math.floor(e / 1000)}-${Math.floor(n / 1000)}`
 }

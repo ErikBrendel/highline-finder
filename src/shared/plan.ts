@@ -12,7 +12,7 @@ import {
 import { lineKind, rigCost, rigRange, type Standing } from './anchoring.js'
 import type { Scene } from './scene.js'
 import type { Candidate, Params } from './types.js'
-import { toWgs84 } from './geo.js'
+import { toWgs84, groundDistance } from './geo.js'
 
 /** Id a planned line carries, so callers can distinguish it from a found candidate. */
 export const PLANNED_ID = 'custom'
@@ -146,7 +146,7 @@ export function planLine(
   const blind = Number.isNaN(measuredA) || Number.isNaN(measuredB)
   if (blind && !tolerateGaps) return null
 
-  const length = Math.hypot(b.e - a.e, b.n - a.n)
+  const length = groundDistance(a.e, a.n, b.e, b.n)
   if (length < 1) return null
 
   const [gA, gB] = blind ? standOn(a, b, measuredA, measuredB, ground) : [measuredA, measuredB]
