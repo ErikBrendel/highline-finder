@@ -16,8 +16,8 @@ import { cachedUrl } from './tileCache.js'
 import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
 import { stackedUrl } from './stacked.js'
-import { reachable } from './hosts.js'
 import { stateBox } from './coverage.js'
+import { FEDERAL_SHADE, ORTHO_SURVEYS, SHADE_SURVEYS, type SurveyLayer } from './surveys.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
@@ -45,6 +45,9 @@ const DOP_ATTR = [
   '&copy; GeoBasis-DE/LGLN (CC BY 4.0)',
   '&copy; GDI-Th (dl-de/by-2.0)',
   '&copy; GeoBasis-DE/LVermGeoRP (dl-de/by-2.0)',
+  '&copy; GeoBasis-DE/LVermGeo SH (CC BY 4.0)',
+  '&copy; LVGL-SL (dl-de/by-2.0)',
+  '&copy; Landesamt GeoInformation Bremen (CC BY 4.0)',
 ].join(' &middot; ')
 const S2_ATTR =
   '<a href="https://s2maps.eu" target="_blank" rel="noreferrer">Sentinel-2 cloudless</a> by EOX ' +
@@ -65,45 +68,33 @@ const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, BKG_ATTR, DOP_ATTR
  * shown. The strings match the basemap ones exactly so they collapse into one when both apply.
  */
 const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR]
-const wms = (path: string, layer: string) =>
-  anyWms(`https://isk.geobasis-bb.de/mapproxy/${path}/service/wms`, layer)
-
-/**
- * A WMS anywhere, in the shape MapLibre's raster template needs. Transparent, so stacks work.
- *
- * `crs` because not every service admits to knowing Web Mercator by its current name. Saxony-Anhalt
- * advertises only `EPSG:900913`, the deprecated alias, and answers `InvalidCRS` to the modern one --
- * same projection, same bounding box numbers, different label.
- */
-const anyWms = (base: string, layer: string, crs = 'EPSG:3857') =>
-  `${reachable(base)}${base.includes('?') ? '&' : '?'}SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap` +
-  `&LAYERS=${layer}&STYLES=&CRS=${crs}&WIDTH=256&HEIGHT=256` +
-  `&FORMAT=image/png&TRANSPARENT=true&BBOX={bbox-epsg-3857}`
-
 /**
  * Where each survey has imagery, read off the outlines rather than typed in. See `stateBox`.
  *
- * Brandenburg's service covers Berlin too, and Berlin is a hole in Brandenburg's outline, so the
- * two boxes are merged rather than the city being left as a square of Sentinel-2 in the middle.
+ * A survey that answers for more than one state gets the box around all of them: Brandenburg's
+ * covers Berlin too, and Berlin is a hole in Brandenburg's outline, so taking only Brandenburg's
+ * box would leave the city as a square of Sentinel-2 in the middle of its own survey.
  */
-const box = stateBox
-const BB_BOX = merge(box('Brandenburg'), box('Berlin'))
-const SN_BOX = box('Sachsen')
-const ST_BOX = box('Sachsen-Anhalt')
-
-function merge(
-  a: [number, number, number, number],
-  b: [number, number, number, number],
-): [number, number, number, number] {
-  return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])]
+function boxFor(states: string[]): [number, number, number, number] {
+  const boxes = states.map(stateBox)
+  return [
+    Math.min(...boxes.map((b) => b[0])),
+    Math.min(...boxes.map((b) => b[1])),
+    Math.max(...boxes.map((b) => b[2])),
+    Math.max(...boxes.map((b) => b[3])),
+  ]
 }
+
+/** One survey's layer, clipped to the ground it answers for. See surveys.ts. */
+const clipped = (l: SurveyLayer) => ({ ...l, bbox: boxFor(l.states) })
 
 /**
  * The three basemaps, each assembled from whatever survey covers the ground on screen.
  *
- * Bottom to top, broadest first. basemap.de is the whole country and is what stops any of these
- * from being blank outside the three states; over it go the state orthophotos and reliefs, each
- * ending where its own survey does.
+ * Bottom to top, broadest first. What covers the whole country goes in first and is what stops
+ * either of these from being blank anywhere; over it go the state layers, each ending where its own
+ * survey does. Which surveys those are is surveys.ts, so that the coverage map in the guide can
+ * colour a state from the same list this stack is built from.
  */
 const ORTHO = stackedUrl('ortho', {
   layers: [
@@ -117,22 +108,7 @@ const ORTHO = stackedUrl('ortho', {
      * Openly licensed and needs no key, which the federal orthophoto coverage does.
      */
     { url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg' },
-    /**
-     * Nine surveys' own orthophotos at twenty centimetres, each ending where its state does.
-     *
-     * Order among them does not matter -- no two overlap -- so they are listed as they were found.
-     * What matters is that they are all above Sentinel-2 and none of them is a fallback for
-     * another: a state without one shows the ten-metre imagery rather than a neighbour's.
-     */
-    { url: anyWms('https://geodienste.sachsen.de/wms_geosn_dop-rgb/guest', 'sn_dop_020'), bbox: SN_BOX },
-    { url: anyWms('https://geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_DOP_WMS_OpenData/guest', 'lsa_lvermgeo_dop20_2'), bbox: ST_BOX },
-    { url: anyWms('https://www.wms.nrw.de/geobasis/wms_nw_dop', 'nw_dop_rgb'), bbox: box('Nordrhein-Westfalen') },
-    { url: anyWms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', 'by_dop20c'), bbox: box('Bayern') },
-    { url: anyWms('https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_INSP_BW_Orthofoto_DOP20', 'OI.OrthoimageCoverage'), bbox: box('Baden-Württemberg') },
-    { url: anyWms('https://opendata.lgln.niedersachsen.de/doorman/noauth/dop_wms', 'ni_dop20'), bbox: box('Niedersachsen') },
-    { url: anyWms('https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP', 'th_dop'), bbox: box('Thüringen') },
-    { url: anyWms('https://geo4.service24.rlp.de/wms/rp_dop20.fcgi', 'rp_dop20'), bbox: box('Rheinland-Pfalz') },
-    { url: wms('dop20c', 'bebb_dop20c'), bbox: BB_BOX },
+    ...ORTHO_SURVEYS.map(clipped),
   ],
 })
 
@@ -140,81 +116,17 @@ const ORTHO = stackedUrl('ortho', {
  * The relief, with the flat-ground grey underneath it.
  *
  * Painted rather than left transparent because the shaded composites divide by that grey: ground
- * no survey has shaded has to come out unchanged, not black. That is what any ground outside these
- * three states gets, and it is `SHADE_BASELINE` written as a colour -- the two have to agree or
- * unshaded ground is quietly tinted.
+ * no survey has shaded has to come out unchanged, not black. It is `SHADE_BASELINE` written as a
+ * colour -- the two have to agree or unshaded ground is quietly tinted. Since the federal hillshade
+ * arrived there is very little ground left that sees it, which makes it a backstop rather than what
+ * most of the country is drawn on.
  *
- * All three disagree about two separate things, and each says so.
- *
- * What flat ground looks like: 195, 221 and 179 respectively, measured. Left alone, a state border
- * is a step in brightness across an unbroken field, and the composites below brighten or darken
- * everything the odd one out covers.
- *
- * And how much relief they draw for the same hillside, which agreeing about flat says nothing
- * about. Measured two ways that agree: on the ground the surveys share, since each renders a few
- * kilometres past its own border, and against a hillshade computed from one DGM across the whole
- * range of German terrain, which the shared ground could not give because all of it is flat. Saxony
- * draws about 1.9x Brandenburg's relief and Saxony-Anhalt about a third of it -- so Saxony's darks
- * are far heavier than any hillside warrants and Saxony-Anhalt is nearly a blank grey. Both are
- * scaled back onto Brandenburg's, which is the survey the dataset is in.
+ * Every product disagrees with every other about two separate things -- what grey flat ground is,
+ * and how far from it a given hillside is drawn -- and each says so where it is described.
  */
 const SHADE = stackedUrl('shade', {
   under: '#c3c3c3',
-  layers: [
-    /**
-     * The whole country, underneath the three that are sharper.
-     *
-     * basemap.de's hillshade, from the federal DGM5, and the reason a line can now be planned in
-     * the Eifel against something other than blank grey. Five metres a pixel against the states'
-     * one, so it is softer -- and a great deal better than nothing, which is what the twelve states
-     * without a readable service had before.
-     *
-     * It needs no rebasing at all: measured over five stretches of Brandenburg, from the Spreewald
-     * to the Märkische Schweiz, it renders flat ground at exactly the same 195 and draws 1.16x the
-     * relief for the same hillside. So it is the one layer here whose flat grey was not a decision
-     * anybody had to make, and `contrast` is the whole of its correction.
-     *
-     * Chosen over `combshade`, which mixes slope shading into the hillshade: that one sits at 253
-     * and is a different kind of picture, far too pale to read against any of the state products.
-     */
-    {
-      url: anyWms(
-        'https://sgx.geodatenzentrum.de/wms_basemapde_schummerung',
-        'de_basemapde_web_raster_hillshade',
-      ),
-      contrast: 0.86,
-    },
-    {
-      url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'),
-      bbox: SN_BOX,
-      baseline: 0xdd,
-      contrast: 0.52,
-    },
-    /**
-     * Saxony-Anhalt, which took the longest to find because it answers to the wrong name.
-     *
-     * Two things make it unlike the other two. It only knows Web Mercator as `EPSG:900913`, so it
-     * is asked for that; and it renders itself at 80 % alpha, so it is forced opaque -- see
-     * `makeOpaque`. Its relief is derived from the DGM5 at 25 m2 a pixel, coarser than Brandenburg's
-     * and visible as such at the border, which is a difference in detail rather than in brightness
-     * and is the honest way for it to show.
-     */
-    {
-      url: anyWms(
-        'https://geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_DGM5_Relief_OpenData/guest',
-        'lvermgeo_dgm5_schummerung',
-        'EPSG:900913',
-      ),
-      bbox: ST_BOX,
-      baseline: 0xb3,
-      // The one factor that is resolution-dependent, since this is a DGM5 product against two DGM1
-      // ones: measured 2.7 from ten metres a pixel out, rising as far as 6.6 at two, where it has
-      // no detail left to show and the relief hardly matters. Fitted where relief is read.
-      contrast: 3.05,
-      opaque: true,
-    },
-    { url: wms('dgm', 'dgmshade'), bbox: BB_BOX },
-  ],
+  layers: [FEDERAL_SHADE, ...SHADE_SURVEYS.map(clipped)],
 })
 
 const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
@@ -897,7 +809,16 @@ export function MapView({
     }
     const m = new maplibregl.Map({
       container: el.current,
-      attributionControl: { customAttribution: DATA_ATTRIBUTION },
+      /**
+       * Always the button, never the bar.
+       *
+       * MapLibre collapses the credits behind an "i" only on a narrow screen, and left to itself a
+       * desktop map spreads them across the bottom edge. That was fine at four surveys. There are
+       * now more than a dozen -- every state orthophoto that might be on screen, plus the reliefs,
+       * plus OpenStreetMap -- and the strip ran the width of the window, over the map, permanently.
+       * Compact keeps every credit a click away at every width, which is what the licences ask for.
+       */
+      attributionControl: { customAttribution: DATA_ATTRIBUTION, compact: true },
       style: {
         version: 8,
         sources: Object.fromEntries(

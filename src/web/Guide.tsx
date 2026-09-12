@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRemembered } from './remembered.js'
+import { CoverageMap } from './CoverageMap.js'
+import type { Region } from '../shared/types.js'
 
 /**
  * The panel that says what this is, open until it is closed.
@@ -22,7 +24,7 @@ export function useGuide(): { open: boolean; show: () => void; close: () => void
   return { open, show: () => setOpen(true), close: () => setOpen(false) }
 }
 
-export function Guide({ onClose }: { onClose: () => void }) {
+export function Guide({ onClose, regions }: { onClose: () => void; regions: Region[] | null }) {
   /**
    * Kept on the page until it has finished leaving.
    *
@@ -82,13 +84,13 @@ export function Guide({ onClose }: { onClose: () => void }) {
 
           <h2><span className="ico">🛰️</span>The data</h2>
           <ul>
-            <li>Terrain, canopy and buildings, published free and open by the state.</li>
+            <li>Terrain, canopy and buildings, published free and open by the state surveys.</li>
             <li>
-              Searched in Berlin and Brandenburg only &mdash; the solid outlines are where that
-              stops. Past them you can still place two anchors by hand and have the line measured,
-              out to the dashed line, though with less to measure it against.
+              Anywhere in Germany you can place two anchors by hand and have the span measured
+              against the real ground. What differs is how much there is to measure it against:
             </li>
           </ul>
+          <CoverageMap regions={regions} />
 
           <h2><span className="ico">🗺️</span>On the map</h2>
           <ul>

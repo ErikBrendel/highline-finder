@@ -1646,7 +1646,7 @@ export function App() {
         </div>
       </div>
 
-      {guide.open && <Guide onClose={guide.close} />}
+      {guide.open && <Guide onClose={guide.close} regions={meta?.regions ?? null} />}
     </>
   )
 }

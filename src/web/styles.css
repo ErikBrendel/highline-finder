@@ -1218,3 +1218,86 @@ header[data-fit~='notitle'] h1 { display: none; }
 .chartfail { display: flex; flex-direction: column; gap: 6px; max-width: 46ch; text-align: left; }
 .chartfail strong { color: var(--text); }
 .chartfail em { font-style: normal; opacity: 0.65; line-height: 1.45; }
+
+/* ------------------------------------------------------------------- the coverage map in the guide */
+
+/*
+ * Map beside its caption on a desktop panel, stacked on a phone. The map keeps its aspect ratio
+ * either way, so the caption never squeezes the country into a stripe.
+ */
+.coverage {
+  display: grid;
+  grid-template-columns: 236px 1fr;
+  gap: 14px;
+  align-items: start;
+  margin: 10px 0 4px;
+}
+.coverage svg { width: 100%; height: auto; display: block; }
+
+/*
+ * Three fills for three answers, and one rule for the shapes themselves.
+ *
+ * Colour carries the whole message here, so it is the saturated end of the palette rather than the
+ * muted one the panel is otherwise drawn in -- a state has to be findable at a glance from across
+ * the page. The stroke is the panel background, which is what separates two neighbours in the same
+ * tier without drawing a border nobody is reading.
+ */
+.coverage .state path { stroke: var(--panel); stroke-width: 0.8; }
+/*
+ * The city states' dots, outlined against whatever they sit in rather than against the panel.
+ *
+ * Berlin is the same colour as the Brandenburg around it and Bremen the same as Lower Saxony, so a
+ * dot in the background colour reads as a hole punched in a state rather than as a state of its
+ * own. A pale ring says "this small thing is separate", which is the only thing the dot is for.
+ */
+.coverage .state circle { stroke: rgba(230, 232, 236, 0.6); stroke-width: 1.1; }
+.coverage .state { cursor: pointer; outline: none; }
+.coverage .state[data-tier='searched'] > * { fill: #38bdf8; }
+.coverage .state[data-tier='measured'] > * { fill: #3f7d3f; }
+.coverage .state[data-tier='terrain'] > * { fill: #4a5162; }
+.coverage .state:hover > *,
+.coverage .state[data-on] > * { filter: brightness(1.45); }
+.coverage .state[data-on] path,
+.coverage .state[data-on] circle { stroke: var(--text); stroke-width: 1.1; }
+.coverage .state:focus-visible > * { stroke: var(--accent); stroke-width: 1.4; }
+
+/* The caption. Two columns so the labels line up and the eye runs down what is present. */
+.coverage .detail b { color: var(--text); font-size: 12px; }
+.coverage .detail ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.coverage .detail li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.4;
+  /* Absent is the quiet state, not the loud one: what a state has should be what stands out. */
+  opacity: 0.5;
+}
+.coverage .detail li[data-on] { opacity: 1; }
+.coverage .detail li[data-on] span:last-child { color: var(--text); }
+.coverage .detail li span:last-child { text-align: right; }
+
+.coverage .legend {
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+}
+.coverage .legend li { display: flex; align-items: baseline; gap: 5px; margin: 0; }
+.coverage .legend i {
+  width: 9px; height: 9px; border-radius: 2px; flex: none; align-self: center;
+}
+.coverage .legend i[data-tier='searched'] { background: #38bdf8; }
+.coverage .legend i[data-tier='measured'] { background: #3f7d3f; }
+.coverage .legend i[data-tier='terrain'] { background: #4a5162; }
+
+@media (max-width: 560px) {
+  .coverage { grid-template-columns: 1fr; justify-items: center; }
+  .coverage svg { width: 200px; }
+  .coverage .detail { width: 100%; }
+}
