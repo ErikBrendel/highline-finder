@@ -106,8 +106,14 @@ const ORTHO = stackedUrl('ortho', {
      * a pixel against the surveys' twenty centimetres, so it is scenery rather than something to
      * site an anchor on -- but it is unmistakably the ground, which is the whole job down here.
      * Openly licensed and needs no key, which the federal orthophoto coverage does.
+     *
+     * Eighteen is where EOX stops holding tiles, though its capabilities advertise a matrix set
+     * down to twenty-one. Past that it is blown up rather than asked. See `maxzoom`.
      */
-    { url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg' },
+    {
+      url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',
+      maxzoom: 18,
+    },
     ...ORTHO_SURVEYS.map(clipped),
   ],
 })

@@ -52,6 +52,16 @@ export interface StackLayer {
    * Saxony-Anhalt's relief arrives at 80 % alpha everywhere it has ground. See `makeOpaque`.
    */
   opaque?: boolean
+  /**
+   * The deepest zoom this service actually holds tiles for, for a `{z}/{x}/{y}` layer.
+   *
+   * Above it the ancestor tile is fetched and the right quarter of it blown up, which is what a
+   * plain raster source would do by itself. Asking anyway is not harmless: EOX stops at 18 and
+   * answers 404 past it, and a stack has no way to tell that from a survey being down, so every
+   * tile of every deeper view reported a failed basemap fetch. A WMS needs none of this -- it
+   * renders whatever box it is handed.
+   */
+  maxzoom?: number
 }
 
 export interface Stack {
@@ -100,6 +110,30 @@ export function touches(layer: StackLayer, bbox: string): boolean {
   return west <= le && east >= lw && south <= ln && north >= ls
 }
 
+/**
+ * Which tile of a layer to ask for, and which part of it this tile is.
+ *
+ * Identity for anything without a `maxzoom`, and for anything at or above one. Past it the request
+ * walks up to the deepest level the service holds and the answer is the fraction of that tile the
+ * wanted one occupies -- offsets and size as fractions of its width, all exact powers of two.
+ */
+export function ancestor(
+  layer: StackLayer,
+  z: number,
+  x: number,
+  y: number,
+): { z: number; x: number; y: number; crop: [number, number, number] } {
+  const over = layer.maxzoom !== undefined && z > layer.maxzoom ? z - layer.maxzoom : 0
+  const part = 1 / (1 << over)
+  const mask = (1 << over) - 1
+  return {
+    z: z - over,
+    x: x >> over,
+    y: y >> over,
+    crop: [(x & mask) * part, (y & mask) * part, part],
+  }
+}
+
 async function bitmap(url: string, signal: AbortSignal): Promise<ImageBitmap | null> {
   try {
     return await createImageBitmap(new Blob([await fetchCached(url, signal)]))
@@ -124,11 +158,15 @@ async function paint(url: string, signal: AbortSignal): Promise<OffscreenCanvas>
   if (!stack) throw new Error(`no stacked basemap called ${id}`)
   // The bounding box is the last segment and carries commas of its own, so it is rejoined.
   const bbox = rest.join('/')
-  const wanted = stack.layers.filter((l) => touches(l, bbox))
+  const [zn, xn, yn] = [Number(z), Number(x), Number(y)]
+  const wanted = stack.layers
+    .filter((l) => touches(l, bbox))
+    .map((layer) => {
+      const { z: az, x: ax, y: ay, crop } = ancestor(layer, zn, xn, yn)
+      return { layer, crop, url: fill(layer.url, String(az), String(ax), String(ay), bbox) }
+    })
 
-  const tiles = await Promise.all(
-    wanted.map((l) => bitmap(fill(l.url, z!, x!, y!, bbox), signal)),
-  )
+  const tiles = await Promise.all(wanted.map((w) => bitmap(w.url, signal)))
   const size = tiles.find(Boolean)?.width ?? 256
   const canvas = new OffscreenCanvas(size, size)
   const ctx = canvas.getContext('2d')
@@ -139,12 +177,19 @@ async function paint(url: string, signal: AbortSignal): Promise<OffscreenCanvas>
   }
   tiles.forEach((tile, i) => {
     if (!tile) return
-    const layer = wanted[i]!
+    const { layer, crop: part } = wanted[i]!
+    /** The part of the fetched tile this one is, once an over-zoomed layer has been blown up. */
+    const crop = [
+      part[0] * tile.width,
+      part[1] * tile.width,
+      part[2] * tile.width,
+      part[2] * tile.width,
+    ] as const
     const rebase =
       (layer.baseline !== undefined && layer.baseline !== SHADE_BASELINE) ||
       (layer.contrast !== undefined && layer.contrast !== 1)
     if (!rebase && !layer.opaque) {
-      ctx.drawImage(tile, 0, 0, size, size)
+      ctx.drawImage(tile, ...crop, 0, 0, size, size)
       return
     }
     // Fixed up in its own scratch canvas, so reading its pixels back does not pick up whatever this
@@ -152,7 +197,7 @@ async function paint(url: string, signal: AbortSignal): Promise<OffscreenCanvas>
     const own = new OffscreenCanvas(size, size)
     const octx = own.getContext('2d')
     if (!octx) return
-    octx.drawImage(tile, 0, 0, size, size)
+    octx.drawImage(tile, ...crop, 0, 0, size, size)
     const pixels = octx.getImageData(0, 0, size, size)
     if (rebase) normaliseShade(pixels.data, layer.baseline ?? SHADE_BASELINE, SHADE_BASELINE, layer.contrast)
     if (layer.opaque) makeOpaque(pixels.data)
