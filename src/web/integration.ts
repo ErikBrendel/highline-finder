@@ -1,7 +1,7 @@
-import { STATES, nearState } from './coverage.js'
+import { STATES } from './coverage.js'
 import { SOURCES, hoehendaten } from './sources.js'
 import { ORTHO_SURVEYS, SHADE_SURVEYS, statesCovered } from './surveys.js'
-import { toUtm33, toWgs84 } from '../shared/geo.js'
+import { toUtm33 } from '../shared/geo.js'
 import type { Region } from '../shared/types.js'
 
 /**
@@ -82,25 +82,100 @@ const ORTHO_STATES = statesCovered(ORTHO_SURVEYS)
 const SHADE_STATES = statesCovered(SHADE_SURVEYS)
 
 /**
- * Which states the pipeline actually owns lines in, from the regions it reports.
+ * Which states the search actually covered, from the regions the dataset reports.
  *
- * `owns25833` rather than the bounding box, since two neighbouring chunks overlap in what they load
- * and tile exactly in what they own -- the same distinction the coverage outlines on the map draw.
+ * Covered, not touched. The pipeline runs on an 8 km chunk grid laid over Brandenburg's bounding
+ * box, so the chunks along every border own ground on the far side of it -- and Brandenburg's own
+ * survey renders a kilometre or two past its state line, so those chunks really do find lines
+ * there. Attributing a state by whether any searched ground or any found line falls inside it
+ * therefore credits four of its neighbours: 132 lines in Saxony, 128 in Mecklenburg-Vorpommern, 12
+ * in Lower Saxony. All of them real, none of them a reason to tell someone that Saxony has been
+ * searched -- nobody browsing Saxony would find them.
+ *
+ * So the question asked is what share of the *state* the search covered, which is the thing the map
+ * claims. Measured, that separates cleanly with no threshold worth arguing about: Berlin and
+ * Brandenburg come out at 100 %, and the next state down is Mecklenburg-Vorpommern at 7 %.
+ *
  * Null until the dataset has loaded, because claiming nothing is searched would be a worse guess
  * than admitting to not knowing yet.
  */
-export function searchedStates(regions: Region[] | null): Set<string> | null {
+const COVERED = 0.5
+
+/**
+ * How coarsely a state is sampled to answer that, in degrees -- about three kilometres.
+ *
+ * Fine enough that Berlin, the smallest state anything has been searched in, still gets a couple of
+ * dozen samples, and coarse enough that all sixteen together are a few thousand lookups rather than
+ * a hundred thousand.
+ */
+const SAMPLE = 0.04
+
+/** Searched ground as a set of keys, so a sample costs a lookup instead of scanning 560 boxes. */
+const SEARCH_CELL = 2000
+
+export function searchedStates(regions: Pick<Region, 'owns25833'>[] | null): Set<string> | null {
   if (!regions) return null
-  const found = new Set<string>()
+  const cells = new Set<string>()
+  const reach = { minE: Infinity, minN: Infinity, maxE: -Infinity, maxN: -Infinity }
   for (const r of regions) {
     const box = r.owns25833
     if (!box) continue
-    const { lat, lon } = toWgs84((box.minE + box.maxE) / 2, (box.minN + box.maxN) / 2)
-    for (const s of STATES) {
-      if (s.code !== 'DE' && nearState(s.name, lon, lat, 0)) found.add(s.name)
+    reach.minE = Math.min(reach.minE, box.minE)
+    reach.minN = Math.min(reach.minN, box.minN)
+    reach.maxE = Math.max(reach.maxE, box.maxE)
+    reach.maxN = Math.max(reach.maxN, box.maxN)
+    for (let e = Math.floor(box.minE / SEARCH_CELL); e <= Math.floor(box.maxE / SEARCH_CELL); e++) {
+      for (let n = Math.floor(box.minN / SEARCH_CELL); n <= Math.floor(box.maxN / SEARCH_CELL); n++) {
+        cells.add(`${e}_${n}`)
+      }
     }
   }
+
+  const found = new Set<string>()
+  for (const s of STATES) {
+    if (s.code === 'DE') continue
+    const points = s.rings.flat()
+    const lons = points.map((p) => p[0]!)
+    const lats = points.map((p) => p[1]!)
+    // Nothing searched anywhere near this state, so none of it is: skipped before the sampling
+    // rather than sampled to nought. Fourteen of sixteen take this exit, which is the difference
+    // between a third of a second and nothing noticeable when the guide opens.
+    if (!overlaps(reach, lons, lats)) continue
+    let inside = 0
+    let hit = 0
+    for (let lon = Math.min(...lons); lon <= Math.max(...lons); lon += SAMPLE) {
+      for (let lat = Math.min(...lats); lat <= Math.max(...lats); lat += SAMPLE) {
+        if (!s.rings.some((r) => enclosedBy(r, lon, lat))) continue
+        inside++
+        const [e, n] = toUtm33(lat, lon)
+        if (cells.has(`${Math.floor(e / SEARCH_CELL)}_${Math.floor(n / SEARCH_CELL)}`)) hit++
+      }
+    }
+    if (inside && hit / inside >= COVERED) found.add(s.name)
+  }
   return found
+}
+
+/** Whether a state's degree bounds reach the searched ground at all. Corners projected, not edges. */
+function overlaps(
+  reach: { minE: number; minN: number; maxE: number; maxN: number },
+  lons: number[],
+  lats: number[],
+): boolean {
+  const corners = [
+    toUtm33(Math.min(...lats), Math.min(...lons)),
+    toUtm33(Math.min(...lats), Math.max(...lons)),
+    toUtm33(Math.max(...lats), Math.min(...lons)),
+    toUtm33(Math.max(...lats), Math.max(...lons)),
+  ]
+  const es = corners.map((c) => c[0])
+  const ns = corners.map((c) => c[1])
+  return (
+    Math.max(...es) >= reach.minE &&
+    Math.min(...es) <= reach.maxE &&
+    Math.max(...ns) >= reach.minN &&
+    Math.min(...ns) <= reach.maxN
+  )
 }
 
 /** Every state, in the order the map should read them. See {@link StateFacts}. */
