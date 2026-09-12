@@ -462,7 +462,7 @@ lattice. `blitGeoTiff` already takes a `project` callback for exactly this, but 
 - `buildings.ts` is Brandenburg's LoD1. Not blocking: `URBAN_AREAS` is empty, so a natural-only run
   never asks.
 - Already fine: `extract.ts` downloads any state's OpenStreetMap extract and both are cached, and
-  boundaries.json and states.json already carry both states.
+  boundaries.json and states.json already carry all sixteen.
 
 **The order that avoids the blocker.** Run named chunks rather than a state sweep. The chunk
 mechanism already works with no areas of interest at all, so a Saxony run needs no coarse pass, and
@@ -515,6 +515,14 @@ was nobody's decision. Five metres a pixel against the states' one.
 Hesse, which publish theirs somewhere a browser-side search did not reach, and
 Mecklenburg-Vorpommern, which is reachable and unusable: it renders its own credit into the corner
 of every image, so on 256 px tiles the notice tiles across the whole map. Its relief does the same.
+
+**All sixteen borders are drawn**, from BKG's VG250 at 1:250 000 rather than traced out of
+OpenStreetMap extracts -- one request against a few hundred megabytes a state, and closed rings,
+which the extracts could not give because Geofabrik clips them at the state line. Solid where the
+survey answers with canopy, dashed where the ground comes from the republisher, so the line says
+which of the two you are over. They earn their place now that every basemap is a stack of state
+surveys: the imagery changes at a state line everywhere, and without the border that seam reads as
+a rendering fault.
 
 **Two things were found and deliberately not taken.** NRW's 1 m relief is clean, sharp and better
 than the federal layer, but it renders flat ground at 128 with the full range either side; the

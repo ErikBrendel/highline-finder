@@ -75,6 +75,33 @@ describe('integration', () => {
  * neighbours, and the guide told people Saxony and Lower Saxony had been searched. Read against
  * the dataset rather than a fixture, because a fixture is exactly what missed it.
  */
+/**
+ * What the map's borders are filtered by.
+ *
+ * MapView splits boundaries.json into a solid layer and a dashed one by matching the feature's name
+ * against the states a survey measures canopy in. Both lists come from the BKG, so they agree --
+ * but the match is a string compare, and one of them spelt differently would not fail anywhere: it
+ * would quietly draw every border in the country as the weaker promise.
+ */
+const BORDERS = new URL('public/boundaries.json', import.meta.url).pathname
+
+describe('boundaries.json', () => {
+  const drawn = (
+    JSON.parse(readFileSync(BORDERS, 'utf8')) as {
+      features: { properties: { name: string } }[]
+    }
+  ).features.map((f) => f.properties.name)
+
+  it('draws every state and calls each what the outlines call it', () => {
+    const known = STATES.filter((s) => s.code !== 'DE').map((s) => s.name)
+    expect(drawn.sort()).toEqual([...known].sort())
+  })
+
+  it('has a border to draw solid for every state whose canopy is measured', () => {
+    for (const f of integration(null).filter((f) => f.canopy)) expect(drawn).toContain(f.name)
+  })
+})
+
 const META = new URL('public/meta.json', import.meta.url).pathname
 const meta = existsSync(META)
   ? (JSON.parse(readFileSync(META, 'utf8')) as { regions: Region[] })

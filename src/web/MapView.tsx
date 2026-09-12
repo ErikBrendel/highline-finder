@@ -18,6 +18,7 @@ import { shadedUrl } from './shaded.js'
 import { stackedUrl } from './stacked.js'
 import { stateBox } from './coverage.js'
 import { FEDERAL_SHADE, ORTHO_SURVEYS, SHADE_SURVEYS, type SurveyLayer } from './surveys.js'
+import { integration } from './integration.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
@@ -66,8 +67,12 @@ const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, BKG_ATTR, DOP_ATTR
  * view -- while both datasets were still deciding what every line was worth. Both licences require
  * naming the source wherever the data is shown, and a line's clearance figure is the data being
  * shown. The strings match the basemap ones exactly so they collapse into one when both apply.
+ *
+ * The BKG credit is here rather than only under the hillshade because the state borders are drawn
+ * whatever the basemap is, and they are VG250 -- the survey's own boundary dataset. See
+ * `npm run boundaries`.
  */
-const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR]
+const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR, BKG_ATTR]
 /**
  * Where each survey has imagery, read off the outlines rather than typed in. See `stateBox`.
  *
@@ -136,6 +141,16 @@ const SHADE = stackedUrl('shade', {
 })
 
 const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+
+/**
+ * The states a survey answers for with a surface model, which is what a solid border means.
+ *
+ * Derived, not listed: the same reading of `SOURCES` the coverage map in the guide colours from, so
+ * a state that gains or loses a service changes both at once. See integration.ts.
+ */
+const CANOPY_STATES = integration(null)
+  .filter((f) => f.canopy)
+  .map((f) => f.name)
 
 /** The three maps the slider is labelled with, and which its whole numbers land on. */
 export const BASEMAPS = [
@@ -1030,40 +1045,45 @@ export function MapView({
       })
 
       /**
-       * Where the answers stop, always on.
+       * All sixteen state borders, always on.
        *
-       * Not a debug view and not a filter: everything in this dataset is inside Brandenburg, so its
-       * border is where the found lines end -- and the hole in the middle of it is Berlin, which the
-       * city model does not cover, so a line there is natural whatever the urban rectangles say.
-       * Saxony and Saxony-Anhalt are drawn for what a planned line can measure rather than what the
-       * search found. All of it is context you want on screen without having asked for it.
+       * Not a debug view and not a filter. Every basemap here is a stack of state surveys, so what
+       * is drawn changes at a state line everywhere in the country -- twenty-centimetre imagery to
+       * Sentinel-2's ten metres, a one-metre relief to basemap.de's five. Without the border that
+       * seam reads as a rendering fault; with it, it is a fact about who publishes what. It is also
+       * where the found lines end: everything in this dataset is inside Brandenburg, and the hole
+       * in the middle of it is Berlin, which the city model does not cover, so a line there is
+       * natural whatever the urban rectangles say.
        *
-       * Two layers, because the outlines say two different things. A state border is a survey that
-       * answers here at full quality; Germany is only the ground the republisher might hold, terrain
-       * and no canopy, and it is Geofabrik's clipping polygon rather than the political border. So
-       * it is drawn dashed and fainter -- an edge that is approximate, and a promise that is weaker.
+       * Two layers, because the borders say two different things. Solid is a survey that answers
+       * here at full quality, canopy included -- the five states with their own coverage service.
+       * Dashed and fainter is terrain and nothing about what stands on it, which is what the other
+       * eleven get from the republisher: the same line, a weaker promise. Which states are which is
+       * read off the sources rather than listed here, so it cannot drift from them.
        *
-       * Loaded rather than bundled, and small enough not to care, simplified by `npm run boundaries`.
-       * A failure is left silent, which is the one place in this file that is right -- the border is
-       * context, and a map that refuses to draw because it could not decorate itself would be worse
-       * than one without the decoration.
+       * Loaded rather than bundled, simplified by `npm run boundaries`. A failure is left silent,
+       * which is the one place in this file that is right -- the border is context, and a map that
+       * refuses to draw because it could not decorate itself would be worse than one without the
+       * decoration.
        */
       m.addSource('borders', {
         type: 'geojson',
         data: { type: 'FeatureCollection', features: [] },
       })
+      const measured: maplibregl.FilterSpecification =
+        ['in', ['get', 'name'], ['literal', CANOPY_STATES]]
       m.addLayer({
         id: 'borders',
         type: 'line',
         source: 'borders',
-        filter: ['!=', ['get', 'name'], 'Germany'],
+        filter: measured,
         paint: { 'line-color': '#cbd5e1', 'line-width': 3, 'line-opacity': 0.55 },
       })
       m.addLayer({
-        id: 'borders-outer',
+        id: 'borders-terrain',
         type: 'line',
         source: 'borders',
-        filter: ['==', ['get', 'name'], 'Germany'],
+        filter: ['!', measured],
         paint: {
           'line-color': '#cbd5e1',
           'line-width': 2,
