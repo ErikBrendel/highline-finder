@@ -44,6 +44,25 @@ const memIndex = new Map<string, Entry>()
 let memBytes = 0
 let dbPromise: Promise<IDBDatabase | null> | null = null
 
+/**
+ * Somewhere other than IndexedDB to keep the bytes, for the one caller with no browser.
+ *
+ * `npm run slackmap` measures dozens of real lines through this same source registry, and a
+ * hoehendaten tile is two to four megabytes with twelve hundred an hour to go round. Uncached that
+ * is most of a gigabyte re-fetched on every run, off a shared service, to learn nothing new. So the
+ * tool hands this a directory and the elevation path caches exactly as the browser's does.
+ */
+export interface CacheStore {
+  read(key: string): Promise<ArrayBuffer | null>
+  write(key: string, bytes: ArrayBuffer): Promise<void>
+}
+
+let store: CacheStore | null = null
+
+export const useCacheStore = (s: CacheStore | null): void => {
+  store = s
+}
+
 /** A cache read that failed is a cache miss, and the fetch behind it still has to happen. */
 function cacheMiss(e: unknown): null {
   report('reading a tile from the cache', e)
@@ -91,6 +110,7 @@ function db(): Promise<IDBDatabase | null> {
 }
 
 async function read(url: string): Promise<ArrayBuffer | null> {
+  if (store) return store.read(url)
   const d = await db()
   // Awaiting the open before consulting memIndex matters: on a cold start the index is empty until
   // the database has been read, so checking first would report a miss for every cached tile.
@@ -119,6 +139,7 @@ async function evict(d: IDBDatabase): Promise<void> {
 }
 
 async function write(url: string, bytes: ArrayBuffer): Promise<void> {
+  if (store) return store.write(url, bytes)
   const d = await db()
   if (!d) return
   const entry: Entry = { size: bytes.byteLength, at: Date.now() }

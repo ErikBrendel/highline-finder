@@ -15,5 +15,10 @@
 const FUSSY = 'https://geodatenportal.sachsen-anhalt.de'
 export const VIA_DEV = '/via/st'
 
+/**
+ * Optional, because Node has no `import.meta.env` at all and the tools import this transitively:
+ * `npm run slackmap` measures lines through the same source registry the browser uses, and there
+ * neither the dev server nor CORS exists, so the untouched URL is the right one.
+ */
 export const reachable = (url: string): string =>
-  import.meta.env.DEV && url.startsWith(FUSSY) ? VIA_DEV + url.slice(FUSSY.length) : url
+  import.meta.env?.DEV && url.startsWith(FUSSY) ? VIA_DEV + url.slice(FUSSY.length) : url
