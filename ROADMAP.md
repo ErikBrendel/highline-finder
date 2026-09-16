@@ -90,6 +90,21 @@ anchors only, one AOI, static viewer.
   does not put the walker on the ground. That is computable from span, height and backup slack, and
   would turn the honest-but-useless "all of these are low highlines" into a per-candidate figure
   for how much backup tension a site demands.
+- **Backup fall depth as a profile overlay.** The ISA hosts a backup fall simulator
+  (<https://data.slacklineinternational.org/publications/highline/backup-fall/>, embedded from
+  <https://github.com/AugustinMoinat/BackupFall-html-js>) that takes a webbing setup, a tension and
+  a walker and returns how far below the line the fall bottoms out. Its idea of the ground is one
+  flat number — its own form asks for "the height of the anchors relative to this obstacle" — which
+  is exactly the half of the problem this app already has measured. So the fall depth belongs on the
+  profile chart as a second, deeper line, shaded where it meets the terrain: it knows how far you
+  drop, we know what is underneath, and neither alone answers where along the span a mainline
+  failure actually kills you. Geometrically it is a temporary sag, so the existing sag control and
+  `maxSagRatio` machinery already do the evaluation — the cheap first version is a single "fall
+  depth" input the user reads off the simulator, with no code taken from it. Two things to settle
+  before that: the repo carries **no licence**, so nothing may be vendored or ported without asking
+  the author (augustin@slacklineinternational.org, an ISA address, and the README invites contact),
+  and the model is **unvalidated by its own README** — linear webbing stretch, no energy loss — so
+  its curve must read as a model and never as a sibling of the measured band.
 - **Anchor loads.** Report the tension a candidate implies, which is what decides whether the
   anchors are adequate.
 
