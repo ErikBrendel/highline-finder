@@ -70,13 +70,27 @@ const CACHE = new URL('../../data/cache/tiles/', import.meta.url).pathname
 /**
  * How far either anchor may move from its pin, in metres.
  *
- * "Roughly this spot", which is all a map click promises. Wide enough to step off a cliff face onto
- * the edge above it -- the error being corrected for -- and narrow enough that what comes back is
- * still recognisably the reported line rather than a better one nearby. How far each end actually
- * travelled is reported per line, so a run that spent the whole budget is visible rather than
- * flattering.
+ * "Roughly this spot", which is more than a map click promises and deliberately so. Eight metres --
+ * about the error in a pin dropped on a phone -- already collapsed the offlevel violations from 25
+ * to 3, but thirteen of forty-three lines were still improving when they hit that edge, so every
+ * figure they gave was a floor rather than an answer. Twenty gives the search room to finish.
+ *
+ * What it buys is the difference between "the reported pins are bad" and "there is no line like
+ * this here". What it costs is that the answer drifts from the reported line: at twenty metres an
+ * end can round a corner onto a different feature, and a 30 m line can come back 70 m long. So the
+ * distance each end actually travelled is reported per line and summarised, and a row that spent
+ * its whole budget should be read as a claim about the area rather than about the line.
  */
-const SEARCH_RADIUS = 8
+const SEARCH_RADIUS = 20
+
+/**
+ * How far a pin may plausibly be from where it was meant, in metres. Only `relief` uses it.
+ *
+ * Kept apart from the search radius, which is now four times a pin's worth of error: `relief` is
+ * answering "could the pin alone explain this", and widening that probe with the search would
+ * inflate every row's answer to yes.
+ */
+const PIN_SLOP = 5
 
 /** Frames of descent before a line is called converged, whatever the optimiser still wants. */
 const MAX_FRAMES = 400
@@ -161,15 +175,16 @@ function chordDrop(c: Candidate): number {
  *
  * Not used to judge anything -- the search is what handles it -- but reported per line, because it
  * is the difference between a figure that disagrees and a figure that was never determined. Two
- * metres means the pin barely mattered; forty means it was the only thing that did.
+ * metres means the pin barely mattered; forty means it was the only thing that did. Measured over
+ * {@link PIN_SLOP} rather than the search radius -- see there.
  */
 function relief(a: Pos, b: Pos): number {
   const spread = (p: Pos) => {
     let lo = Infinity
     let hi = -Infinity
-    for (let de = -SEARCH_RADIUS; de <= SEARCH_RADIUS; de++) {
-      for (let dn = -SEARCH_RADIUS; dn <= SEARCH_RADIUS; dn++) {
-        if (de * de + dn * dn > SEARCH_RADIUS * SEARCH_RADIUS) continue
+    for (let de = -PIN_SLOP; de <= PIN_SLOP; de++) {
+      for (let dn = -PIN_SLOP; dn <= PIN_SLOP; dn++) {
+        if (de * de + dn * dn > PIN_SLOP * PIN_SLOP) continue
         const v = groundSampler.sample(p.e + de, p.n + dn)
         if (!Number.isFinite(v)) continue
         lo = Math.min(lo, v)
