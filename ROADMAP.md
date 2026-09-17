@@ -136,8 +136,18 @@ anchors only, one AOI, static viewer.
 - **A cheaper vegetation source for screening.** With the surface model deferred to line corridors,
   it is still the largest single cost of a large run. A coarse canopy height model would let a line
   be rejected on vegetation before any 0.2 m data is fetched, with `bdom` only for final scoring.
-- **Validation set.** Import documented real highlines and assert the finder rediscovers them.
-  Nothing else distinguishes "found 2000 candidates" from "found 2000 artefacts".
+- **Validation set.** Done, as `npm run slackmap`: the ISA's world map has 48 German highlines with
+  a length and a height somebody rigged and then wrote down, and the tool measures each through the
+  same `planLine` the app uses. It settled the geometry (length median error 1 % as pinned) and it
+  raised the question below about the filters. Nothing else distinguishes "found 2000 candidates"
+  from "found 2000 artefacts".
+- **Filters against what people actually rig.** The check above puts 22 of 43 real, walked German
+  highlines inside every hard filter; the rest are refused by `minExposure` 10 m (13 lines) and
+  `minLength` 50 m (12). Both look defensible on their own and neither was set against evidence.
+  What a German highline is in practice is shorter and lower than either floor, so the choice is
+  between owning that -- these are the lines worth *finding*, whatever the community rigs -- and
+  loosening them and letting the score sort it out. Worth deciding on purpose rather than by
+  default, and the numbers to decide with now exist.
 
 ## Context the results need to be useful
 
@@ -148,6 +158,43 @@ anchors only, one AOI, static viewer.
 - **Seasonality.** The surface model is a single epoch, so leaf-on vs leaf-off changes the canopy
   answer for deciduous stands.
 - **Wind and sun exposure** from terrain, which is what makes a line pleasant rather than possible.
+
+### What slackmap could be to this project, past the validation it already is
+
+slackmap.com is the ISA's world slackline map: about 7,900 lines, 2,100 of them highlines, 897 in
+Germany. Open source under GPL-3.0 (`International-Slackline-Association/slackmap`), and -- the
+thing that makes any of this cheap -- its data is served as plain static GeoJSON with
+`access-control-allow-origin: *`, regenerated continuously: `data.slackmap.com/geojson/lines/all.geojson`
+is 248 KB gzipped for the whole world, each feature a two-point LineString with id, length, type and
+country. `api.slackmap.com/line/<id>/details` is public and unauthenticated too, and carries name,
+length, height, anchor and access notes, restriction level and images.
+
+- **Draw the known lines on our map.** One fetch, one source, filtered to Germany. It stops the
+  planner proposing a line that already exists and shows what is rigged near a search area, which
+  is context nothing else here provides. The cheapest of these by a distance.
+- **Be slackmap's terrain profile.** They have no elevation data at all; our URL format already
+  encodes a line as two anchors, so a link from a line's detail page into the profile view costs
+  them a link and gives their 2,100 highlines a ground section. Their README runs on "whoever
+  builds it maintains it", so this is a conversation rather than a patch. Linking also keeps
+  GPL-3.0 at arm's length -- vendoring their code would not.
+- **Publish measured facts back for lines that already exist.** They have `length`, `height` and an
+  `isMeasured` flag: slots built for exactly this. 48 German records, additive and checkable, via an
+  ISA account rather than a bulk import.
+
+**The blocker is the data licence, and there is not one.** GPL-3.0 covers the code; the 7,900
+user-contributed lines have no licence stated anywhere in the app or the repo. Reading a CORS-open
+endpoint is technically free and shipping their data inside our map without a licence or an
+attribution line is the same mistake as vendoring the unlicensed backup-fall simulator. One email to
+the ISA settles both, since it is the same organisation.
+
+**What is ruled out:** pushing our candidates into slackmap. 25k machine-generated lines in
+Brandenburg against 7,900 human-verified ones worldwide is not a contribution, it is a denial of
+service on their data quality.
+
+**Two things their data cannot give us**, both hoped for and checked: access and legality is not
+there (the `guides` layer is 106 features worldwide, 2 in Germany, and its only property is a
+free-text label), and their `spots` are 2,092 polygons a few tens of metres across -- rigging
+locations, not areas of interest at our scale.
 
 ## Scale
 
