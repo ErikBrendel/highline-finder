@@ -153,7 +153,17 @@ anchors only, one AOI, static viewer.
 
 - **Legal and access layer.** Nature protection (Naturschutzgebiet, Landschaftsschutzgebiet, FFH,
   Vogelschutzgebiet), forestry ownership, and — specifically for the default AOI — the former
-  former military land, which several parts of Brandenburg still are. A candidate you may not rig is noise.
+  military land, which several parts of Brandenburg still are. A candidate you may not rig is noise.
+
+  The protection half has one national source, checked October 2026:
+  <https://geodienste.bfn.de/ogc/wfs/schutzgebiet> serves nine layers for the whole country —
+  Naturschutzgebiete (9,035 features), Landschaftsschutzgebiete (9,195), Vogelschutzgebiete (742),
+  FFH, Nationalparke, Naturparke, Biosphärenreservate and their zoning, plus nationale
+  Naturmonumente — harmonised annually by the BfN from the state registers and snapped to BKG
+  boundaries. It reflects `Origin`, so a browser may read it directly, and it offers GML only, no
+  GeoJSON output format. That is the same shape as the border work: fetch once in a tool, simplify,
+  ship a static file, the way `boundaries.ts` does with VG250. Ownership and ex-military land have
+  no national equivalent and stay unsolved.
 - **Approach.** Distance and walking time from the nearest road or path via OSM.
 - **Seasonality.** The surface model is a single epoch, so leaf-on vs leaf-off changes the canopy
   answer for deciduous stands.
@@ -195,6 +205,65 @@ service on their data quality.
 there (the `guides` layer is 106 features worldwide, 2 in Germany, and its only property is a
 free-text label), and their `spots` are 2,092 polygons a few tens of metres across -- rigging
 locations, not areas of interest at our scale.
+
+## Prior art, and what it would take to plug into it
+
+Surveyed October 2026. None of this is agreed — it is where the neighbouring tools are already
+ahead, and the places where they could be reached.
+
+**Nobody else carries a surface model.** CalTopo attributes `DGM1` for Germany
+(<https://caltopo.com/about/attribution-dem>), which is the same bare-earth 1 m LiDAR family this
+project reads — though it is filed there under "Europe — Alps", and everything outside those boxes
+falls back to 30 m Copernicus. The consumer tier is worse: Gaia, onX and anything on Mapbox
+Terrain-DEM is SRTM/NASADEM at 30 m outside the US and capped at zoom 14, so one cell is wider than
+most of the lines found here, and HeyWhatsThat's path profiler — the closest thing to a free
+line-of-sight tool — is SRTM too. None of them carries canopy *height* at all; CalTopo's "tree
+cover" shading is percent-cover land cover. So `bdom` is the one input that is genuinely ours, and
+it is also the one that decides whether a line here is walkable.
+
+Worth knowing what Switzerland has and Germany does not: a free federal elevation-profile endpoint
+over 0.5 m LiDAR (`api3.geo.admin.ch/rest/services/profile.json`), which is why the slackline
+community measures Swiss lines by hand in map.geo.admin.ch and German ones by eye. hoehendaten.de is
+the nearest equivalent, and it is one service in front of state data rather than a survey's own.
+
+### Three tools worth reading before writing more of this one
+
+- **SEILAPLAN** (<https://github.com/piMoll/SEILAPLAN>) is this project's geometry carrying a
+  different payload: a QGIS plugin from the WSL that lays out forestry cable cranes, peer-reviewed
+  and open source. A catenary over a terrain profile, an alarm where minimum ground clearance is
+  violated, and an optimiser that enumerates every intermediate-support combination and reports
+  **anchor force and skyline deflection angle**. Two entries under *Physics* — real sag and anchor
+  loads — exist there as shipped, published maths (the Zweifel close-to-catenary approach), and
+  their optimiser searches a combinatorial space where *Better refinement* hill-climbs from one
+  start.
+- **PLS-CADD**, the power-line tool, never evaluates a single wire position: it computes a family
+  under wind, ice and temperature and tests each against a vegetation point cloud. Everything here
+  is scored at one sag ratio. *Backup fall depth as a profile overlay* is that idea arriving one
+  case at a time, and the general version is to score the worst case over a set of loads rather
+  than the nominal one.
+- **Skitourenguru** is the closest thing to what this project *is*: an automated, terrain-derived
+  score published as a map, for a decision where being wrong hurts. What it has and this does not is
+  a published model document, an independent validation study, a curated route set scored
+  automatically rather than a pure enumeration, and a channel by which a user reports a wrong route.
+  `npm run slackmap` is the first step of that, and currently a one-off rather than a practice.
+
+Smaller, and aimed straight at *Filters against what people actually rig*: CalTopo's Terrain Shading
+lets the user write the rule — over elevation, slope, aspect and tree cover — instead of shipping a
+threshold. The honest answer to a `minExposure` floor that was never set against evidence may be to
+expose it rather than to defend it.
+
+### Ways this could reach the tools people already use
+
+- **GPX and KML out.** Already listed under *Viewer*; what the survey adds is that this is also how
+  every one of these tools ingests, CalTopo and Gaia included, and that it covers the part this
+  project is worst at — the walk in.
+- **Publish the candidates as a source CalTopo can add.** It takes external WFS and custom tile
+  sources, so a small feed would put these lines inside the map people already plan the approach in.
+  Depends on having somewhere to host it, which is *Hosting and data delivery*.
+- **Not worth chasing:** Gaia and onX (US-centric, closed, 30 m in Europe), HeyWhatsThat (no public
+  API), anything built on Mapbox terrain. Their elevation data here is an order of magnitude coarser
+  than what the pipeline already holds, so an integration would cost accuracy rather than gain
+  reach.
 
 ## Scale
 
