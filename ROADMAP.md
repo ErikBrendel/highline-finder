@@ -23,6 +23,20 @@ anchors only, one AOI, static viewer.
   Measuring that per line and scoring it would replace a tuned constant with the thing the constant
   is standing in for.
 
+  The replacement is per end, and taken on demand. The two anchors are different ground — one may
+  leave over a gully and the other out of a stand of pine — so a single number for the line is
+  already the wrong shape; what is wanted is a zone at A and a zone at B, each measured where a fall
+  at that station stops being survivable. And it cannot be baked into the dataset, because it moves
+  with the sag slider and with the rig heights, both of which the viewer changes live. That makes it
+  a measurement the planner takes when a line is opened, alongside the profile it already rebuilds
+  there.
+
+  The figure that falls out of it is the one worth having: **walk length**, the span minus the two
+  zones. A 494 m line with fifty metres of unwalkable end at each anchor is a 394 m walk, and the
+  walk is what a person is actually deciding about. It is also a better thing to rank and filter on
+  than anchor-to-anchor distance, which is what the length slider, the length term in the score and
+  `minLength` all read today — three places measuring a distance nobody walks.
+
   Worth knowing what the constant costs today: it is enough for a tree anchor at the *edge* of a
   wood, where the span leaves over open ground or a gully, and not enough for one running *through*
   a stand — ten metres out the canopy is still full height and the line is below it. So the
