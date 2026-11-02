@@ -18,6 +18,10 @@ the research suggests, for the roadmap to accept or reject.
   elsewhere in Germany; an empty map with no explanation is a closed tab. — dsv-highliner S2
 - **Hand-placed anchors have to be findable without instructions** — it is the only thing the tool
   offers the majority of its recipients. — dsv-highliner S3
+- **The bare link is a second first screen, and nobody designed that one either.** A tool shared
+  without a line opens on a default view plus the guide, and the recipient has to decide for
+  themselves where on a map of Germany to look. This is the one arrival where the goal *is* for them
+  to find their own lines. — dsv-highliner S5
 - **A way out of the shared line into the map, and back.** Cheap, and the only thing between the one
   line and the rest of the tool. — newcomer S3
 

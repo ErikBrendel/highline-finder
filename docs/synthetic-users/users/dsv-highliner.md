@@ -56,6 +56,18 @@ quo is fine is a real result here, not a gap.
 - **Without the tool:** they already know the answer; this story is only about whether the tool earns
   trust, and it is the fastest way for it to lose.
 
+### S5 — Just the bare link to the tool
+- **Arrives:** the tool itself, with no line and no view attached — shared generically, or found
+  through the repo. `http://localhost:5173/highline-finder/`
+- **Device:** desktop
+- **Wants:** "Someone said this finds highlines. Show me."
+- **Done when:** they have got themselves to actual lines on the map and looked at one, under their
+  own steam.
+- **Gives up when:** the opening screen does not hand them a first move, and they are left deciding
+  for themselves where on a map of Germany to look.
+- **Without the tool:** nothing — there is no status quo for "browse ground nobody has walked", and
+  this is the arrival where the product has to make its own case.
+
 ### S4 — Worth my time at all?
 - **Arrives:** at the end of the same sitting.
 - **Device:** desktop
