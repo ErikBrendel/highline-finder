@@ -225,6 +225,14 @@ locations, not areas of interest at our scale.
 Surveyed October 2026. None of this is agreed — it is where the neighbouring tools are already
 ahead, and the places where they could be reached.
 
+This section covers the *technical* neighbours — mapping and engineering tools that do something
+this one also does. The *community* neighbours — the spot databases people in the sport actually
+use, and the one direct competitor — are in [`docs/related-work.md`](docs/related-work.md). One
+fact from there belongs here, because it is the clearest statement of what this project is for:
+HighlineScout computes candidate highlines from terrain data, is asked by German highliners to
+cover Germany, and declines on the grounds that the finest freely available German topographic data
+is 20 m. It is 1 m, and the surface model is 0.2 m.
+
 **Nobody else carries a surface model.** CalTopo attributes `DGM1` for Germany
 (<https://caltopo.com/about/attribution-dem>), which is the same bare-earth 1 m LiDAR family this
 project reads — though it is filed there under "Europe — Alps", and everything outside those boxes
