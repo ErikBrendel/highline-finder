@@ -7,3 +7,7 @@ src/web/public/mask.json
 src/web/public/tiles.json
 *.log
 .DS_Store
+
+# Synthetic user testing: screenshots and browser sessions are run artefacts, not results.
+docs/synthetic-users/runs/*/shots/
+.playwright-cli/
