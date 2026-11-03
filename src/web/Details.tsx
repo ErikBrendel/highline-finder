@@ -648,24 +648,46 @@ export function Details({
         </span>
       </div>
 
-      {/* Only in the full view: on the card the filter panel is a click away and the room is worth
-          more than a duplicate. Here there is room, and this is where the answer it changes is. */}
-      {full && sag && (
-        <div className="sagbar">
-          <Slider
-            label="Midspan sag"
-            value={sag.pct}
-            min={sag.floor}
-            max={10}
-            step={0.5}
-            unit=" % of span"
-            format={(v) => v.toFixed(1)}
-            onChange={onSag}
+      {/*
+        * The two pictures and the one control that changes both of them.
+        *
+        * First because it is the half of this panel that explains itself. A link arrives at one
+        * line and the reader has not asked anything yet -- a photograph of the place and a section
+        * through it answer "what is this" before any figure does, and the figures are waiting
+        * directly beside them on a desk and directly below them on a phone.
+        */}
+      <div className="show">
+        {full && c && (
+          <Terrain3D
+            a={{ e: c.a.e, n: c.a.n }}
+            b={{ e: c.b.e, n: c.b.n }}
+            anchorA={c.a.anchor}
+            anchorB={c.b.anchor}
+            // The sag actually drawn, not the dataset's: the slider re-measures every line, and the
+            // span in the picture has to be the span in the figures beside it.
+            sagRatio={c.length > 0 ? c.sag / c.length : 0}
+            hoverAt={hoverAt}
+            onMoveAnchor={onMoveAnchor}
           />
-        </div>
-      )}
+        )}
 
-      <div className="cols">
+        {/* Only in the full view: on the card the filter panel is a click away and the room is worth
+            more than a duplicate. Here there is room, and this is where the answer it changes is. */}
+        {full && sag && (
+          <div className="sagbar">
+            <Slider
+              label="Midspan sag"
+              value={sag.pct}
+              min={sag.floor}
+              max={10}
+              step={0.5}
+              unit=" % of span"
+              format={(v) => v.toFixed(1)}
+              onChange={onSag}
+            />
+          </div>
+        )}
+
         <div className="chart">
           {c && profile?.length ? (
             <>
@@ -724,6 +746,84 @@ export function Details({
             <span><i style={{ background: 'var(--line)' }} />line with sag</span>
           </div>
         </div>
+      </div>
+
+      {/*
+        * What the pictures are worth, what they measured, and what can be changed about it.
+        *
+        * In that order, and the caveats genuinely are first: every one of them says what the
+        * figures underneath are and are not, which is a correction when it comes after them and a
+        * heading when it comes before. The rig sliders are last because they are the only thing
+        * here nobody arrives wanting -- they are for the second question, not the first.
+        */}
+      <div className="read">
+        {/* Same reason as the road banner below, and a stronger one: every figure a partial line
+            reports is measured over the ground that was read, so all of them are optimistic in the
+            same direction. The clearance minimum is the one that matters -- it cannot see into a
+            stretch it never had, and the hill that would have set it may be exactly in there. */}
+        {unmeasured > 0 && (
+          <div className="violations" data-tone={fetching ? 'wait' : 'bad'}>
+            <b>
+              {fetching
+                ? 'Still measuring this line…'
+                : `No elevation for ${pctUnmeasured} of this line`}
+            </b>
+            <div>
+              {assumedEnds > 0 && (
+                <>
+                  {assumedEnds === 2
+                    ? 'Neither anchor has ground under it yet, so the span is drawn level at the ' +
+                      'average height of the terrain it crosses. '
+                    : 'One anchor has no ground under it yet, so the span is drawn level with the ' +
+                      'other. '}
+                  <strong>Its height is a guess, not a measurement.</strong>{' '}
+                </>
+              )}
+              {fetching
+                ? 'The figures below cover the part that has arrived, so they can only improve as ' +
+                  'the rest does. Clearance especially: the tightest point may be in the gap.'
+                : 'The survey covers Brandenburg and Berlin only, and part of this line falls ' +
+                  'outside it. The figures below describe the rest, which makes every one of them ' +
+                  'the best case — the tightest clearance may be in the stretch nobody measured.'}
+            </div>
+          </div>
+        )}
+
+        {/* Same shape as the road banner and the same reason: a figure nobody measured must not read
+            as a figure that came out well. */}
+        {!canopyKnown && (
+          <div className="violations" data-tone="wait">
+            <b>No surface model for this ground</b>
+            <div>
+              Only Brandenburg publishes one. Everywhere else the terrain is real and the canopy is
+              not: this line is measured as though the ground were bare, so{' '}
+              <strong>clearance and exposure are exact and the canopy figures are empty</strong>.
+              Nor is there a building model &mdash; an anchor on a roof here is measured at the height
+              of the ground beneath it. Trees, walls and anything else standing are yours to check.
+            </div>
+          </div>
+        )}
+
+        {/* Said before the verdict, because it qualifies the verdict: a line can only be called clear
+            of the roads under it once we know what they are. */}
+        {roadState !== 'ok' && (
+          <div className="violations" data-tone={roadState === 'loading' ? 'wait' : 'bad'}>
+            <b>
+              {roadState === 'loading'
+                ? 'Checking what this line passes over…'
+                : 'No roads or water for this ground'}
+            </b>
+            <div>
+              {roadState === 'loading'
+                ? 'Clearance over roads and railways is not in the figures below yet.'
+                : 'Outside Berlin and Brandenburg this is asked of OpenStreetMap as the line is ' +
+                  'placed, and that request did not come back. Until it does, a span over a road ' +
+                  'reads as a span over a field, and a span over a lake is held to the three metres ' +
+                  'this search asks over ground rather than the one it asks over water. Cautious in ' +
+                  'both directions, and blind in both. Moving an anchor asks again.'}
+            </div>
+          </div>
+        )}
 
         <dl className="stats">
           {rows.map((r) => (
@@ -733,239 +833,158 @@ export function Details({
             </div>
           ))}
         </dl>
-      </div>
 
-      {full && c && (
-        <>
-          <div className="rig" onPointerDown={() => setDragging(true)} onKeyDown={() => setDragging(true)}>
-            {(['a', 'b'] as const).map((which) => {
-              const here = rigAt(which)
-              const measured = Number.isFinite(here)
-              const stands = standingAt(which)
-              const ceiling = Math.max(rigTop[which], measured ? here : 0)
-              const words = rigWords(here, stands, params)
-              return (
-                <div className="rigend" key={which}>
-                <Slider
-                  key={which}
-                  label={`Rig ${which.toUpperCase()}`}
-                  value={measured ? here : 0}
-                  min={0}
-                  max={ceiling}
-                  bands={rigBands(stands, params, ceiling)}
-                  step={0.1}
-                  unit={measured ? ' m' : ''}
-                  format={() => (measured ? here.toFixed(1) : DASH)}
-                  derived={rig === null}
-                  onChange={(v) => setEnd(which, v)}
-                />
-                  {/*
-                    * The named heights, and a box for the ones that are not.
-                    *
-                    * Planning happens in these terms -- on the ground, on a frame, up the trunk, at
-                    * the top -- far more often than at some particular number of metres, and a
-                    * button is one action where finding a value on a track is several. What is
-                    * offered depends on what is there: no frame on a roof, no trunk in a field.
-                    *
-                    * The box is what makes the control unbounded in practice. A crane is fifty
-                    * metres and dragging to fifty on a track that ends at thirty is a fight, where
-                    * typing it is two keystrokes -- and the scale then grows to include it.
-                    */}
-                  <div className="rigpresets">
-                    {rigPresets(which, stands, params, levelWith(which)).map((preset) => (
-                      <button
-                        key={preset.label}
-                        title={preset.title}
-                        data-on={Math.abs(preset.to - here) < 0.05 || undefined}
-                        onClick={() => setEnd(which, Math.round(preset.to * 10) / 10)}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                    <input
-                      type="number"
-                      min={0}
-                      // Half a metre a click. The arrows are for reaching a very different height
-                      // -- a mast, a crane -- and a tenth of a metre a click is a hundred clicks to
-                      // do it. Typing an off-step figure still works; nothing here submits a form.
-                      step={0.5}
-                      aria-label={`Rig height ${which.toUpperCase()} in metres`}
-                      value={measured ? Math.round(here * 10) / 10 : ''}
-                      onChange={(e) => {
-                        const v = Number(e.target.value)
-                        if (e.target.value !== '' && Number.isFinite(v) && v >= 0) setEnd(which, v)
-                      }}
-                    />
-                  </div>
-                  {/* Attached to its own slider rather than collected below both, so on a phone --
-                      where the two stack -- the sentence stays with the thumb it is about. Only the
-                      ends that need one get one: a rig inside the A-frame is the ordinary case. */}
-                  {words && (
-                    <div className="note" data-means={rigMeans(here, stands, params)}>
-                      {words}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            <button
-              className="rigauto"
-              disabled={rig === null}
-              onClick={() => onRig(null)}
-              title="Rig as level and as high as the ground allows, like the search does"
-            >
-              auto
-            </button>
-          </div>
-          {rig === null && (
-            <div className="note" style={{ margin: '4px 0 0' }}>
-              Rigged as level as the ground allows, then as high &mdash; the same choice the search
-              makes, so both heights follow the terrain as you drag an anchor. Move a slider to set
-              them yourself.
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Same reason as the road banner below, and a stronger one: every figure a partial line
-          reports is measured over the ground that was read, so all of them are optimistic in the
-          same direction. The clearance minimum is the one that matters -- it cannot see into a
-          stretch it never had, and the hill that would have set it may be exactly in there. */}
-      {unmeasured > 0 && (
-        <div className="violations" data-tone={fetching ? 'wait' : 'bad'}>
-          <b>
-            {fetching
-              ? 'Still measuring this line…'
-              : `No elevation for ${pctUnmeasured} of this line`}
-          </b>
-          <div>
-            {assumedEnds > 0 && (
-              <>
-                {assumedEnds === 2
-                  ? 'Neither anchor has ground under it yet, so the span is drawn level at the ' +
-                    'average height of the terrain it crosses. '
-                  : 'One anchor has no ground under it yet, so the span is drawn level with the ' +
-                    'other. '}
-                <strong>Its height is a guess, not a measurement.</strong>{' '}
-              </>
-            )}
-            {fetching
-              ? 'The figures below cover the part that has arrived, so they can only improve as ' +
-                'the rest does. Clearance especially: the tightest point may be in the gap.'
-              : 'The survey covers Brandenburg and Berlin only, and part of this line falls ' +
-                'outside it. The figures below describe the rest, which makes every one of them ' +
-                'the best case — the tightest clearance may be in the stretch nobody measured.'}
-          </div>
-        </div>
-      )}
-
-      {/* Same shape as the road banner and the same reason: a figure nobody measured must not read
-          as a figure that came out well. */}
-      {!canopyKnown && (
-        <div className="violations" data-tone="wait">
-          <b>No surface model for this ground</b>
-          <div>
-            Only Brandenburg publishes one. Everywhere else the terrain is real and the canopy is
-            not: this line is measured as though the ground were bare, so{' '}
-            <strong>clearance and exposure are exact and the canopy figures are empty</strong>.
-            Nor is there a building model &mdash; an anchor on a roof here is measured at the height
-            of the ground beneath it. Trees, walls and anything else standing are yours to check.
-          </div>
-        </div>
-      )}
-
-      {/* Said before the verdict, because it qualifies the verdict: a line can only be called clear
-          of the roads under it once we know what they are. */}
-      {roadState !== 'ok' && (
-        <div className="violations" data-tone={roadState === 'loading' ? 'wait' : 'bad'}>
-          <b>
-            {roadState === 'loading'
-              ? 'Checking what this line passes over…'
-              : 'No roads or water for this ground'}
-          </b>
-          <div>
-            {roadState === 'loading'
-              ? 'Clearance over roads and railways is not in the figures below yet.'
-              : 'Outside Berlin and Brandenburg this is asked of OpenStreetMap as the line is ' +
-                'placed, and that request did not come back. Until it does, a span over a road ' +
-                'reads as a span over a field, and a span over a lake is held to the three metres ' +
-                'this search asks over ground rather than the one it asks over water. Cautious in ' +
-                'both directions, and blind in both. Moving an anchor asks again.'}
-          </div>
-        </div>
-      )}
-
-      {/* A dataset line, re-measured. The search accepted it at its own resolution; this is what a
-          metre apart makes of it, which is occasionally not the same answer. */}
-      {fromDataset && violations && violations.length > 0 && (
-        <div className="violations">
-          <b>Measured again at 1 m, this line would not qualify:</b>
-          <ul>
-            {violations.map((v) => (
-              <li key={v}>{v}</li>
-            ))}
-          </ul>
-          <div>
-            The search sampled it every four metres and accepted it. Neither figure is wrong; the
-            finer one is the one to walk in on.
-          </div>
-        </div>
-      )}
-
-      {!fromDataset && planned && (
-        planned.violations.length > 0 ? (
+        {/* A dataset line, re-measured. The search accepted it at its own resolution; this is what a
+            metre apart makes of it, which is occasionally not the same answer. */}
+        {fromDataset && violations && violations.length > 0 && (
           <div className="violations">
-            <b>
-              Would not qualify as a candidate &mdash; costing {planned.penalty.toFixed(1)} score:
-            </b>
+            <b>Measured again at 1 m, this line would not qualify:</b>
             <ul>
-              {planned.violations.map((v) => (
+              {violations.map((v) => (
                 <li key={v}>{v}</li>
               ))}
             </ul>
+            <div>
+              The search sampled it every four metres and accepted it. Neither figure is wrong; the
+              finer one is the one to walk in on.
+            </div>
           </div>
-        ) : (
-          <div className="note" style={{ margin: '8px 0 0' }}>
-            Meets every hard constraint — the search would have accepted this line.
+        )}
+
+        {!fromDataset && planned && (
+          planned.violations.length > 0 ? (
+            <div className="violations">
+              <b>
+                Would not qualify as a candidate &mdash; costing {planned.penalty.toFixed(1)} score:
+              </b>
+              <ul>
+                {planned.violations.map((v) => (
+                  <li key={v}>{v}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="note" style={{ margin: '8px 0 0' }}>
+              Meets every hard constraint — the search would have accepted this line.
+            </div>
+          )
+        )}
+
+
+        {full && c && (
+          <>
+            <div className="rig" onPointerDown={() => setDragging(true)} onKeyDown={() => setDragging(true)}>
+              {(['a', 'b'] as const).map((which) => {
+                const here = rigAt(which)
+                const measured = Number.isFinite(here)
+                const stands = standingAt(which)
+                const ceiling = Math.max(rigTop[which], measured ? here : 0)
+                const words = rigWords(here, stands, params)
+                return (
+                  <div className="rigend" key={which}>
+                  <Slider
+                    key={which}
+                    label={`Rig ${which.toUpperCase()}`}
+                    value={measured ? here : 0}
+                    min={0}
+                    max={ceiling}
+                    bands={rigBands(stands, params, ceiling)}
+                    step={0.1}
+                    unit={measured ? ' m' : ''}
+                    format={() => (measured ? here.toFixed(1) : DASH)}
+                    derived={rig === null}
+                    onChange={(v) => setEnd(which, v)}
+                  />
+                    {/*
+                      * The named heights, and a box for the ones that are not.
+                      *
+                      * Planning happens in these terms -- on the ground, on a frame, up the trunk, at
+                      * the top -- far more often than at some particular number of metres, and a
+                      * button is one action where finding a value on a track is several. What is
+                      * offered depends on what is there: no frame on a roof, no trunk in a field.
+                      *
+                      * The box is what makes the control unbounded in practice. A crane is fifty
+                      * metres and dragging to fifty on a track that ends at thirty is a fight, where
+                      * typing it is two keystrokes -- and the scale then grows to include it.
+                      */}
+                    <div className="rigpresets">
+                      {rigPresets(which, stands, params, levelWith(which)).map((preset) => (
+                        <button
+                          key={preset.label}
+                          title={preset.title}
+                          data-on={Math.abs(preset.to - here) < 0.05 || undefined}
+                          onClick={() => setEnd(which, Math.round(preset.to * 10) / 10)}
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                      <input
+                        type="number"
+                        min={0}
+                        // Half a metre a click. The arrows are for reaching a very different height
+                        // -- a mast, a crane -- and a tenth of a metre a click is a hundred clicks to
+                        // do it. Typing an off-step figure still works; nothing here submits a form.
+                        step={0.5}
+                        aria-label={`Rig height ${which.toUpperCase()} in metres`}
+                        value={measured ? Math.round(here * 10) / 10 : ''}
+                        onChange={(e) => {
+                          const v = Number(e.target.value)
+                          if (e.target.value !== '' && Number.isFinite(v) && v >= 0) setEnd(which, v)
+                        }}
+                      />
+                    </div>
+                    {/* Attached to its own slider rather than collected below both, so on a phone --
+                        where the two stack -- the sentence stays with the thumb it is about. Only the
+                        ends that need one get one: a rig inside the A-frame is the ordinary case. */}
+                    {words && (
+                      <div className="note" data-means={rigMeans(here, stands, params)}>
+                        {words}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              <button
+                className="rigauto"
+                disabled={rig === null}
+                onClick={() => onRig(null)}
+                title="Rig as level and as high as the ground allows, like the search does"
+              >
+                auto
+              </button>
+            </div>
+            {rig === null && (
+              <div className="note" style={{ margin: '4px 0 0' }}>
+                Rigged as level as the ground allows, then as high &mdash; the same choice the search
+                makes, so both heights follow the terrain as you drag an anchor. Move a slider to set
+                them yourself.
+              </div>
+            )}
+          </>
+        )}
+
+        {ends && (
+          <div className="anchors">
+            {/* With the rest of the editing, in the row that names the two ends. Which end is A
+                decides how this whole panel is laid out, and on a found line it was settled by
+                whichever anchor the search reached first -- so it is worth being able to say
+                otherwise. */}
+            {full && (
+              <button className="flip" onClick={onFlip} title="Swap which end is A">
+                &#8646; flip A/B
+              </button>
+            )}
+            A{' '}
+            <a href={`geo:${ends.a.lat},${ends.a.lon}`}>
+              {ends.a.lat.toFixed(6)}, {ends.a.lon.toFixed(6)}
+            </a>
+            {'  —  B '}
+            <a href={`geo:${ends.b.lat},${ends.b.lon}`}>
+              {ends.b.lat.toFixed(6)}, {ends.b.lon.toFixed(6)}
+            </a>
           </div>
-        )
-      )}
-
-      {ends && (
-        <div className="anchors">
-          {/* With the rest of the editing, in the row that names the two ends. Which end is A
-              decides how this whole panel is laid out, and on a found line it was settled by
-              whichever anchor the search reached first -- so it is worth being able to say
-              otherwise. */}
-          {full && (
-            <button className="flip" onClick={onFlip} title="Swap which end is A">
-              &#8646; flip A/B
-            </button>
-          )}
-          A{' '}
-          <a href={`geo:${ends.a.lat},${ends.a.lon}`}>
-            {ends.a.lat.toFixed(6)}, {ends.a.lon.toFixed(6)}
-          </a>
-          {'  —  B '}
-          <a href={`geo:${ends.b.lat},${ends.b.lon}`}>
-            {ends.b.lat.toFixed(6)}, {ends.b.lon.toFixed(6)}
-          </a>
-        </div>
-      )}
-
-      {full && c && (
-        <Terrain3D
-          a={{ e: c.a.e, n: c.a.n }}
-          b={{ e: c.b.e, n: c.b.n }}
-          anchorA={c.a.anchor}
-          anchorB={c.b.anchor}
-          // The sag actually drawn, not the dataset's: the slider re-measures every line, and the
-          // span in the picture has to be the span in the figures beside it.
-          sagRatio={c.length > 0 ? c.sag / c.length : 0}
-          hoverAt={hoverAt}
-          onMoveAnchor={onMoveAnchor}
-        />
-      )}
+        )}
+      </div>
       </div>
     </div>
   )

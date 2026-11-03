@@ -767,6 +767,46 @@ header[data-measuring] .spacer { flex: none; }
 .details[data-full='true'] .sagbar { max-width: 420px; margin-bottom: 6px; }
 
 /*
+ * Two columns, once there is a desk to put them on.
+ *
+ * Under this width the two groups simply stack and the page is read top to bottom -- pictures,
+ * then what they are worth -- which is the right shape for a phone and the only shape that fits
+ * one. Above it, stacking wastes the half of the window the pictures do not use and buries the
+ * verdict a screen and a half below the thing it is a verdict on. So the pictures keep the width
+ * they are worth and everything that is read rather than looked at moves up beside them.
+ *
+ * The right column is capped at a reading width and floored above the point where two banded rig
+ * tracks stop being aimable; the left takes whatever is left. The chart gives up about a third of
+ * its horizontal detail to this, which at a metre a sample it can afford -- a 500 m span is still
+ * better than a pixel per sample -- and buys back a screen of scrolling for every reader.
+ */
+@media (min-width: 1000px) {
+  .details[data-full='true'] .body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    column-gap: 20px;
+    align-items: start;
+  }
+  /* Across both, and still the thing pinned to the top: it names the line the whole page is about
+     and carries the way out. */
+  .details[data-full='true'] .head { grid-column: 1 / -1; }
+  /* Already as narrow as the column that holds it, so the reading cap has nothing left to do and
+     would only stop the figures using the width they were given. */
+  .details[data-full='true'] .read .stats,
+  .details[data-full='true'] .read .violations,
+  .details[data-full='true'] .read .anchors { max-width: none; }
+  /* Four columns of figures do not fit a column this wide, and a label that wraps to three lines
+     costs more room than the pair it saves. One label, one figure. */
+  .details[data-full='true'] .read .stats { grid-template-columns: 1fr auto; }
+  /* The same reason the phone stacks them: half of 400 px is not a width for a slider you are
+     meant to aim, and each end's sentence belongs under the thumb it is about. */
+  .details[data-full='true'] .read .rig { flex-direction: column; align-items: stretch; gap: 10px; }
+  .details[data-full='true'] .read .rig .rigauto { margin-top: 0; align-self: flex-start; }
+  /* Taller, because it is no longer sharing the page's full width with everything below it. */
+  .details[data-full='true'] .scene3d { height: min(58vh, 620px); }
+}
+
+/*
  * The 3D view. Sized in viewport units because it is a window onto a place rather than a diagram
  * with a right aspect ratio, and it should take about half the screen whatever the screen is.
  */
@@ -870,7 +910,8 @@ header[data-measuring] .spacer { flex: none; }
   background: var(--panel-2);
   border-color: var(--accent);
 }
-.details .cols { display: flex; flex-direction: column; gap: 8px; }
+.details .show,
+.details .read { display: flex; flex-direction: column; gap: 8px; }
 .details .chart { min-width: 0; }
 
 
@@ -884,7 +925,16 @@ header[data-measuring] .spacer { flex: none; }
 .stats dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
 .stats dd.neg { color: #fb7185; }
 
-.legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 6px; }
+/* Wrapping, because it is a row of keys and not a row of columns: without it the seven items share
+   the width equally and each one's phrase is broken down a strip a few characters wide. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
 /* The required-clearance series is a dashed rule, not a filled area, so its key looks like one. */
 .legend i.dashed {
@@ -1053,7 +1103,14 @@ header[data-measuring] .spacer { flex: none; }
   /* Full width and no resizing: there is nothing to drag it into. */
   .details { width: calc(100% - 20px); max-height: 55%; }
   .details .grip { display: none; }
-  .details .cols { gap: 6px; }
+  .details .show,
+  .details .read { gap: 6px; }
+  /* Same as the narrow column on a desk: half a phone is not a width for a figure and its label. */
+  .stats { grid-template-columns: 1fr auto; }
+  /* Four lines of the scarcest space in the product, spent on three figures that are already
+     below: the air and the offlevel in the table, the sag on the slider under the picture. The
+     card keeps it, because there it is the only place any of them is said. */
+  .details[data-full='true'] .head .sub { display: none; }
   /* Half a phone is not a width. Stacked, and each end's sentence stays under the thumb it is
      about rather than being separated from it by the other end's slider. */
   .rig { flex-direction: column; align-items: stretch; gap: 10px; }
