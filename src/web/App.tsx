@@ -303,7 +303,6 @@ export function App() {
   // Read once. The URL is an input at startup and an output thereafter; treating it as live state
   // both ways is how a URL writer and a URL reader start feeding each other.
   const [initial] = useState(() => parseUrl(window.location.search))
-  const guide = useGuide()
   const header = useRef<HTMLElement>(null)
   // Measured once the row is in the document, and re-applied on every resize thereafter.
   useEffect(() => (header.current ? fitHeader(header.current) : undefined), [])
@@ -435,6 +434,9 @@ export function App() {
   const [emphasiseLines, setEmphasiseLines] = useState(false)
   /** Whether the open line fills the window. In the URL, so a link can be sent from that view. */
   const [full, setFull] = useState(initial.full ?? false)
+  // Which guide this reader gets: the one for the view they are actually in. `full` can be set
+  // without a line to be full of, so both have to hold.
+  const guide = useGuide(full && selectedId ? 'line' : 'map')
   /**
    * Following the device, and the last position it gave.
    *
@@ -917,7 +919,12 @@ export function App() {
     // Two different nothings. Ground the search never covered can still be measured by hand, and
     // saying only "nothing here" would send someone away from a tool that would have answered them.
     const [e, n] = toUtm33((view[0] + view[2]) / 2, (view[1] + view[3]) / 2)
-    return sourceFor(e, n) ? 'plannable' : 'nothing'
+    const source = sourceFor(e, n)
+    // What will be measured here, said before the measurement rather than after it. The three
+    // tiers the guide's coverage map draws are the same question, and the guide is shut by the
+    // time anyone has panned this far.
+    if (!source) return { where: 'nothing' as const, surface: false }
+    return { where: 'plannable' as const, surface: source.hasSurface }
   }, [view, meta])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
@@ -1583,12 +1590,21 @@ export function App() {
           />
 
           {offMap && (
-            <div className="offmap" data-where={offMap}>
-              {offMap === 'plannable' ? (
+            <div className="offmap" data-where={offMap.where}>
+              {offMap.where === 'plannable' ? (
                 <>
                   No lines were searched here &mdash; that covers Berlin and Brandenburg only. You
                   can still <b>right-click to place two anchors</b> and have a line measured against
-                  the survey for this ground.
+                  the survey for this ground.{' '}
+                  {offMap.surface ? (
+                    <>Ground and canopy are both read here.</>
+                  ) : (
+                    <>
+                      <b>Terrain only here:</b> nothing is known about the trees, and no building
+                      stands anywhere outside Brandenburg &mdash; a roof would measure as the ground
+                      under it.
+                    </>
+                  )}
                 </>
               ) : (
                 <>
@@ -1648,7 +1664,13 @@ export function App() {
         </div>
       </div>
 
-      {guide.open && <Guide onClose={guide.close} regions={meta?.regions ?? null} />}
+      {guide.open && (
+        <Guide
+          kind={full && selectedId ? 'line' : 'map'}
+          onClose={guide.close}
+          regions={meta?.regions ?? null}
+        />
+      )}
     </>
   )
 }

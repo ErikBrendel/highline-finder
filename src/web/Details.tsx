@@ -16,13 +16,6 @@ import { spanGeometry, type LatLon } from './planPoints.js'
 import { Terrain3D } from './Terrain3D.js'
 import { ShareButton } from './ShareButton.js'
 
-function scoreColor(score: number): string {
-  if (score >= 70) return '#22c55e'
-  if (score >= 60) return '#a3e635'
-  if (score >= 50) return '#f59e0b'
-  return '#64748b'
-}
-
 const DASH = '—'
 
 /**
@@ -563,9 +556,20 @@ export function Details({
       />
       <div className="body">
       <div className="head">
-        <strong style={{ color: c && Number.isFinite(c.score) ? scoreColor(c.score) : undefined }}>
+        {/*
+          * The span, not the score.
+          *
+          * The score exists to put twenty-two thousand lines in an order, and it is good at that --
+          * it is the map's sort and the filter slider's subject. On one open line it answers a
+          * question nobody asked: a single number mixing five things, printed in traffic-light
+          * colours, which reads as a verdict on whether to rig. A reader with no feel for the scale
+          * cannot tell a deduction for being short, which says nothing about safety, from one for
+          * canopy, which says a great deal. Its parts are still in the table below, where they are
+          * five labelled figures rather than one opinion.
+          */}
+        <strong>
           {c && Number.isFinite(c.score)
-            ? `Score ${c.score.toFixed(1)}`
+            ? `${c.length.toFixed(0)} m`
             : c
               ? 'not measured yet'
               : failed
@@ -585,13 +589,14 @@ export function Details({
         )}
         {geom && (
           <span className="sub">
-            {geom.length.toFixed(0)} m
-            {c && (
+            {c && Number.isFinite(c.score) ? (
               <>
-                {' '}&middot; midspan sag {c.sag.toFixed(1)} m
+                {c.exposure.toFixed(0)} m air &middot; midspan sag {c.sag.toFixed(1)} m
                 &middot; offlevel {c.offLevel.toFixed(1)} m (
                 {(c.offLevelRatio * 100).toFixed(1)} %)
               </>
+            ) : (
+              `${geom.length.toFixed(0)} m`
             )}
           </span>
         )}
@@ -846,7 +851,8 @@ export function Details({
             Only Brandenburg publishes one. Everywhere else the terrain is real and the canopy is
             not: this line is measured as though the ground were bare, so{' '}
             <strong>clearance and exposure are exact and the canopy figures are empty</strong>.
-            Trees, and anything else standing here, are yours to check.
+            Nor is there a building model &mdash; an anchor on a roof here is measured at the height
+            of the ground beneath it. Trees, walls and anything else standing are yours to check.
           </div>
         </div>
       )}
