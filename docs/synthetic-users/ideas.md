@@ -73,3 +73,43 @@ the research suggests, for the roadmap to accept or reject.
 ### The constraint over all of it
 "I fear it is too complex already and we should keep it more simple somehow." Every finding in this
 run should be read against that: a fix that adds a control is probably the wrong fix.
+
+## 2026-11-03 — phase 2, stories for the two research personas (from reading)
+
+### Tool helps
+- **A shared line link should say it is a shared line link.** The full view opens with no sign that
+  someone sent it: no sender, no "this is one candidate out of 22,000", no one-line account of what
+  was measured. The guide covers that ground but it is a separate page of prose on top. (every
+  persona's arrival story)
+- **The full view's order is backwards for a first look.** Header, sag slider, profile, stats, rig
+  sliders, and only then the three-dimensional view. On a phone the picture of the place — the one
+  thing that needs no explanation — is several screens below two sets of controls nobody asked for
+  yet. (rigging-partner S1, newcomer S1, first-highline S4)
+- **Nothing copies the link.** The address bar is the only share path. The sender is usually on a
+  phone, and the urban rigger wants something to attach to an email to a housing company.
+  (urban-rigger S5, rigging-partner S1)
+- **A missing tile reads as a failure.** The toast says "1 background failure" when an LoD1 building
+  tile 404s over rural ground where no building model exists. First impression, first screen.
+  (every arrival story)
+- **Exposure has no upper bound.** The slider sets a minimum, so "at most fifteen metres of air" —
+  the only sentence the beginner wants to say — cannot be said. Every other filter that matters for
+  avoiding a line rather than finding one has the same shape. (first-highline S5)
+- **The score ranks spectacle and is read as a verdict.** Its parts are exposure, length, canopy,
+  margin and level: long and high scores high. A short, low, safe line lands near 60 against a best
+  of 88, and 60 looks like a warning. About 5,000 lines in the dataset are under 120 m with under
+  20 m of air, so this is a surfacing problem, not an absence. (first-highline S1, S3)
+- **The urban half does not announce itself.** Covering one rectangle of Brandenburg and no part of
+  Berlin, with roof heights from a block model that cannot know about a parapet or a plant room.
+  (urban-rigger S1, S3, S4)
+- **A measurement outside Brandenburg can fail silently.** Saxony's survey serves no CORS header, so
+  a hand-placed anchor there cannot be measured. Whatever the screen says at that moment is what the
+  sceptical rigger from elsewhere takes away. (urban-rigger S2, dsv-highliner S3)
+
+### Status quo wins
+- **Finding spots the usual way.** Years of rigging, a memory full of places and the people who know
+  them already work. Said in the interview: they "have worked well without such a tool before". The
+  tool has to beat that on ground nobody has walked, not on ground they have.
+- **Judging whether a first highline is safe.** That is a person standing next to you, not a number.
+  The product's job here is to stop its own number from being read as that judgement.
+- **The owner conversation.** Permission, access and liability are human work. The only part a tool
+  can take is the plan that opens the conversation — which is exactly the part that is missing.
