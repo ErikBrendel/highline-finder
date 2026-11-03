@@ -510,6 +510,16 @@ export function scoreOf(
 ): { score: number; parts: ScoreParts } {
   const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
   const budget = p.maxOffLevelRatio * length
+  /**
+   * An unmeasured canopy is not charged for.
+   *
+   * Two thirds of the country has no surface model, so the choice there is between crediting this
+   * component in full and refusing to produce a score at all. Crediting it keeps a hand-placed
+   * line's score on the same scale as a found candidate's, which is the whole reason the two are
+   * computed by the same code -- while `parts.canopy` stays NaN, so nothing can show a component
+   * that came out well for ground nobody looked above.
+   */
+  const blocked = Number.isNaN(m.canopyBlockedFraction) ? 0 : m.canopyBlockedFraction
   const parts: ScoreParts = {
     exposure: clamp01(Math.log10(Math.max(m.exposure, 1) / 5) / Math.log10(200 / 5)),
     length: clamp01(length / p.maxLength),
@@ -532,7 +542,7 @@ export function scoreOf(
     100 *
       (0.3 * parts.exposure +
         0.15 * parts.length +
-        0.35 * parts.canopy +
+        0.35 * (1 - blocked) +
         0.05 * parts.margin +
         0.15 * parts.level) -
     penaltyOf(m, length, offLevel, p)

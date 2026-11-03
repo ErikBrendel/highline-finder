@@ -139,6 +139,15 @@ interface Props {
   /** Whether elevation is still arriving, which is what a gap in the chart means while it is. */
   fetching: boolean
   /**
+   * Whether a surface model covers this ground.
+   *
+   * False in two thirds of the country, where the app fills the surface in from the terrain so the
+   * series stay finite. The canopy shapes then describe the terrain under a different colour --
+   * and the band ones are the worst of it: `surfaceMax` falls back to the ground band, so a gully
+   * beside the span is painted as a stand of trees. Nothing green is drawn when this is false.
+   */
+  canopyKnown: boolean
+  /**
    * Where along the span the pointer is, in metres, or null when it has left.
    *
    * Reported in metres rather than as a sample index so the 3D view can place a marker without
@@ -249,7 +258,9 @@ export function bridgeGaps(profile: ProfileSample[]): {
   return { samples, gaps, measured }
 }
 
-export function ProfileChart({ c, profile, wings, cover, params, fetching, onHover }: Props) {
+export function ProfileChart({
+  c, profile, wings, cover, params, fetching, canopyKnown, onHover,
+}: Props) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const { samples: p, gaps, measured } = bridgeGaps(profile)
   const crossings = c.crossings ?? []
@@ -334,7 +345,7 @@ export function ProfileChart({ c, profile, wings, cover, params, fetching, onHov
     ) + 3
   /** Whether the band found anything the centreline did not, which is when it is worth drawing. */
   const bandShows = p.some((s) => s.groundMax > s.ground + 0.05)
-  const canopyBandShows = p.some((s) => s.surfaceMax > s.surface + 0.05)
+  const canopyBandShows = canopyKnown && p.some((s) => s.surfaceMax > s.surface + 0.05)
   const iw = W - PAD.left - PAD.right
   const ih = H - PAD.top - PAD.bottom
 
@@ -533,7 +544,7 @@ export function ProfileChart({ c, profile, wings, cover, params, fetching, onHov
         ([wings.before, wings.after] as const).map((part, i) => (
           <g key={i} opacity="0.55">
             <path d={wingFill(part, 'ground')} fill="var(--ground)" />
-            <path d={wingFill(part, 'surface')} fill="var(--canopy)" />
+            {canopyKnown && <path d={wingFill(part, 'surface')} fill="var(--canopy)" />}
             {wingCover(part).map((r) => (
               <path
                 key={r.key}
@@ -543,7 +554,7 @@ export function ProfileChart({ c, profile, wings, cover, params, fetching, onHov
             ))}
           </g>
         ))}
-      <path d={canopyFill} fill="var(--canopy)" opacity="0.5" />
+      {canopyKnown && <path d={canopyFill} fill="var(--canopy)" opacity="0.5" />}
       <path d={groundFill} fill="var(--ground)" opacity="0.9" />
       {runs.map((r) => (
         <path

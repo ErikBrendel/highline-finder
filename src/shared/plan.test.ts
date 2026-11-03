@@ -94,6 +94,33 @@ describe('planLine', () => {
     expect(r.candidate.canopyClearanceMin).toBeLessThan(0)
   })
 
+  /**
+   * Where no surface model exists the app hands planLine the terrain as the surface, so a canopy
+   * figure computed from it is the terrain figure under another name. The test uses the same
+   * grid twice on purpose: that is exactly what terrain.ts passes in two thirds of the country.
+   */
+  it('reports no canopy at all where no surface model covers the ground', () => {
+    const { ground } = terrain(15, 30)
+    const r = planLine(a, b, ground, ground, p.sagRatio, p, null, {}, { canopyKnown: false })!
+    expect(r.candidate.canopyBlockedFraction).toBeNaN()
+    expect(r.candidate.canopyClearanceMin).toBeNaN()
+    expect(r.candidate.scoreParts.canopy).toBeNaN()
+    // Unknown is not charged, so the line still scores on the four components that were measured.
+    expect(Number.isFinite(r.candidate.score)).toBe(true)
+  })
+
+  it('raises no canopy fault for a buried line where the canopy is unknown', () => {
+    const { ground } = terrain(15)
+    // Rigged far enough below the rims that the span runs through the canyon floor, so every
+    // station counts as blocked once the surface is read as the terrain.
+    const rig = { a: -38, b: -38 }
+    const faults = (canopyKnown: boolean) =>
+      planLine(a, b, ground, ground, p.sagRatio, p, rig, {}, { canopyKnown })!.violations.join(' ')
+    expect(faults(true)).toMatch(/inside canopy/)
+    expect(faults(false)).not.toMatch(/inside canopy/)
+    expect(faults(false)).toMatch(/intersects the ground/)
+  })
+
   it('returns null where there is no elevation data', () => {
     const empty = Grid.filled(300, 300, E0, N0 + 300, 1)
     expect(planLine(a, b, empty, empty, p.sagRatio, p)).toBeNull()

@@ -139,7 +139,24 @@ export function planLine(
    * stretch it never read, and the hill that would have set it may be exactly there. Anything
    * showing those numbers has to say so.
    */
-  { tolerateGaps = false }: { tolerateGaps?: boolean } = {},
+  {
+    tolerateGaps = false,
+    canopyKnown = true,
+  }: {
+    tolerateGaps?: boolean
+    /**
+     * Whether a surface model actually covers this ground.
+     *
+     * False outside the four state surveys that publish one. There the app fills the surface in
+     * from the terrain so every series stays finite -- see terrain.ts -- which leaves `surface`
+     * equal to `ground`, and every canopy figure derived from it is the terrain figure wearing a
+     * canopy label. On a line above the ground that reads as "nothing standing here, measured";
+     * on one below it, as a hundred per cent of a span spent inside trees that were never looked
+     * for. Both are the same lie and it is told at every station of every line in two thirds of
+     * the country.
+     */
+    canopyKnown?: boolean
+  } = {},
 ): PlannedLine | null {
   const measuredA = ground.sample(a.e, a.n)
   const measuredB = ground.sample(b.e, b.n)
@@ -174,10 +191,16 @@ export function planLine(
   // Null means not one station along the span was measured, which for a tolerant caller is a line
   // whose figures are unknown rather than a line that does not exist. NaN says unknown where zero
   // would say measured-and-fine, and the charges are zero because nothing seen is nothing to charge.
-  const m =
+  const raw =
     rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings) ??
     (tolerateGaps ? NOTHING_MEASURED : null)
-  if (!m) return null
+  if (!raw) return null
+  // The same NaN, for the same reason, one step further out: nobody looked above this ground, so
+  // the two canopy figures say so rather than restating the terrain. Everything downstream already
+  // reads NaN as unknown -- the panel dashes the row, `violationsOf` raises no canopy fault, and
+  // `scoreOf` leaves the component uncharged instead of crediting it.
+  const m =
+    canopyKnown ? raw : { ...raw, canopyClearanceMin: NaN, canopyBlockedFraction: NaN }
 
   const r2 = (v: number) => Math.round(v * 100) / 100
   const { score, parts } = scoreOf(length, h.offLevel, m, p)

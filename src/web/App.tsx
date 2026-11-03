@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { LINE_KINDS } from '../shared/types.js'
+import type { Pos } from '../shared/grid.js'
 import { withSpan } from '../shared/roads.js'
 import type {
   AnchorDump,
@@ -11,6 +12,7 @@ import type {
   Hotspots,
   LineKind,
   MaskCells,
+  Params,
   Region,
   StoredProfile,
   TileUsage,
@@ -56,6 +58,17 @@ const WING_POINTS = 20
 import { toWgs84 } from '../shared/geo.js'
 
 type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roads' | 'regions'
+
+/**
+ * Whether a surface model covers the corridor a line of this span is measured over.
+ *
+ * One expression, used both to tell the reader and to tell `planLine`, so the banner and the
+ * figures cannot end up disagreeing about whether anything was known about what is standing here.
+ * The corridor is the one the measurement actually reads -- see `measuredHalfWidth` -- rather than
+ * the wider one the drag prefetches.
+ */
+const canopyOver = (a: Pos, b: Pos, length: number, p: Params): boolean =>
+  surfaceKnown(a, b, measuredHalfWidth(length, p))
 
 /** What each anchor class actually means for the trip, which the word alone does not say. */
 const KIND_HELP: Record<LineKind, string> = {
@@ -737,7 +750,15 @@ export function App() {
       // A dragged anchor crosses into ground still being fetched constantly, and a chart of most of
       // the line beats a spinner over all of it. What is missing comes back as a count and the panel
       // says so -- see PlannedLine.unmeasured.
-      { tolerateGaps: true },
+      {
+        tolerateGaps: true,
+        canopyKnown: canopyOver(
+          customUtm.a,
+          customUtm.b,
+          Math.hypot(customUtm.b.e - customUtm.a.e, customUtm.b.n - customUtm.a.n),
+          meta.params,
+        ),
+      },
     )
   }, [meta, customUtm, sagPct, terrainVersion, rig, scene])
 
@@ -1171,7 +1192,7 @@ export function App() {
     () =>
       !shownEnds || !meta
         ? true
-        : surfaceKnown(shownEnds.a, shownEnds.b, measuredHalfWidth(detailed!.length, meta.params)),
+        : canopyOver(shownEnds.a, shownEnds.b, detailed!.length, meta.params),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shownEnds, meta, terrainVersion],
   )

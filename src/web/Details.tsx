@@ -538,10 +538,17 @@ export function Details({
         ]),
     {
       label: 'Score: exp / len / canopy / clear / level',
-      value: stat((c) => {
-        const s = c.scoreParts
-        return [s.exposure, s.length, s.canopy, s.margin, s.level].map(pct).join('/')
-      }),
+      // Dashed per component rather than through `stat`, which blanks a whole row at the first
+      // NaN: the canopy is unknown everywhere without a surface model, and the four parts that
+      // were measured are still worth reading.
+      value: c
+        ? (() => {
+            const s = c.scoreParts
+            return [s.exposure, s.length, s.canopy, s.margin, s.level]
+              .map((v) => (Number.isNaN(v) ? DASH : pct(v)))
+              .join('/')
+          })()
+        : DASH,
     },
   ]
 
@@ -669,6 +676,7 @@ export function Details({
                 cover={cover}
                 params={params}
                 fetching={fetching}
+                canopyKnown={canopyKnown}
                 onHover={setHoverAt}
               />
               {/* Over the chart rather than instead of it, and only where the chart has a hole to
@@ -706,7 +714,9 @@ export function Details({
           )}
           <div className="legend">
             <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m, LGB)</span>
-            <span><i style={{ background: 'var(--canopy)' }} />canopy (bDOM, LGB)</span>
+            {canopyKnown && (
+              <span><i style={{ background: 'var(--canopy)' }} />canopy (bDOM, LGB)</span>
+            )}
             <span><i style={{ background: 'var(--building)' }} />building, counted as ground (LoD1, Brandenburg only)</span>
             <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
             <span><i style={{ background: 'var(--road)' }} />road or rail crossed (OSM)</span>
