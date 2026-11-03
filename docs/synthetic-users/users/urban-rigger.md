@@ -53,9 +53,10 @@ place where a tool can beat the status quo outright.
 - **Wants:** "Measure the span I have been staring at for two years."
 - **Done when:** they have placed two anchors by hand on their building and read back a length and a
   height — or understood why they cannot.
-- **Gives up when:** the measurement fails silently. Saxony's survey serves no CORS header, so a
-  hand-placed anchor there cannot be measured at all: this is a real product limitation, and what it
-  looks like to the person it happens to is the finding.
+- **Gives up when:** the height they read back is the pavement. Outside Brandenburg there is no
+  building model at all, and outside the four state surveys no surface model either — the
+  republisher that answers for the rest of Germany is bare terrain. So a roof anchor measured in
+  their own city is measured as ground, and whether the screen says so is the finding.
 - **Without the tool:** the rangefinder, on the day, after getting on the roof — which needs the
   permission this plan was supposed to help get.
 

@@ -99,9 +99,11 @@ run should be read against that: a fix that adds a control is probably the wrong
 - **The urban half does not announce itself.** Covering one rectangle of Brandenburg and no part of
   Berlin, with roof heights from a block model that cannot know about a parapet or a plant room.
   (urban-rigger S1, S3, S4)
-- **A measurement outside Brandenburg can fail silently.** Saxony's survey serves no CORS header, so
-  a hand-placed anchor there cannot be measured. Whatever the screen says at that moment is what the
-  sceptical rigger from elsewhere takes away. (urban-rigger S2, dsv-highliner S3)
+- **Outside Brandenburg, a roof measures as ground.** Heights still come back — four state surveys,
+  then the hoehendaten republisher for the rest of Germany — but only Brandenburg has a building
+  model, and the republisher has no surface model either, so anything standing is invisible. The
+  coverage map in the guide says this in three tiers; the measurement itself does not. (urban-rigger
+  S2, dsv-highliner S3)
 
 ### Status quo wins
 - **Finding spots the usual way.** Years of rigging, a memory full of places and the people who know
