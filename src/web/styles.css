@@ -1106,6 +1106,16 @@ header .external {
 }
 header .external:hover { border-color: var(--accent); }
 
+/* Beside the two links, because it points at the same kind of thing: somewhere else to open this. */
+header .share {
+  flex: none;
+  font: inherit; font-size: 11px; color: var(--accent);
+  border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px;
+  background: transparent; cursor: pointer; white-space: nowrap;
+}
+header .share:hover { border-color: var(--accent); }
+header .share[data-state='failed'] { color: var(--bad); }
+
 /*
  * The header, given less room than it wants.
  *

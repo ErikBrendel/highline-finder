@@ -1,13 +1,14 @@
 # First-highline longliner — training on park lines, looking for a gap small enough to survive
 
 Rigs 100–150 m longlines in a park to train, owns a few hundred euros of tensioning gear, and wants
-a first real gap. What they need is the opposite of impressive: short, low, close to a road, nothing
-underneath that punishes a mistake. Every tool in the sport, this one included, ranks lines by how
-good they are — and "good" means long and high, which is exactly what this person must avoid.
+a first real gap. Height is not the constraint — a first highline can be a kilometre in the air, and
+nobody rigs a shorter line because it is lower. Length is: a line longer than the webbing in the bag
+cannot be rigged at all, by anyone, ever. Every tool in the sport ranks lines by how good they are,
+and part of "good" is simply "long", which is the one axis this person cannot move on.
 
-- **Why this persona:** the only one whose goal runs against the product's ranking. If the score, the
-  sliders and the map cannot be made to surface a small, dull, safe line, that is a finding no other
-  persona can produce. Also the only one for whom the gear they own is a hard constraint on length.
+- **Why this persona:** the only one arriving with a hard cap on what they can rig, and so the only
+  one for whom most of the dataset is noise. Also the only one who has never rigged a highline, so
+  the only one who reads the numbers without already knowing what they ought to say.
 - **Merged from:** longliner working up to a first highline, gear-constrained improviser (whether a
   span is short enough for what they actually own), the customers of commercial highline courses
 - **Device:** phone, because this gets looked at in gaps during the day. Emulate as `Pixel 7`.
@@ -15,77 +16,74 @@ good they are — and "good" means long and high, which is exactly what this per
 - **Sources:** https://www.reddit.com/r/Slackline/comments/1ur6fw4/ , https://www.reddit.com/r/Slackline/comments/1vjdevr/ , https://www.oneinchdreams.com/en/slackline-highline-courses
 
 ## Context
-Comfortable on a 100 m longline in a park, has never rigged over a gap, and is looking for the one
-that will not be the last. Owns one length of webbing and a set of pulleys: a line longer than what
-is in the bag is not a stretch goal, it is impossible. Everything in the sport points the other way
-— the photos, the records, the lines people post — and the people who could judge a first gap are
-the same people who find the small ones boring.
+Comfortable on a 100 m longline in a park, has never rigged over a gap. Owns one length of webbing
+and a set of pulleys, and that length is the whole of what is possible: a 300 m span is not
+ambitious, it is equipment they do not have. Would go with someone experienced — that part is not
+in doubt — but the trip has to be worth that person's weekend.
 
 ## How they do it today
 Asking in the club, and going along to whatever someone else rigs. That works, and it is slow: it
-depends on someone experienced having both the time and a reason to go to a small, dull spot. A tool
-that could hand them a shortlist to take to that person would be genuinely new — which is why the
-failure mode here is the tool handing them something impressive instead.
+waits on an experienced rigger having both the time and a reason to go. A shortlist of real spans
+within the gear, to take to that person, would be genuinely new — which is why the failure mode
+here is the tool handing them lines they cannot rig.
 
 ## Goals and frustrations
-- Find a short gap, low over soft ground, that the gear in the bag can actually span.
-- Not be sold the best line. The best line is the one they must not rig first.
-- Work out what is underneath before going, since that is what a mistake lands in.
-- Have something concrete to show the experienced rigger who would come along.
+- Find gaps the webbing in the bag can actually span.
+- Understand what the two ends are, since a tree they can sling is the difference between a plan
+  and a daydream.
+- Have something concrete enough that an experienced rigger would agree to come along.
+- Not be made to feel the small line is the wrong line.
 
 ## User stories
-### S1 — Something small, near me
+### S1 — Anything near me at all
 - **Arrives:** the bare tool, on the phone, in a gap during the day.
   `http://localhost:5173/highline-finder/`
 - **Device:** Pixel 7
-- **Wants:** "Is there a short, low gap anywhere near me?"
-- **Done when:** they have a line on screen under about 120 m and under about 20 m of air, and know
-  roughly where it is. The data holds about five thousand such lines, so this story failing is a
-  surfacing failure, not an absence.
-- **Gives up when:** the opening screen shows the long spectacular ones and offers no way to ask for
-  the opposite.
+- **Wants:** "Is there a gap anywhere near me I could actually rig?"
+- **Done when:** they have a specific line on screen and know roughly where it is.
+- **Gives up when:** the opening screen is a map of a whole state and gives them no first move.
 - **Without the tool:** asking in the club, which works but waits on someone else's weekend.
 
 ### S2 — What is in the bag
 - **Arrives:** continuing from S1, with one hundred metres of webbing and no more.
 - **Device:** Pixel 7
 - **Wants:** "Hide everything I cannot physically rig."
-- **Done when:** they have set an upper length bound and are looking only at lines that fit the gear.
+- **Done when:** they have set an upper length bound and are looking only at lines that fit the
+  gear. About 5,000 of the 22,371 natural lines are 120 m or under, so there is plenty to find.
 - **Gives up when:** the upper bound cannot be found. Length is one track with two handles, and
   whether the second handle is grabbable with a thumb is the thing to watch.
-- **Without the tool:** a rule of thumb and disappointment on arrival.
+- **Without the tool:** a rule of thumb, and disappointment on arrival.
 
-### S3 — The score says this line is mediocre
-- **Arrives:** having found exactly what they wanted: short, low, dull. Its score is around 60; the
-  best in the dataset is 88.
+### S3 — What the number means
+- **Arrives:** having found a line inside the gear limit. Its score is lower than the ones they
+  scrolled past.
 - **Device:** Pixel 7
-- **Wants:** to know whether a middling score means a bad line or a small one.
-- **Done when:** they can tell that the score ranks spectacle, not safety, and that a low score is
-  not a warning.
-- **Gives up when:** they read 60-out-of-88 as "this line is poor" and go looking for a higher
-  number — which, for a first highline, is the most dangerous thing this product could cause.
-- **Without the tool:** nobody ranks lines today, so there is no number to misread. This frustration
-  is one the tool introduces.
+- **Wants:** to know whether a lower number means a worse line or just a shorter one.
+- **Done when:** they can tell which part of the score they are looking at. Length is 15 of the 100
+  points and is simply span over the 500 m maximum, so a 100 m line gives up about twelve points
+  for being short — nothing to do with whether it is safe to rig.
+- **Gives up when:** they read the number as a verdict and go looking for a higher one, which means
+  going looking for a longer line than they own webbing for.
+- **Without the tool:** nobody ranks lines today, so there is no number to misread. This confusion
+  is one the product introduces.
 
-### S4 — What is actually underneath
-- **Arrives:** with that line open, before deciding to go and look.
+### S4 — What is at the two ends
+- **Arrives:** with that line open, deciding whether to put it in front of an experienced rigger.
 - **Device:** Pixel 7
-- **Wants:** "Is that water, a road, brambles or a field? Is the ground even down there?"
-- **Done when:** they have read the ground profile and can say what a fall would be over.
-- **Gives up when:** the profile is a chart without units or landmarks and they cannot connect it to
-  the map above it.
-- **Without the tool:** going and standing there, which they will do anyway — the tool is only
-  deciding whether the trip is worth it.
+- **Wants:** "What am I tying to? Trees? How big? Can I get to both ends?"
+- **Done when:** they can say what each anchor stands on and roughly what it is.
+- **Gives up when:** the ends are two coordinates and a height and nothing about what is there — in
+  which case the whole trip is still a guess and the tool has saved nothing.
+- **Without the tool:** going and standing there, or satellite imagery, which is what they would do
+  anyway.
 
-### S5 — Asking for less air
-- **Arrives:** trying to narrow to the lowest thing they can find.
+### S5 — Showing it to someone who knows
+- **Arrives:** at the end, having found one or two candidates.
 - **Device:** Pixel 7
-- **Wants:** "Show me nothing higher than fifteen metres."
-- **Done when:** they have worked out what the exposure control can and cannot do for them. It sets
-  a minimum only, so "at least this much air" is expressible and "at most" is not — the one thing
-  this person wants to say to the tool is the one thing it has no control for.
-- **Gives up when:** they move the exposure slider, watch the low lines disappear instead of the
-  high ones, and conclude the tool is for other people.
-- **Without the tool:** the club picks the spot. Worth knowing as well: the search itself never
-  looked below ten metres of air, so the beginner band is outside the dataset by construction, not
-  merely unfiltered.
+- **Wants:** to send it to the club's experienced rigger in a way that survives the sending.
+- **Done when:** a link is in the chat app, and what the other person opens says enough to get a
+  yes or a no.
+- **Gives up when:** getting the link out of the browser on a phone is more effort than describing
+  the place in words.
+- **Without the tool:** "there's a gap near the quarry, want to look at it?" — which is the status
+  quo, and it is not bad. The tool only wins if what arrives is more convincing than that sentence.

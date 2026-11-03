@@ -14,6 +14,7 @@ import {
 } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
 import { Terrain3D } from './Terrain3D.js'
+import { ShareButton } from './ShareButton.js'
 
 function scoreColor(score: number): string {
   if (score >= 70) return '#22c55e'
@@ -607,6 +608,9 @@ export function Details({
               i
             </button>
           )}
+          {/* Only in the full view: on the card the header's own share button is in plain sight a
+              few pixels above, and this is the view a line actually gets sent from. */}
+          {full && <ShareButton className="close" />}
           {!full && (
             <button
               className="close"

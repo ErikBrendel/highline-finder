@@ -153,9 +153,18 @@ function facesFor(tile: string): Promise<LevelFace[]> {
     const name = Object.keys(entries).find((k) => k.endsWith('.gml'))
     return name ? levelFaces(new TextDecoder().decode(entries[name]!)) : []
   })().catch((e: unknown) => {
-    // A 404 is the answer for a tile with no buildings in it, and saying so for every empty field
-    // in Brandenburg would drown out the failures worth seeing. Anything else is one of those.
-    if (!/\b404\b/.test(String(e))) report(`loading the city model for tile ${tile}`, e)
+    // A tile with no buildings in it answers 404, and saying so for every empty field in
+    // Brandenburg would drown out the failures worth seeing. The catch is that the service sends
+    // its CORS header on a 200 and none at all on a 404, so the browser cannot read the status and
+    // the miss arrives as a bare `TypeError: Failed to fetch` -- which is also what a dropped
+    // connection looks like. Both are "no roofs here, carry on", and neither is worth a toast on a
+    // first visit. Anything that is not a fetch failure -- a corrupt zip, a GML this parser cannot
+    // read -- is a real one and still says so.
+    if (!(e instanceof TypeError) && !/\b404\b/.test(String(e))) {
+      report(`loading the city model for tile ${tile}`, e)
+    } else {
+      console.warn(`[highline] no city model for tile ${tile}:`, e)
+    }
     return []
   })
   roofFaces.set(tile, job)

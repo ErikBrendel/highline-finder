@@ -91,13 +91,11 @@ run should be read against that: a fix that adds a control is probably the wrong
 - **A missing tile reads as a failure.** The toast says "1 background failure" when an LoD1 building
   tile 404s over rural ground where no building model exists. First impression, first screen.
   (every arrival story)
-- **Exposure has no upper bound.** The slider sets a minimum, so "at most fifteen metres of air" —
-  the only sentence the beginner wants to say — cannot be said. Every other filter that matters for
-  avoiding a line rather than finding one has the same shape. (first-highline S5)
-- **The score ranks spectacle and is read as a verdict.** Its parts are exposure, length, canopy,
-  margin and level: long and high scores high. A short, low, safe line lands near 60 against a best
-  of 88, and 60 looks like a warning. About 5,000 lines in the dataset are under 120 m with under
-  20 m of air, so this is a surfacing problem, not an absence. (first-highline S1, S3)
+- **The score is one number standing in for five, and is read as a verdict.** Weights are exposure
+  0.30, canopy 0.35, length 0.15, level 0.15, margin 0.05. Length is span over the 500 m maximum, so
+  a 100 m line gives up about twelve points for being short — which says nothing about whether it is
+  safe to rig, and a reader with no feel for the scale cannot tell that deduction from the canopy
+  one, which says a great deal. (first-highline S3, newcomer S2)
 - **The urban half does not announce itself.** Covering one rectangle of Brandenburg and no part of
   Berlin, with roof heights from a block model that cannot know about a parapet or a plant room.
   (urban-rigger S1, S3, S4)
@@ -113,3 +111,13 @@ run should be read against that: a fix that adds a control is probably the wrong
   The product's job here is to stop its own number from being read as that judgement.
 - **The owner conversation.** Permission, access and liability are human work. The only part a tool
   can take is the plan that opens the conversation — which is exactly the part that is missing.
+
+## 2026-11-03 — corrections from Erik, before any test was run
+
+- **Contradicted: "a first highline wants little air".** It does not. A first highline can be a
+  kilometre up; nobody picks a lower gap to be safer. The only hard constraint is span, because
+  webbing that is too short cannot be stretched. The exposure-upper-bound idea is withdrawn, and the
+  `first-highline` persona was rewritten around gear length and anchor quality instead.
+- **Consequence for the score finding:** it is weaker than it was written. A short line loses only
+  the length term, about twelve points, not the thirty the earlier note implied. What survives is
+  that one number hides which of five things it is reporting.

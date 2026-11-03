@@ -36,6 +36,7 @@ import { Details } from './Details.js'
 import type { WingSample } from './ProfileChart.js'
 import { Guide, useGuide } from './Guide.js'
 import { fitHeader } from './headerFit.js'
+import { ShareButton } from './ShareButton.js'
 import { useRemembered } from './remembered.js'
 import { watchLocation, type Fix } from './locate.js'
 import { overlaps, touches, type Bbox } from './inView.js'
@@ -1344,6 +1345,7 @@ export function App() {
         >
           <Label full="GitHub ↗" short="GH ↗" />
         </a>
+        <ShareButton className="share" />
         <button
           className="guidebtn"
           onClick={guide.show}
