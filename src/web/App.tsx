@@ -1653,6 +1653,7 @@ export function App() {
               onMoveAnchor={moveAnchor}
               onFlip={flipAnchors}
               onGuide={guide.show}
+              guideOpen={guide.open}
               rig={rig}
               onRig={(next) => {
                 forkSelected()

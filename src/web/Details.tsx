@@ -248,6 +248,7 @@ interface Props {
   onFlip: () => void
   /** Open the guide, which the full view otherwise covers up. */
   onGuide: () => void
+  guideOpen: boolean
   onClose: () => void
 }
 
@@ -273,7 +274,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
   canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onGuide, onClose,
+  rig, onRig, onFlip, onGuide, guideOpen, onClose,
 }: Props) {
   /**
    * The full-screen view of one line.
@@ -285,13 +286,19 @@ export function Details({
   useEffect(() => {
     if (!full) return
     const onKey = (e: KeyboardEvent) => {
-      // Escape leaves the full view rather than closing the line, which is the smaller undo and so
-      // the one a key with no label should do.
-      if (e.key === 'Escape') onFull(false)
+      if (e.key !== 'Escape') return
+      // One Escape undoes one thing, topmost first. The guide listens on the window as well, so
+      // without this the key would shut the guide and drop the full view out from behind it in the
+      // same stroke. `guideOpen` stays true through the closing animation, which is what keeps a
+      // second press from landing before the dialog is actually gone.
+      if (guideOpen) return
+      // Otherwise it leaves the full view rather than closing the line, which is the smaller undo
+      // and so the one a key with no label should do.
+      onFull(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [full])
+  }, [full, guideOpen])
 
   /**
    * Where the pointer is on the profile, shared with the 3D view below it.
