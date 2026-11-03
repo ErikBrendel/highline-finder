@@ -13,6 +13,7 @@ import {
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Scene3D } from './scene3d.js'
+import { IMAGERY_SHORT } from './surveys.js'
 
 /**
  * The site in three dimensions, for the full-screen view of one line.
@@ -182,9 +183,66 @@ export function Terrain3D({
   }, [spin])
   /** Bumped when the ground under the view has to be read again. */
   const [epoch, setEpoch] = useState(0)
+  /**
+   * Whether this view has ever been on screen.
+   *
+   * The 3D view sits at the bottom of the full-screen panel, under the figures and both sets of
+   * sliders, so on a phone it is usually two screens below the fold when the panel opens. The
+   * terrain itself is read from windows the rest of the page already needed; the imagery is not --
+   * it is a dozen requests to state servers for a picture nobody has looked at yet. So it waits.
+   *
+   * Sticky once true: the texture is already in hand by then, and scrolling back up must not throw
+   * it away and fetch it again on the way down.
+   */
+  const [seen, setSeen] = useState(false)
+  /** Whether the imagery landed, since the credit is owed only once its pixels are on screen. */
+  const [textured, setTextured] = useState(false)
 
   const moveRef = useRef(onMoveAnchor)
   moveRef.current = onMoveAnchor
+
+  useEffect(() => {
+    if (seen || !host.current) return
+    const watch = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setSeen(true)
+      },
+      // A screen's warning, so the imagery is usually there by the time the view is scrolled to.
+      { rootMargin: '400px' },
+    )
+    watch.observe(host.current)
+    return () => watch.disconnect()
+  }, [seen])
+
+  /**
+   * The aerial photograph over the ground, once there is ground and somebody looking at it.
+   *
+   * Keyed on the patch as well as on the view being seen, because a drag that runs an anchor out of
+   * the square rebuilds the scene -- and a scene rebuilt without this would be the only part of the
+   * view that silently lost its texture. Aborting on the way out matters for the same reason: the
+   * answer is for a square that no longer exists.
+   */
+  useEffect(() => {
+    if (!seen || state !== 'ready') return
+    const g = ground.current
+    if (!g) return
+    setTextured(false)
+    const stop = new AbortController()
+    void (async () => {
+      try {
+        const { orthoPatch } = await import('./ortho.js')
+        const image = await orthoPatch(g.centre, g.halfSide, stop.signal)
+        if (stop.signal.aborted) return
+        scene.current?.setOrtho(image)
+        setTextured(!!image)
+      } catch (e: unknown) {
+        // Decoration. Every state server in the stack can be down without this view being wrong,
+        // and a toast about a missing photograph would be noise over a picture that is complete.
+        if (!stop.signal.aborted) console.warn('[highline] no imagery for the 3D view:', e)
+      }
+    })()
+    return () => stop.abort()
+  }, [seen, state, epoch])
 
   useEffect(() => {
     preferred = exaggeration
@@ -510,6 +568,7 @@ export function Terrain3D({
           <span>No 3D view &mdash; {failed}</span>
         </div>
       )}
+      {textured && <span className="scenecredit">{IMAGERY_SHORT}</span>}
       {state === 'ready' && (
         <button
           className="spin3d"

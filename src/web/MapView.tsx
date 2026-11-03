@@ -16,8 +16,11 @@ import { cachedUrl } from './tileCache.js'
 import { report } from './report.js'
 import { shadedUrl } from './shaded.js'
 import { stackedUrl } from './stacked.js'
-import { stateBox } from './coverage.js'
-import { FEDERAL_SHADE, ORTHO_SURVEYS, SHADE_SURVEYS, type SurveyLayer } from './surveys.js'
+import { clipped, ORTHO } from './ortho.js'
+import {
+  BKG_ATTR, creditsFor, FEDERAL_SHADE, LGB_ATTR, ORTHO_SURVEYS, SENTINEL,
+  SHADE_SURVEYS,
+} from './surveys.js'
 import { integration } from './integration.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
@@ -34,30 +37,9 @@ import { sideHalfWidthAt } from '../shared/profile.js'
  * {bbox-epsg-3857} raster template works without a reprojecting proxy. Attribution is not
  * decoration here: dl-de/by-2.0 requires naming GeoBasis-DE/LGB wherever the data is shown.
  */
-const LGB_ATTR = '&copy; GeoBasis-DE/LGB (dl-de/by-2.0)'
-const GEOSN_ATTR = '&copy; GeoBasis-DE/GeoSN (dl-de/by-2.0)'
-const LVERMGEO_ST_ATTR = '&copy; GeoBasis-DE/LVermGeo ST (dl-de/by-2.0)'
-const BKG_ATTR = '&copy; GeoBasis-DE/BKG (dl-de/by-2.0)'
-/** The surveys whose orthophotos the stack reaches for outside the three it started with. */
-const DOP_ATTR = [
-  '&copy; GeoBasis-DE/NRW (dl-de/zero-2.0)',
-  '&copy; Bayerische Vermessungsverwaltung (CC BY 4.0)',
-  '&copy; LGL-BW (dl-de/by-2.0)',
-  '&copy; GeoBasis-DE/LGLN (CC BY 4.0)',
-  '&copy; GDI-Th (dl-de/by-2.0)',
-  '&copy; GeoBasis-DE/LVermGeoRP (dl-de/by-2.0)',
-  '&copy; GeoBasis-DE/LVermGeo SH (CC BY 4.0)',
-  '&copy; LVGL-SL (dl-de/by-2.0)',
-  '&copy; Landesamt GeoInformation Bremen (CC BY 4.0)',
-].join(' &middot; ')
-const S2_ATTR =
-  '<a href="https://s2maps.eu" target="_blank" rel="noreferrer">Sentinel-2 cloudless</a> by EOX ' +
-  '(modified Copernicus Sentinel data 2020, CC BY 4.0)'
 const OSM_ATTR = '&copy; OpenStreetMap contributors (ODbL)'
 /** Every survey whose imagery can appear in a stacked basemap, since any of them may be on screen. */
-const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, BKG_ATTR, DOP_ATTR, S2_ATTR].join(
-  ' &middot; ',
-)
+const BASEMAP_ATTR = creditsFor([SENTINEL, ...ORTHO_SURVEYS, FEDERAL_SHADE, ...SHADE_SURVEYS])
 
 /**
  * Attribution for the data behind the measurements, shown whatever basemap is on.
@@ -73,56 +55,6 @@ const BASEMAP_ATTR = [LGB_ATTR, GEOSN_ATTR, LVERMGEO_ST_ATTR, BKG_ATTR, DOP_ATTR
  * `npm run boundaries`.
  */
 const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR, BKG_ATTR]
-/**
- * Where each survey has imagery, read off the outlines rather than typed in. See `stateBox`.
- *
- * A survey that answers for more than one state gets the box around all of them: Brandenburg's
- * covers Berlin too, and Berlin is a hole in Brandenburg's outline, so taking only Brandenburg's
- * box would leave the city as a square of Sentinel-2 in the middle of its own survey.
- */
-function boxFor(states: string[]): [number, number, number, number] {
-  const boxes = states.map(stateBox)
-  return [
-    Math.min(...boxes.map((b) => b[0])),
-    Math.min(...boxes.map((b) => b[1])),
-    Math.max(...boxes.map((b) => b[2])),
-    Math.max(...boxes.map((b) => b[3])),
-  ]
-}
-
-/** One survey's layer, clipped to the ground it answers for. See surveys.ts. */
-const clipped = (l: SurveyLayer) => ({ ...l, bbox: boxFor(l.states) })
-
-/**
- * The three basemaps, each assembled from whatever survey covers the ground on screen.
- *
- * Bottom to top, broadest first. What covers the whole country goes in first and is what stops
- * either of these from being blank anywhere; over it go the state layers, each ending where its own
- * survey does. Which surveys those are is surveys.ts, so that the coverage map in the guide can
- * colour a state from the same list this stack is built from.
- */
-const ORTHO = stackedUrl('ortho', {
-  layers: [
-    /**
-     * Sentinel-2, cloud-free, everywhere.
-     *
-     * The bottom of the stack has to be imagery and not a map, or panning out of a surveyed state
-     * turns the orthophoto view into something that looks like the OSM view beside it. Ten metres
-     * a pixel against the surveys' twenty centimetres, so it is scenery rather than something to
-     * site an anchor on -- but it is unmistakably the ground, which is the whole job down here.
-     * Openly licensed and needs no key, which the federal orthophoto coverage does.
-     *
-     * Eighteen is where EOX stops holding tiles, though its capabilities advertise a matrix set
-     * down to twenty-one. Past that it is blown up rather than asked. See `maxzoom`.
-     */
-    {
-      url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',
-      maxzoom: 18,
-    },
-    ...ORTHO_SURVEYS.map(clipped),
-  ],
-})
-
 /**
  * The relief, with the flat-ground grey underneath it.
  *

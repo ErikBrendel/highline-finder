@@ -26,10 +26,24 @@ export const anyWms = (base: string, layer: string, crs = 'EPSG:3857') =>
   `&LAYERS=${layer}&STYLES=&CRS=${crs}&WIDTH=256&HEIGHT=256` +
   `&FORMAT=image/png&TRANSPARENT=true&BBOX={bbox-epsg-3857}`
 
+/**
+ * Who has to be named wherever a layer's pixels are shown.
+ *
+ * On the layer rather than in a list beside it, because the pixels now appear in two places: the
+ * basemap, and the texture on the 3D view's ground. dl-de/by-2.0 and CC BY both require the credit
+ * wherever the data is, and a second hand-kept list would be a second chance to forget one.
+ */
+export const LGB_ATTR = '&copy; GeoBasis-DE/LGB (dl-de/by-2.0)'
+export const GEOSN_ATTR = '&copy; GeoBasis-DE/GeoSN (dl-de/by-2.0)'
+export const LVERMGEO_ST_ATTR = '&copy; GeoBasis-DE/LVermGeo ST (dl-de/by-2.0)'
+export const BKG_ATTR = '&copy; GeoBasis-DE/BKG (dl-de/by-2.0)'
+
 export interface SurveyLayer {
   /** As named in states.json. More than one where a survey answers for more than one state. */
   states: string[]
   url: string
+  /** The credit this survey's licence requires. */
+  attr: string
   /** Grey this product renders flat ground at, where it is not the common one. See shadeMath. */
   baseline?: number
   /** How far its relief is scaled to match Brandenburg's. See shadeMath. */
@@ -52,10 +66,11 @@ const bbWms = (path: string, layer: string) =>
  * without one falls all the way to the ten-metre imagery rather than borrowing a neighbour's.
  */
 export const ORTHO_SURVEYS: SurveyLayer[] = [
-  { states: ['Brandenburg', 'Berlin'], url: bbWms('dop20c', 'bebb_dop20c') },
+  { states: ['Brandenburg', 'Berlin'], url: bbWms('dop20c', 'bebb_dop20c'), attr: LGB_ATTR },
   {
     states: ['Sachsen'],
     url: anyWms('https://geodienste.sachsen.de/wms_geosn_dop-rgb/guest', 'sn_dop_020'),
+    attr: GEOSN_ATTR,
   },
   {
     states: ['Sachsen-Anhalt'],
@@ -63,14 +78,17 @@ export const ORTHO_SURVEYS: SurveyLayer[] = [
       'https://geodatenportal.sachsen-anhalt.de/wss/service/ST_LVermGeo_DOP_WMS_OpenData/guest',
       'lsa_lvermgeo_dop20_2',
     ),
+    attr: LVERMGEO_ST_ATTR,
   },
   {
     states: ['Nordrhein-Westfalen'],
     url: anyWms('https://www.wms.nrw.de/geobasis/wms_nw_dop', 'nw_dop_rgb'),
+    attr: '&copy; GeoBasis-DE/NRW (dl-de/zero-2.0)',
   },
   {
     states: ['Bayern'],
     url: anyWms('https://geoservices.bayern.de/od/wms/dop/v1/dop20', 'by_dop20c'),
+    attr: '&copy; Bayerische Vermessungsverwaltung (CC BY 4.0)',
   },
   {
     states: ['Baden-Württemberg'],
@@ -78,30 +96,37 @@ export const ORTHO_SURVEYS: SurveyLayer[] = [
       'https://owsproxy.lgl-bw.de/owsproxy/ows/WMS_INSP_BW_Orthofoto_DOP20',
       'OI.OrthoimageCoverage',
     ),
+    attr: '&copy; LGL-BW (dl-de/by-2.0)',
   },
   {
     states: ['Niedersachsen'],
     url: anyWms('https://opendata.lgln.niedersachsen.de/doorman/noauth/dop_wms', 'ni_dop20'),
+    attr: '&copy; GeoBasis-DE/LGLN (CC BY 4.0)',
   },
   {
     states: ['Thüringen'],
     url: anyWms('https://www.geoproxy.geoportal-th.de/geoproxy/services/DOP', 'th_dop'),
+    attr: '&copy; GDI-Th (dl-de/by-2.0)',
   },
   {
     states: ['Rheinland-Pfalz'],
     url: anyWms('https://geo4.service24.rlp.de/wms/rp_dop20.fcgi', 'rp_dop20'),
+    attr: '&copy; GeoBasis-DE/LVermGeoRP (dl-de/by-2.0)',
   },
   {
     states: ['Schleswig-Holstein'],
     url: anyWms('https://dienste.gdi-sh.de/WMS_SH_DOP20col_OpenGBD', 'sh_dop20_rgb'),
+    attr: '&copy; GeoBasis-DE/LVermGeo SH (CC BY 4.0)',
   },
   {
     states: ['Saarland'],
     url: anyWms('https://geoportal.saarland.de/freewms/dop2019', 'sl_dop2019'),
+    attr: '&copy; LVGL-SL (dl-de/by-2.0)',
   },
   {
     states: ['Bremen'],
     url: anyWms('https://geodienste.bremen.de/wms_dop_lb', 'dop10_2025_HB'),
+    attr: '&copy; Landesamt GeoInformation Bremen (CC BY 4.0)',
   },
 ]
 
@@ -125,6 +150,7 @@ export const FEDERAL_SHADE = {
     'https://sgx.geodatenzentrum.de/wms_basemapde_schummerung',
     'de_basemapde_web_raster_hillshade',
   ),
+  attr: BKG_ATTR,
   contrast: 0.86,
 }
 
@@ -143,10 +169,11 @@ export const FEDERAL_SHADE = {
  * Mecklenburg-Vorpommern's is watermarked like its orthophoto.
  */
 export const SHADE_SURVEYS: SurveyLayer[] = [
-  { states: ['Brandenburg', 'Berlin'], url: bbWms('dgm', 'dgmshade') },
+  { states: ['Brandenburg', 'Berlin'], url: bbWms('dgm', 'dgmshade'), attr: LGB_ATTR },
   {
     states: ['Sachsen'],
     url: anyWms('https://geodienste.sachsen.de/wms_geosn_hoehe/guest', 'relief'),
+    attr: GEOSN_ATTR,
     baseline: 0xdd,
     contrast: 0.52,
   },
@@ -157,6 +184,7 @@ export const SHADE_SURVEYS: SurveyLayer[] = [
       'lvermgeo_dgm5_schummerung',
       'EPSG:900913',
     ),
+    attr: LVERMGEO_ST_ATTR,
     baseline: 0xb3,
     // The one factor that is resolution-dependent, since this is a DGM5 product against two DGM1
     // ones: measured 2.7 from ten metres a pixel out, rising as far as 6.6 at two, where it has
@@ -169,3 +197,39 @@ export const SHADE_SURVEYS: SurveyLayer[] = [
 /** The states any of these layers answers for. */
 export const statesCovered = (layers: SurveyLayer[]): Set<string> =>
   new Set(layers.flatMap((l) => l.states))
+
+/**
+ * Sentinel-2, cloud-free, everywhere, under every orthophoto there is.
+ *
+ * The bottom of the imagery stack has to be imagery and not a map, or panning out of a surveyed
+ * state turns the orthophoto view into something that looks like the OSM view beside it. Ten metres
+ * a pixel against the surveys' twenty centimetres, so it is scenery rather than something to site
+ * an anchor on -- but it is unmistakably the ground, which is the whole job down here. Openly
+ * licensed and needs no key, which the federal orthophoto coverage does.
+ *
+ * Eighteen is where EOX stops holding tiles, though its capabilities advertise a matrix set down to
+ * twenty-one. Past that it is blown up rather than asked. See `maxzoom` in stacked.ts.
+ */
+export const SENTINEL = {
+  url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg',
+  maxzoom: 18,
+  attr:
+    '<a href="https://s2maps.eu" target="_blank" rel="noreferrer">Sentinel-2 cloudless</a> by EOX ' +
+    '(modified Copernicus Sentinel data 2020, CC BY 4.0)',
+}
+
+/** Every credit a set of layers owes, each named once however many layers carry it. */
+export const creditsFor = (layers: { attr: string }[]): string =>
+  [...new Set(layers.map((l) => l.attr))].join(' &middot; ')
+
+/** What the orthophoto stack owes, wherever its pixels are shown -- the map, or the 3D ground. */
+export const IMAGERY_ATTR = creditsFor([SENTINEL, ...ORTHO_SURVEYS])
+
+/**
+ * The same thing short enough for the corner of the 3D view.
+ *
+ * The full list is thirteen surveys long and would be most of the picture. It is one Escape away on
+ * the map, where the licences' naming requirement is already met in full; this says whose pixels
+ * these are and where the rest of the sentence is.
+ */
+export const IMAGERY_SHORT = 'Imagery: state orthophotos \u00b7 Sentinel-2 cloudless by EOX'

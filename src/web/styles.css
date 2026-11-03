@@ -813,6 +813,22 @@ header[data-measuring] .spacer { flex: none; }
   color: var(--muted);
   border: 1px solid var(--border);
 }
+/* Top left, which is the only corner of the scene nothing else uses: the spin switch has the
+   right, and the legend and the heights run the whole way along the bottom. Small enough to be a
+   credit rather than a label, and on screen only while the imagery it names is. */
+.scenecredit {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--muted);
+  background: rgba(15, 17, 21, 0.6);
+  border-radius: 4px;
+  padding: 2px 5px;
+  pointer-events: none;
+  max-width: calc(100% - 16px);
+}
 .spin3d:hover { color: var(--text); border-color: var(--muted); }
 .spin3d[data-on] { color: var(--accent); border-color: var(--accent); }
 

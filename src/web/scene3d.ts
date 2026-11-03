@@ -2,7 +2,8 @@ import {
   AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
   DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
-  Vector3, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture,
+  Vector3, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture, Texture,
+  ClampToEdgeWrapping, SRGBColorSpace,
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import type { MeshData } from './terrainMesh.js'
@@ -73,8 +74,26 @@ export interface SceneInput {
   props?: { x: number; y: number; z: number }
 }
 
+/**
+ * How much of the photograph is let through, at most.
+ *
+ * Set by eye against the one thing that must not break: a lake has to still read as water and a
+ * wood as a wood on a hillside whose imagery was flown in a dry August. Past about a half the
+ * classification stops being the thing you see and the view becomes a slightly worse satellite map,
+ * which exists already and is one click away.
+ */
+const ORTHO_MIX = 0.45
+
 export interface Scene3D {
   dispose(): void
+  /**
+   * Lays the aerial photograph of this square over the ground, or takes it away.
+   *
+   * Separate from the mesh because it arrives separately: the terrain is drawn from heights that
+   * are already held, and the imagery is a dozen requests to somebody else's server that are not
+   * made at all until the view is actually being looked at.
+   */
+  setOrtho(image: ImageBitmap | null): void
   /** Redraws at a different vertical scale, keeping the camera where the viewer put it. */
   setExaggeration(k: number): void
   /** Replaces the span without touching the terrain, which is the expensive half. */
@@ -155,7 +174,66 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     g.computeVertexNormals()
     return g
   }
-  const ground = new Mesh(geometryOf(input.mesh), new MeshLambertMaterial({ vertexColors: true }))
+  /**
+   * The aerial photograph of this square, mixed into the measured colours rather than over them.
+   *
+   * The colours are what the ground *is* -- wood, water, building, bare earth, each read from the
+   * survey -- and they have to stay readable, so the photograph is let in as texture and almost no
+   * hue: its brightness modulates the colour already there, and a fifth of its colour comes through.
+   * What that buys is everything the classification cannot say. A field edge, a path, the shape of
+   * the roof and which half of it is glass are all in the imagery and in none of the numbers.
+   *
+   * Three things are deliberate. The texture is a planar projection from above, so vertical faces
+   * would be a smear of whatever pixel is above them -- `vOrthoUp` fades it out as a face turns
+   * towards the horizon, and a wall keeps the flat colour it had. The imagery is only reached for
+   * once the view is on screen (see Terrain3D), so the mix starts at zero and the uniform arrives
+   * later. And where no survey answered, the texture is simply transparent there and its own alpha
+   * takes the mix back to nothing.
+   */
+  const orthoMap = { value: null as Texture | null }
+  const orthoMix = { value: 0 }
+  const orthoRadius = { value: input.radius }
+  const groundMat = new MeshLambertMaterial({ vertexColors: true })
+  groundMat.onBeforeCompile = (shader) => {
+    shader.uniforms.orthoMap = orthoMap
+    shader.uniforms.orthoMix = orthoMix
+    shader.uniforms.orthoRadius = orthoRadius
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         uniform float orthoRadius;
+         varying vec2 vOrthoUv;
+         varying float vOrthoUp;`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         vOrthoUv = (position.xz + orthoRadius) / (2.0 * orthoRadius);
+         vOrthoUp = abs(normalize(normal).y);`,
+      )
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         uniform sampler2D orthoMap;
+         uniform float orthoMix;
+         varying vec2 vOrthoUv;
+         varying float vOrthoUp;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+         if (orthoMix > 0.0) {
+           vec4 photo = texture2D(orthoMap, vOrthoUv);
+           float k = orthoMix * vOrthoUp * photo.a;
+           float lum = dot(photo.rgb, vec3(0.299, 0.587, 0.114));
+           diffuseColor.rgb = mix(diffuseColor.rgb, photo.rgb, k * 0.22) *
+             max(0.0, 1.0 + k * (lum - 0.45) * 1.3);
+         }`,
+      )
+  }
+  const ground = new Mesh(geometryOf(input.mesh), groundMat)
   scene.add(ground)
 
   /**
@@ -675,6 +753,25 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       rescale(k)
       controls.update()
     },
+    setOrtho(image: ImageBitmap | null) {
+      orthoMap.value?.dispose()
+      if (!image) {
+        orthoMap.value = null
+        orthoMix.value = 0
+        return
+      }
+      const texture = new Texture(image)
+      // Drawn north-up and in the patch's own axes, which is the order the mesh's rows are built
+      // in -- so it is sampled as it was drawn rather than flipped the way an HTML image would be.
+      texture.flipY = false
+      texture.colorSpace = SRGBColorSpace
+      texture.wrapS = ClampToEdgeWrapping
+      texture.wrapT = ClampToEdgeWrapping
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy()
+      texture.needsUpdate = true
+      orthoMap.value = texture
+      orthoMix.value = ORTHO_MIX
+    },
     setMesh(mesh: MeshData, next: MeshData | null) {
       for (const [target, data] of [
         [ground, mesh],
@@ -731,6 +828,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         ;(l.material as SpriteMaterial).map?.dispose()
         ;(l.material as SpriteMaterial).dispose()
       }
+      orthoMap.value?.dispose()
       for (const m of [
         ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat, ghostMat,
         ballMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
