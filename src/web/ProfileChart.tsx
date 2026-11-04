@@ -38,8 +38,28 @@ import { toWgs84 } from '../shared/geo.js'
  * whole thing is four paths and the axes need domain-specific annotation anyway.
  */
 
-const W = 900
-const H = 200
+/**
+ * The drawing box, in user units.
+ *
+ * The SVG is laid out at `width: 100%` with no height of its own, so the box decides two things at
+ * once: the aspect ratio the chart is drawn at, and -- because one user unit renders as
+ * `elementWidth / w` pixels -- how big every label, tick and stroke in it comes out. Keeping `w`
+ * near the width the element will actually have is therefore not an optimisation but the whole
+ * reason there are two of these: at 900 units in a 358 px column a 10-unit label renders at four
+ * pixels and the chart is a strip of unreadable fuzz 80 px tall.
+ *
+ * So the wide box is for a chart that gets most of a window, and the narrow one for a chart that
+ * gets a phone. Nothing else about the drawing changes -- the paddings are in the same units and
+ * come out at roughly the same pixels in both.
+ *
+ * The narrow one is squarer as well as smaller. At 4.5:1 a phone's width leaves eighty pixels of
+ * height for thirty metres of relief, and no amount of legible lettering rescues a chart with no
+ * vertical room; at 1.7:1 it is a section you can read a clearance off, and still short enough to
+ * sit in the card without crowding out the figures under it.
+ */
+export const CHART_WIDE = { w: 900, h: 200 }
+export const CHART_NARROW = { w: 380, h: 220 }
+
 const PAD = { top: 12, right: 46, bottom: 22, left: 44 }
 
 type SeriesKey = 'ground' | 'surface' | 'line' | 'groundMax' | 'surfaceMax' | 'needed'
@@ -138,6 +158,8 @@ interface Props {
   params: Params
   /** Whether elevation is still arriving, which is what a gap in the chart means while it is. */
   fetching: boolean
+  /** `CHART_WIDE` or `CHART_NARROW`, chosen by how much room the caller is giving it. */
+  box: { w: number; h: number }
   /**
    * Whether a surface model covers this ground.
    *
@@ -259,8 +281,9 @@ export function bridgeGaps(profile: ProfileSample[]): {
 }
 
 export function ProfileChart({
-  c, profile, wings, cover, params, fetching, canopyKnown, onHover,
+  c, profile, wings, cover, params, fetching, canopyKnown, box, onHover,
 }: Props) {
+  const { w: W, h: H } = box
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const { samples: p, gaps, measured } = bridgeGaps(profile)
   const crossings = c.crossings ?? []

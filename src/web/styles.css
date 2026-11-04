@@ -1111,6 +1111,9 @@ header[data-measuring] .spacer { flex: none; }
      below: the air and the offlevel in the table, the sag on the slider under the picture. The
      card keeps it, because there it is the only place any of them is said. */
   .details[data-full='true'] .head .sub { display: none; }
+  /* Shorter than half the screen, because the section below it is the measurement and the first
+     screen should reach it. The camera compensates on its own -- see `lift` in scene3d. */
+  .scene3d { height: min(44vh, 380px); }
   /* Half a phone is not a width. Stacked, and each end's sentence stays under the thumb it is
      about rather than being separated from it by the other end's slider. */
   .rig { flex-direction: column; align-items: stretch; gap: 10px; }

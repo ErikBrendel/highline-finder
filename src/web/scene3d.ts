@@ -134,6 +134,14 @@ export interface Scene3D {
   setMesh(mesh: MeshData, canopy: MeshData | null): void
 }
 
+/**
+ * The canvas shape the default camera height was chosen against.
+ *
+ * Roughly a wide panel on a laptop, which is where this view was designed. Anything squarer or
+ * taller than this gets a higher camera -- see `lift`.
+ */
+const LANDSCAPE = 1.6
+
 /** How long a camera left alone waits before it starts turning again. */
 const RESUME_AFTER_MS = 4000
 
@@ -542,9 +550,25 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   controls.minDistance = input.radius * 0.3
   controls.maxDistance = input.radius * 4
   controls.target.set(0, input.lookAt * exaggeration, 0)
+  /**
+   * How high the camera stands when nobody has moved it, which depends on the shape of the box it
+   * is standing in.
+   *
+   * `fov` is the *vertical* angle, so a portrait canvas is taller in world units than it is wide at
+   * every depth -- while the patch, seen from this angle, is wide and short. The width is what
+   * binds, the surplus height goes to sky, and on a phone that was four tenths of the picture spent
+   * on black above the horizon.
+   *
+   * Standing higher is the lever: it tilts the camera down, which lifts the horizon towards the top
+   * of the frame and fills the frame with ground. Measured against a landscape canvas, so the view
+   * on a desk is exactly the view it was, and capped -- past about here it stops being a view of a
+   * place and becomes a map of one.
+   */
+  const shape = parent.clientHeight > 0 ? parent.clientWidth / parent.clientHeight : LANDSCAPE
+  const lift = Math.min(1.35, 0.62 * Math.max(1, LANDSCAPE / shape))
   const [ox, oy, oz] = input.offset ?? [
     input.radius * 1.15,
-    input.radius * 0.62,
+    input.radius * lift,
     input.radius * 1.15,
   ]
   camera.position.set(ox, controls.target.y + oy, oz)

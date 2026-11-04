@@ -3,7 +3,7 @@ import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types
 import { PLANNED_ID, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import { TRUNK_FRACTION, rigMeans, rigRange, type Standing } from '../shared/anchoring.js'
 import type { Cover } from './landcover.js'
-import { ProfileChart, type Wings } from './ProfileChart.js'
+import { CHART_NARROW, CHART_WIDE, ProfileChart, type Wings } from './ProfileChart.js'
 import { Slider, type SliderBand } from './Slider.js'
 import {
   NEIGHBOURHOOD,
@@ -15,6 +15,7 @@ import {
 import { spanGeometry, type LatLon } from './planPoints.js'
 import { Terrain3D } from './Terrain3D.js'
 import { ShareButton } from './ShareButton.js'
+import { useMedia } from './useMedia.js'
 
 const DASH = '—'
 
@@ -276,6 +277,15 @@ export function Details({
   canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
   rig, onRig, onFlip, onGuide, guideOpen, onClose,
 }: Props) {
+  /**
+   * How much room the profile has, which is the only thing that decides how it is drawn.
+   *
+   * The same query the stylesheet uses for its narrow case, so the chart's own idea of narrow and
+   * the page's cannot drift apart. The card takes it too: it is the same element at the same width
+   * and the labels were the same four pixels tall there.
+   */
+  const chartBox = useMedia('(max-width: 720px)') ? CHART_NARROW : CHART_WIDE
+
   /**
    * The full-screen view of one line.
    *
@@ -699,6 +709,7 @@ export function Details({
                 params={params}
                 fetching={fetching}
                 canopyKnown={canopyKnown}
+                box={chartBox}
                 onHover={setHoverAt}
               />
               {/* Over the chart rather than instead of it, and only where the chart has a hole to
