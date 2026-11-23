@@ -54,7 +54,10 @@ export function startingPoint(lib: Library, { line: { a, b }, name, spot: shared
   open: Open
   shared: Spot | null
 } {
-  const indexIn = (s: Spot) => (a && b ? Math.max(0, s.lines.findIndex((l) => sameAnchors(l, a, b))) : 0)
+  const indexIn = (s: Spot) => {
+    const i = a && b ? s.lines.findIndex((l) => sameAnchors(l, a, b)) : -1
+    return i < 0 ? null : i
+  }
   if (shared) {
     const held = lib.spots.find((s) => sameLines(s, shared))
     if (held) return { open: { kind: 'spot', spot: held.id, line: indexIn(held), editing: false }, shared: null }
@@ -229,9 +232,9 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
     openSpot: (id: string) => {
       const o = openRef.current
       if (held() || (o.kind === 'spot' && o.spot === id)) return
-      go({ kind: 'spot', spot: id, line: spotOf(id)?.lines.length ? 0 : null, editing: false })
+      go({ kind: 'spot', spot: id, line: null, editing: false })
     },
-    openShared: (line: number) => {
+    openShared: (line: number | null) => {
       if (!held()) go({ kind: 'shared', line })
     },
     /**

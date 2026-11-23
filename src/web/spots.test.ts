@@ -78,9 +78,9 @@ describe('startingPoint', () => {
     expect(arrive(line(81), null, shared)).toEqual({ open: { kind: 'shared', line: 1 }, shared })
   })
 
-  it('opens a shared spot that is already saved', () => {
+  it('opens a shared spot that is already saved, with no line picked', () => {
     expect(arrive(null, null, spot('x', line(52.01), line(52)))).toEqual({
-      open: { kind: 'spot', spot: 's1', line: 0, editing: false },
+      open: { kind: 'spot', spot: 's1', line: null, editing: false },
       shared: null,
     })
   })

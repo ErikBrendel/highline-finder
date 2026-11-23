@@ -210,7 +210,7 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
         {head('My lines')}
         <ul className="spotlist">
           {spots.shared && row('shared', spotTitle(spots.shared), <><span className="unsaved">shared</span> · {spots.shared.lines.length} lines</>,
-            open.kind === 'shared', () => { spots.openShared(0); setBrowsing(false); onFocus(spots.shared!) }, { spot: 'shared', line: null })}
+            open.kind === 'shared', () => { spots.openShared(null); setBrowsing(false); onFocus(spots.shared!) }, { spot: 'shared', line: null })}
           {lib.draft && row('draft', titleOf(lib.draft.name) || 'Untitled', <span className="draft">draft</span>,
             open.kind === 'draft', spots.openDraft, { spot: 'draft', line: null })}
           {sorted.map(({ s, metres }) => row(
