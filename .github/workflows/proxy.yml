@@ -18,9 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # A repository secret, set in the GitHub UI: an API token from the "Edit Cloudflare Workers"
-      # template. The account id is not a secret and sits in wrangler.toml.
-      - uses: cloudflare/wrangler-action@v3
+      - uses: actions/setup-node@v7
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          workingDirectory: proxy
+          node-version: 24
+      # Wrangler directly rather than cloudflare/wrangler-action, which runs on the deprecated Node
+      # 20 and installs an outdated Wrangler. The token is a repository secret from the "Edit
+      # Cloudflare Workers" template; the account id is not a secret and sits in wrangler.toml.
+      - run: npx -y wrangler@4 deploy
+        working-directory: proxy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
