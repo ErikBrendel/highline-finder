@@ -1592,6 +1592,7 @@ export function App() {
               onSag={setSagPct}
               full={full}
               onFull={setFull}
+              onMoveAnchor={moveAnchor}
               onFlip={flipAnchors}
               onGuide={guide.show}
               guideOpen={guide.open}

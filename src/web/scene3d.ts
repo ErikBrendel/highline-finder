@@ -1,7 +1,7 @@
 import {
   AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
   DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
-  MeshLambertMaterial, PerspectiveCamera, Scene, SphereGeometry, TubeGeometry,
+  MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
   Vector3, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture, Texture,
   ClampToEdgeWrapping, SRGBColorSpace,
 } from 'three'
@@ -44,13 +44,15 @@ export interface SceneInput {
   /** Height to look at, so the camera frames the line rather than the middle of the sky. */
   lookAt: number
   exaggeration: number
+  /** Called when an anchor is tapped. Omit to make the anchors inert. */
+  onAnchorTapped?: (which: 0 | 1) => void
   /**
    * Where the camera stood relative to what it was looking at, from a scene being replaced.
    *
-   * Moving an anchor far enough on the map forces the ground to be read again, which builds a new
-   * scene. The patch has moved, so the old camera position means nothing -- but the angle and the
-   * distance it was being looked at from are the viewer's, and losing those on every move is the
-   * difference between a view you are working in and one that keeps starting over.
+   * Moving an anchor far enough forces the ground to be read again, which builds a new scene. The
+   * patch has moved, so the old camera position means nothing -- but the angle and the distance it
+   * was being looked at from are the viewer's, and losing those on every move is the difference
+   * between a view you are working in and one that keeps starting over.
    */
   offset?: [number, number, number]
   /** Whether the camera circles on its own. Carried in so a rebuilt scene keeps the last choice. */
@@ -122,7 +124,26 @@ export interface Scene3D {
    * the datum is the coarse pass's, so the two readings sit at exactly the same height.
    */
   setMesh(mesh: MeshData, canopy: MeshData | null): void
+  /**
+   * Flies the camera to one anchor and keeps it there, or back to the whole line.
+   *
+   * Close up is where an anchor can be placed to the decimetre: from the opening view a pixel is
+   * most of a metre, and the camera was not allowed near enough for that to change.
+   */
+  focus(which: 0 | 1 | null): void
+  /**
+   * The two directions on the ground that "up" and "right" on the screen point along, as unit
+   * vectors in the patch's x and z. What a nudge is measured in, so an arrow moves the anchor the
+   * way it points from wherever the camera happens to be standing.
+   */
+  groundAxes(): { forward: [number, number]; right: [number, number] }
 }
+
+/** How far from a focused anchor the camera settles, in metres. */
+const FOCUS_DISTANCE = 30
+
+/** How close the camera may come to a focused anchor, in metres. */
+const FOCUS_NEAREST = 2
 
 /**
  * The canvas shape the default camera height was chosen against.
@@ -409,12 +430,22 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   // follow the zoom every frame for nothing, since scaling it uniformly is exactly right.
   const ballGeom = new SphereGeometry(1, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
+  const focusMat = new MeshBasicMaterial({ color: '#f43f5e' })
+  // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
+  // across on a patch hundreds of metres wide, which is a few pixels -- fine to look at, impossible
+  // to grab, and hopeless with a finger.
+  const grabGeom = new SphereGeometry(1, 8, 6)
+  const grabMat = new MeshBasicMaterial({ visible: false })
   const balls: Mesh[] = []
+  const grabs: Mesh[] = []
   for (const [x, , z] of anchors) {
     const ball = new Mesh(ballGeom, ballMat)
     ball.position.set(x, 0, z)
     scene.add(ball)
     balls.push(ball)
+    const grab = new Mesh(grabGeom, grabMat)
+    scene.add(grab)
+    grabs.push(grab)
   }
 
   /**
@@ -475,6 +506,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     balls.forEach((ball, i) => {
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
       ball.scale.setScalar(tubeRadius * 3)
+      grabs[i]!.position.copy(ball.position)
+      grabs[i]!.scale.setScalar(tubeRadius * 11)
       // Clear of the ball rather than on it, so the letter never sits over the thing it names.
       labels[i]?.position.set(ball.position.x, ball.position.y + tubeRadius * 9, ball.position.z)
     })
@@ -534,11 +567,73 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const resumeLater = () => {
     clearTimeout(idle)
     idle = setTimeout(() => {
-      controls.autoRotate = spinning
+      // Never while an anchor is being worked on: it would carry the anchor out from under the arrows.
+      controls.autoRotate = spinning && focused === null
     }, RESUME_AFTER_MS)
   }
   controls.addEventListener('start', pause)
   controls.addEventListener('end', resumeLater)
+
+  /**
+   * Tapping an anchor, which hands it to the step controls beside this view.
+   *
+   * Not dragging: over terrain hundreds of metres across a drag puts an anchor within a metre at
+   * best, and on a pitched roof the ray flips between roof and ground.
+   *
+   * Registered in the capture phase so a press on an anchor is decided before OrbitControls sees the
+   * event, and stopped there -- otherwise the same gesture would turn the camera as well.
+   */
+  const raycaster = new Raycaster()
+  const pointer = new Vector2()
+  let pressed: 0 | 1 | null = null
+
+  const aim = (ev: PointerEvent) => {
+    const r = canvas.getBoundingClientRect()
+    pointer.set(
+      ((ev.clientX - r.left) / r.width) * 2 - 1,
+      -((ev.clientY - r.top) / r.height) * 2 + 1,
+    )
+    raycaster.setFromCamera(pointer, camera)
+  }
+
+  /** Where a mouse is, so the frame loop can say whether it is over something it can pick up. */
+  let hover: { x: number; y: number } | null = null
+
+  const onDown = (ev: PointerEvent) => {
+    if (!input.onAnchorTapped) return
+    aim(ev)
+    const hit = raycaster.intersectObjects(grabs, false)[0]
+    if (!hit) return
+    pressed = grabs.indexOf(hit.object as Mesh) as 0 | 1
+    controls.enabled = false
+    pause()
+    canvas.setPointerCapture(ev.pointerId)
+    ev.stopPropagation()
+    ev.preventDefault()
+  }
+
+  const onMove = (ev: PointerEvent) => {
+    if (pressed !== null) return ev.stopPropagation()
+    // A cursor that changes over an anchor is the only thing that says it can be tapped. Mouse
+    // only: a finger has no hover, and there is nothing to show it.
+    hover = ev.pointerType === 'mouse' && input.onAnchorTapped ? { x: ev.clientX, y: ev.clientY } : null
+  }
+
+  const onUp = (ev: PointerEvent) => {
+    if (pressed === null) return
+    ev.stopPropagation()
+    const which = pressed
+    pressed = null
+    controls.enabled = true
+    resumeLater()
+    if (canvas.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId)
+    input.onAnchorTapped?.(which)
+  }
+
+  canvas.addEventListener('pointerdown', onDown, { capture: true })
+  canvas.addEventListener('pointermove', onMove, { capture: true })
+  canvas.addEventListener('pointerup', onUp, { capture: true })
+  canvas.addEventListener('pointercancel', onUp, { capture: true })
 
   const resize = () => {
     const { clientWidth: w, clientHeight: h } = parent
@@ -560,7 +655,39 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
    */
   const startedAt = camera.position.distanceTo(controls.target)
   const zoomThickness = () =>
-    Math.min(2.2, Math.max(0.45, camera.position.distanceTo(controls.target) / startedAt))
+    Math.min(
+      2.2,
+      // Thinner close up to an anchor, or the ball would hide the ground it is being placed on.
+      Math.max(focused === null ? 0.45 : 0.04, camera.position.distanceTo(controls.target) / startedAt),
+    )
+
+  /** Which anchor the camera is held on, and whether it is still on its way there or back. */
+  let focused: 0 | 1 | null = null
+  let travelling = false
+
+  /**
+   * Eases the camera towards the focused anchor, or home to the whole line.
+   *
+   * While focused the target keeps following the ball, so a nudge never walks the anchor out of
+   * the picture. The distance is only steered on the way there and back; in between it is the
+   * viewer's to zoom.
+   */
+  const steer = () => {
+    if (focused === null && !travelling) return
+    const goal =
+      focused === null ? new Vector3(0, input.lookAt * exaggeration, 0) : balls[focused]!.position
+    const offset = camera.position.clone().sub(controls.target)
+    controls.target.lerp(goal, 0.2)
+    if (travelling) {
+      const want = focused === null ? startedAt : FOCUS_DISTANCE
+      offset.setLength(offset.length() + (want - offset.length()) * 0.2)
+      if (Math.abs(offset.length() - want) < want * 0.01 && controls.target.distanceTo(goal) < 0.05) {
+        travelling = false
+        if (focused === null) controls.minDistance = input.radius * 0.3
+      }
+    }
+    camera.position.copy(controls.target).add(offset)
+  }
 
   /**
    * Rebuilt on a step rather than every frame.
@@ -586,12 +713,40 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
 
   let raf = requestAnimationFrame(function frame() {
     raf = requestAnimationFrame(frame)
+    steer()
     followZoom()
+    if (hover && pressed === null) {
+      const r = canvas.getBoundingClientRect()
+      pointer.set(
+        ((hover.x - r.left) / r.width) * 2 - 1,
+        -((hover.y - r.top) / r.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(pointer, camera)
+      canvas.style.cursor = raycaster.intersectObjects(grabs, false).length ? 'pointer' : ''
+    }
     controls.update()
     renderer.render(scene, camera)
   })
 
   return {
+    focus(which) {
+      if (which === focused) return
+      focused = which
+      travelling = true
+      balls.forEach((ball, i) => {
+        ball.material = i === which ? focusMat : ballMat
+      })
+      if (which === null) return resumeLater()
+      controls.minDistance = FOCUS_NEAREST
+      pause()
+    },
+    groundAxes() {
+      const f = controls.target.clone().sub(camera.position)
+      f.y = 0
+      if (f.lengthSq() < 1e-9) f.set(0, 0, -1)
+      f.normalize()
+      return { forward: [f.x, f.z], right: [-f.z, f.x] }
+    },
     setExaggeration(k: number) {
       if (k === exaggeration) return
       // Keep the camera where the viewer put it -- same direction, same distance -- and move only
@@ -658,11 +813,19 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       cancelAnimationFrame(raf)
       clearTimeout(idle)
       observer.disconnect()
+      for (const [type, fn] of [
+        ['pointerdown', onDown],
+        ['pointermove', onMove],
+        ['pointerup', onUp],
+        ['pointercancel', onUp],
+      ] as const) {
+        canvas.removeEventListener(type, fn, { capture: true })
+      }
       controls.dispose()
       disposeProps(propsRoot)
       for (const g of [
         ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
-        ballGeom, hoverBall.geometry, hoverDrop.geometry,
+        ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
         ...stems.map((m) => m.geometry),
       ]) {
         g.dispose()
@@ -674,7 +837,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       orthoMap.value?.dispose()
       for (const m of [
         ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat,
-        ballMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
+        ballMat, focusMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()

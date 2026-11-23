@@ -227,6 +227,8 @@ interface Props {
   /** Whether this line fills the window. Lives in the URL, so it is the App's to hold. */
   full: boolean
   onFull: (full: boolean) => void
+  /** An anchor stepped in the 3D view. */
+  onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
   optimizing: boolean
   /** Reach the button is offering for the next run, or null for the careful default. */
   offer: number | null
@@ -262,7 +264,7 @@ const KEEP_VISIBLE = 40
 
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
-  canopyKnown, sag, onSag, full, onFull, optimizing, offer, onOptimize,
+  canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
   rig, onRig, onFlip, onGuide, guideOpen, onClose,
 }: Props) {
   /**
@@ -656,6 +658,7 @@ export function Details({
             // span in the picture has to be the span in the figures beside it.
             sagRatio={c.length > 0 ? c.sag / c.length : 0}
             hoverAt={hoverAt}
+            onMoveAnchor={onMoveAnchor}
           />
         )}
 
