@@ -733,7 +733,7 @@ export function Details({
                 {canopy === 'measured' ? 'canopy (surface model)' : 'canopy (estimated, Meta/WRI)'}
               </span>
             )}
-            <span><i style={{ background: 'var(--building)' }} />building, counted as ground (LoD1 footprint, bDOM roof; Brandenburg only)</span>
+            <span><i style={{ background: 'var(--building)' }} />building, counted as ground (LoD1 footprint, surface-model roof; Brandenburg and Saxony)</span>
             <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
             <span><i style={{ background: 'var(--road)' }} />road or rail crossed (OSM)</span>
             <span><i className="dashed" style={{ borderColor: 'var(--road)' }} />clearance required</span>

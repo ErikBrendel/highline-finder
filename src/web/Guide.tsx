@@ -148,8 +148,8 @@ const PlannerGuide = () => (
         which can be metres off.
       </li>
       <li>
-        Buildings in Brandenburg only, from its 3D city model: there a roof counts as ground you can
-        anchor on, at the height the survey measured it. Elsewhere a roof reads as trees where the
+        Buildings in Brandenburg and Saxony, from their 3D city models: there a roof counts as
+        ground you can anchor on, at the height the survey measured it. Elsewhere a roof reads as trees where the
         canopy is measured, and is not seen at all where it is estimated.
       </li>
       <li>How much there is to measure against differs by state:</li>
@@ -172,7 +172,7 @@ const MapGuide = ({ regions }: { regions: Region[] | null }) => (
       <li>
         Terrain and canopy, published free and open by the state surveys, or estimated from Meta and
         WRI&rsquo;s satellite canopy map where a state&rsquo;s cannot be read. Buildings in
-        Brandenburg only, from its 3D city model.
+        Brandenburg and Saxony, from their 3D city models.
       </li>
       <li>
         Anywhere in Germany you can place two anchors by hand and have the span measured against

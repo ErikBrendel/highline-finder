@@ -12,7 +12,7 @@
 export const PROXIED = {
   sn: {
     origin: 'https://geocloud.landesvermessung.sachsen.de',
-    path: /^\/public\.php\/dav\/files\/(JCcXyifaNdLDnxZ\/dgm1|S6wwnFwX7882sZm\/dom1)_33\d{3}_\d{4}_2_sn_tiff\.zip$/,
+    path: /^\/public\.php\/dav\/files\/(?:(?:JCcXyifaNdLDnxZ\/dgm1|S6wwnFwX7882sZm\/dom1)_33\d{3}_\d{4}_2_sn_tiff|f6p5WLkLtJFef9b\/lod1_33\d{3}_\d{4}_2_sn_citygml)\.zip$/,
   },
   chm: {
     origin: 'https://dataforgood-fb-data.s3.amazonaws.com',

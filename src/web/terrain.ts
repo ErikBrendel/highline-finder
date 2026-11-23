@@ -2,9 +2,8 @@ import { unzipSync } from 'fflate'
 import { Grid, type Pos, type Sampler } from '../shared/grid.js'
 import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
 import type { Roofs } from '../shared/anchoring.js'
-import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
-import { NoData, noteAnswered, sourcesFor, type Source } from './sources.js'
+import { NoData, noteAnswered, sourcesFor, type CityModel, type Source } from './sources.js'
 import { report } from './report.js'
 import { surfaceAt, type CellReader } from './cellSurface.js'
 import { estimateCanopy } from './canopyMap.js'
@@ -38,8 +37,6 @@ import { estimateCanopy } from './canopyMap.js'
  * planned line's canopy figures are slightly optimistic compared with a found candidate's. Terrain
  * and roofs, which are the hard constraints, match exactly.
  */
-
-const LOD1 = 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml'
 
 /** Window size in metres. 256 keeps a request near 256 KB per layer and reuses well while dragging. */
 export const WINDOW = 256
@@ -141,7 +138,7 @@ const emit = (e: WindowEvent) => listeners.forEach((fn) => fn(e))
 export const fetchingWindows = () => inFlight.size > 0
 
 /**
- * Level building faces per 1 km tile, parsed once and kept for the session.
+ * Level building faces per city-model tile, parsed once and kept for the session.
  *
  * A tile with no buildings has no file at all, so a 404 is the answer rather than a failure -- and
  * it is cached here as an empty list so the same empty tile is not asked for again while dragging
@@ -150,12 +147,12 @@ export const fetchingWindows = () => inFlight.size > 0
  */
 const roofFaces = new Map<string, Promise<LevelFace[]>>()
 
-function facesFor(tile: string): Promise<LevelFace[]> {
-  let job = roofFaces.get(tile)
+function facesFor(url: string): Promise<LevelFace[]> {
+  let job = roofFaces.get(url)
   if (job) return job
   job = (async () => {
-    const zip = await fetchCached(`${LOD1}/lod1_${tile}.zip`)
-    const entries = unzipSync(new Uint8Array(zip))
+    const zip = await fetchCached(url)
+    const entries = unzipSync(new Uint8Array(zip), { filter: (f) => f.name.endsWith('.gml') })
     const name = Object.keys(entries).find((k) => k.endsWith('.gml'))
     return name ? levelFaces(new TextDecoder().decode(entries[name]!)) : []
   })().catch((e: unknown) => {
@@ -167,19 +164,19 @@ function facesFor(tile: string): Promise<LevelFace[]> {
     // first visit. Anything that is not a fetch failure -- a corrupt zip, a GML this parser cannot
     // read -- is a real one and still says so.
     if (!(e instanceof TypeError) && !/\b404\b/.test(String(e))) {
-      report(`loading the city model for tile ${tile}`, e)
+      report(`loading the city model tile ${url}`, e)
     } else {
-      console.warn(`[highline] no city model for tile ${tile}:`, e)
+      console.warn(`[highline] no city model tile ${url}:`, e)
     }
     return []
   })
-  roofFaces.set(tile, job)
+  roofFaces.set(url, job)
   return job
 }
 
 /** Draws whatever buildings stand in this window into its roof grid. */
-async function loadRoofs(e0: number, n0: number, into: Grid): Promise<void> {
-  const tiles = tilesForBounds(e0, n0, e0 + WINDOW, n0 + WINDOW)
+async function loadRoofs(model: CityModel, e0: number, n0: number, into: Grid): Promise<void> {
+  const tiles = model.tiles(e0, n0, WINDOW)
   for (const faces of await Promise.all(tiles.map(facesFor))) rasteriseFaces(faces, into)
 }
 
@@ -249,9 +246,9 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
 
   // Separately, after, and caught: an outage on the city model must cost the buildings, never the
   // elevation. The roof grid starts all NaN, which is the same answer as open ground. Only asked of
-  // Brandenburg, whose city model this is -- elsewhere it would be four 404s a window.
-  if (used.id === 'bb') {
-    await loadRoofs(e0, n0, roof).catch((e: unknown) =>
+  // a source with a city model -- of any other it would be a 404 per tile.
+  if (used.cityModel) {
+    await loadRoofs(used.cityModel, e0, n0, roof).catch((e: unknown) =>
       report(`rasterising buildings into the window at ${e0},${n0}`, e),
     )
   }

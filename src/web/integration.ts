@@ -31,9 +31,9 @@ export interface StateFacts {
    */
   canopy: 'measured' | 'estimated'
   /**
-   * Whether building outlines are known, so a roof counts as somewhere to stand. Only Brandenburg's
-   * city model is loaded (see terrain.ts); elsewhere a roof is just something tall in the surface
-   * model, which reads as canopy -- or, where the canopy is estimated, is not seen at all.
+   * Whether building outlines are known, so a roof counts as somewhere to stand. Only where a
+   * source's city model reaches (see `CityModel`); elsewhere a roof is just something tall in the
+   * surface model, which reads as canopy -- or, where the canopy is estimated, is not seen at all.
    */
   buildings: boolean
   /** Relief: the state's own at a metre, or the federal one at five. */
@@ -205,7 +205,7 @@ export function integration(searched: Set<string> | null): StateFacts[] {
       name: s.name,
       ground: source && source !== hoehendaten ? 'survey' : 'shared',
       canopy: source?.hasSurface ? 'measured' : 'estimated',
-      buildings: s.name === 'Brandenburg',
+      buildings: source?.cityModel?.states.includes(s.name) ?? false,
       shade: SHADE_STATES.has(s.name) ? 'survey' : 'shared',
       ortho: ORTHO_STATES.has(s.name) ? 'survey' : 'shared',
       lines: searched?.has(s.name) ?? false,

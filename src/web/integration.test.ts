@@ -61,6 +61,8 @@ describe('integration', () => {
     expect(tierOf(byCode('BB'))).toBe('buildings')
     const searched = integration(new Set(['Brandenburg']))
     expect(tierOf(searched.find((f) => f.code === 'BB')!)).toBe('searched')
+    expect(tierOf(byCode('SN'))).toBe('buildings')
+    expect(tierOf(byCode('BE'))).toBe('measured')
     expect(tierOf(byCode('NW'))).toBe('measured')
     expect(tierOf(byCode('BY'))).toBe('estimated')
   })

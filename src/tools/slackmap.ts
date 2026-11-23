@@ -279,7 +279,7 @@ function report(rows: Row[]): void {
    * Half of ours or less, after the search has had its eight metres, means the disagreement is not
    * a matter of degree: the anchors are not on the ground. A line strung forty metres up between
    * two trees, or off a tower, has a drop this project cannot see, because what it models is the
-   * terrain and -- inside Brandenburg only -- the roofs. Listed rather than averaged in, because
+   * terrain and -- where a city model is loaded -- the roofs. Listed rather than averaged in, because
    * they are the bulk of the residual bias and they are not evidence about the elevation model.
    */
   const unexplained = rows.filter((r) => {

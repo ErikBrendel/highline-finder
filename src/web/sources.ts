@@ -1,7 +1,7 @@
 import { unzipSync } from 'fflate'
 import { Grid } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
-import { latticeProjector, toUtm32, toWgs84, zoneOf } from '../shared/geo.js'
+import { latticeProjector, tilesForBounds, toUtm32, toWgs84, zoneOf } from '../shared/geo.js'
 import { fetchCached, readCached, writeCached } from './tileCache.js'
 import { proxied, reachable } from './hosts.js'
 import { nearState } from './coverage.js'
@@ -45,6 +45,18 @@ export interface Source {
    * which is an answer rather than a failure: the next source is asked.
    */
   load(e0: number, n0: number, size: number, into: WindowGrids): Promise<void>
+  /**
+   * A LoD1 city model, where the survey publishes one a browser can read: what makes a roof
+   * somewhere to stand rather than something tall in the surface model.
+   */
+  cityModel?: CityModel
+}
+
+export interface CityModel {
+  /** Where it has buildings, as named in states.json; the source may answer for more. */
+  states: string[]
+  /** The zipped CityGML tiles touching a window. A tile with no buildings may not exist. */
+  tiles(e0: number, n0: number, size: number): string[]
 }
 
 /** Thrown by a source that simply does not hold this ground, so the next one gets a turn. */
@@ -72,6 +84,7 @@ interface WcsSpec {
   surface?: { url: string; coverage: string }
   /** The zone this service publishes in. 32 means every window has to be carried across. */
   zone: 32 | 33
+  cityModel?: CityModel
 }
 
 /**
@@ -94,6 +107,7 @@ function wcsSource(spec: WcsSpec): Source {
     id: spec.id,
     attribution: spec.attribution,
     hasSurface: !!spec.surface,
+    cityModel: spec.cityModel,
     covers(e, n) {
       const { lat, lon } = toWgs84(e, n)
       return spec.states.some((name) => nearState(name, lon, lat))
@@ -189,7 +203,12 @@ function boxIn32(e0: number, n0: number, size: number): [number, number, number,
   return [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad]
 }
 
-/** Brandenburg and Berlin: the ground the pipeline searched, and the only one with a city model. */
+const BB_LOD1 = 'https://data.geobasis-bb.de/geobasis/daten/3d_gebaeude/lod1_gml'
+
+/**
+ * Brandenburg and Berlin: the ground the pipeline searched. The city model is Brandenburg's alone;
+ * Berlin publishes its own, and asking this one about the city is a 404 per kilometre.
+ */
 export const brandenburg = wcsSource({
   id: 'bb',
   attribution: 'GeoBasis-DE/LGB, dl-de/by-2.0',
@@ -197,6 +216,11 @@ export const brandenburg = wcsSource({
   ground: { url: 'https://isk.geobasis-bb.de/ows/dgm_wcs', coverage: 'bb_dgm' },
   surface: { url: 'https://isk.geobasis-bb.de/ows/bdom_wcs', coverage: 'bb_bdom' },
   zone: 33,
+  cityModel: {
+    states: ['Brandenburg'],
+    tiles: (e0, n0, size) =>
+      tilesForBounds(e0, n0, e0 + size, n0 + size).map((t) => `${BB_LOD1}/lod1_${t}.zip`),
+  },
 })
 
 /**
@@ -255,8 +279,17 @@ export const mecklenburgVorpommern = wcsSource({
 
 /* ------------------------------------------------------------------------------ Saxony */
 
-const SN_SHARE = { dgm1: 'JCcXyifaNdLDnxZ', dom1: 'S6wwnFwX7882sZm' } as const
+const SN_SHARE = { dgm1: 'JCcXyifaNdLDnxZ', dom1: 'S6wwnFwX7882sZm', lod1: 'f6p5WLkLtJFef9b' } as const
 const SN_TILE = 2000
+
+/** The lower-left corners of the 2 km tiles a window touches. */
+function snCorners(e0: number, n0: number, size: number): [number, number][] {
+  const out: [number, number][] = []
+  for (let e = Math.floor(e0 / SN_TILE) * SN_TILE; e < e0 + size; e += SN_TILE) {
+    for (let n = Math.floor(n0 / SN_TILE) * SN_TILE; n < n0 + size; n += SN_TILE) out.push([e, n])
+  }
+  return out
+}
 
 /**
  * Saxony, which publishes both models as open data and will not let a browser read either.
@@ -278,16 +311,22 @@ export const sachsen: Source = {
   },
   async load(e0, n0, size, into) {
     let held = false
-    for (let e = Math.floor(e0 / SN_TILE) * SN_TILE; e < e0 + size; e += SN_TILE) {
-      for (let n = Math.floor(n0 / SN_TILE) * SN_TILE; n < n0 + size; n += SN_TILE) {
-        const [ground, surface] = await Promise.all([snTile('dgm1', e, n), snTile('dom1', e, n)])
-        if (!ground) continue
-        copyInto(ground, into.ground)
-        if (surface) copyInto(surface, into.surface)
-        held = true
-      }
+    for (const [e, n] of snCorners(e0, n0, size)) {
+      const [ground, surface] = await Promise.all([snTile('dgm1', e, n), snTile('dom1', e, n)])
+      if (!ground) continue
+      copyInto(ground, into.ground)
+      if (surface) copyInto(surface, into.surface)
+      held = true
     }
     if (!held) throw new NoData('no Saxon tile covers this window')
+  },
+  // Same tiling. A city tile is about 1 MB zipped and 24 MB of GML, which parses in a tenth of a second.
+  cityModel: {
+    states: ['Sachsen'],
+    tiles: (e0, n0, size) =>
+      snCorners(e0, n0, size).map(([e, n]) =>
+        proxied('sn', `/public.php/dav/files/${SN_SHARE.lod1}/lod1_33${e / 1000}_${n / 1000}_2_sn_citygml.zip`),
+      ),
   },
 }
 
@@ -300,7 +339,7 @@ export const sachsen: Source = {
 const snTiles = new Map<string, Promise<Grid | null>>()
 const SN_KEEP = 8
 
-function snTile(product: keyof typeof SN_SHARE, e: number, n: number): Promise<Grid | null> {
+function snTile(product: 'dgm1' | 'dom1', e: number, n: number): Promise<Grid | null> {
   const name = `${product}_33${e / 1000}_${n / 1000}_2_sn_tiff.zip`
   let job = snTiles.get(name)
   if (job) {
