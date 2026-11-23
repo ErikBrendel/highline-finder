@@ -300,7 +300,7 @@ export function SpotsPanel({ spots, centre, saving, onSaving, onLit, onFocus, on
                 <ShareButton
                   label="share spot"
                   title="Send a link to all lines of this spot; it opens as a copy the other person can save"
-                  url={() => `${location.href.split('#')[0]}#${spotHash(spot)}`}
+                  url={() => `${location.origin}${location.pathname}#${spotHash(spot)}`}
                 />
               )}
             </div>
