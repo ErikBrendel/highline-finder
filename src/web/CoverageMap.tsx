@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { STATES } from './coverage.js'
 import { integration, searchedStates, tierOf, type StateFacts, type Tier } from './integration.js'
 import type { Region } from '../shared/types.js'
+import { DEV_MODE } from './devMode.js'
 
 /**
  * Sixteen states, coloured by how much of them this app can actually measure.
@@ -141,14 +142,16 @@ export function CoverageMap({ regions }: { regions: Region[] | null }) {
           <Row on={here.ortho === 'survey'} label="Aerial imagery">
             {here.ortho === 'survey' ? '20 cm or better' : '10 m, Sentinel-2'}
           </Row>
-          <Row on={here.lines} label="Lines found">
-            {here.lines ? 'searched by the pipeline' : 'plan your own'}
-          </Row>
+          {DEV_MODE && (
+            <Row on={here.lines} label="Lines found">
+              {here.lines ? 'searched by the pipeline' : 'plan your own'}
+            </Row>
+          )}
         </ul>
       </div>
 
       <ul className="legend">
-        {TIERS.map((t) => (
+        {TIERS.filter((t) => DEV_MODE || t.id !== 'searched').map((t) => (
           <li key={t.id}>
             <i data-tier={t.id} />
             <b>{t.label}</b> {t.hint}

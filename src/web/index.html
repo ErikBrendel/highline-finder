@@ -5,16 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/favicon.svg" />
     <!--
-      The dataset, asked for while the browser is still parsing this file.
+      The dataset, asked for while the browser is still parsing this file -- in dev mode only, which
+      is the only mode that reads it. See devMode.ts, whose key and default this repeats.
 
       Without it the request cannot start until the bundle has downloaded, parsed and mounted React
       -- so the largest thing on the page queued behind the smallest, for no reason other than
-      where the fetch is written. `crossorigin` is not optional: it makes the preload's CORS mode
+      where the fetch is written. `crossOrigin` is not optional: it makes the preload's CORS mode
       match what fetch() asks for, and a mismatch downloads the file twice instead of once.
     -->
-    <link rel="preload" as="fetch" crossorigin href="/meta.json" />
-    <link rel="preload" as="fetch" crossorigin href="/candidates.json" />
-    <link rel="preload" as="fetch" crossorigin href="/hotspots.json" />
+    <script>
+      ;(function () {
+        var held = null
+        try {
+          held = localStorage.getItem('highline-finder.dev')
+        } catch (e) {}
+        if (held === '1' || (held === null && '%DEV%' === 'true')) {
+          ;['meta.json', 'candidates.json', 'hotspots.json'].forEach(function (file) {
+            var link = document.createElement('link')
+            link.rel = 'preload'
+            link.as = 'fetch'
+            link.crossOrigin = 'anonymous'
+            link.href = '%BASE_URL%' + file
+            document.head.appendChild(link)
+          })
+        }
+      })()
+    </script>
     <title>Highline Finder</title>
   </head>
   <body>

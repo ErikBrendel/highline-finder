@@ -10,7 +10,6 @@ import {
 
 const everything: UrlState = {
   bbox: [52.1977, 13.6513, 52.2066, 13.6681],
-  lineId: '408123.0_5784200.5__408380.0_5784310.0',
   custom: { a: { lat: 52.2001, lon: 13.6552 }, b: { lat: 52.2043, lon: 13.6614 } },
   rig: { a: 0.5, b: 1.2 },
   sagPct: 6.5,
@@ -30,11 +29,6 @@ describe('url state', () => {
 
   it('carries nothing when there is nothing to carry', () => {
     expect(toSearch(parseUrl(''))).toBe('')
-  })
-
-  it('keeps a candidate id intact through encoding', () => {
-    const search = toSearch({ ...everything, custom: { a: null, b: null } })
-    expect(parseUrl(search).lineId).toBe(everything.lineId)
   })
 
   it('ignores malformed values rather than throwing', () => {

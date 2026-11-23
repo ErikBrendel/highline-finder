@@ -13,9 +13,16 @@ against the real ground.
 - Test data is the shipped dataset, generated 2026-08-31: 22,371 natural and 3,317 urban candidate
   lines across 560 searched regions. It does not change between runs.
 - A shared link to one line, for the arrival this run is mostly about:
-  `http://localhost:5173/highline-finder/?at=51.876,14.565,51.884,14.575&line=470422.5_5747566.5__470232.5_5748022.5&full=1`
+  `http://localhost:5173/highline-finder/?at=51.876,14.565,51.884,14.575&a=51.8780907,14.5703238&b=51.8821804,14.5675244&rig=1.50,1.40&full=1`
 
 ## Main features (as a user sees them)
+Since 2026-11-23 the deployed page is a **planner only** by default: no found lines, hotspots or
+filters. Those are behind "Developer mode (work in progress)" at the bottom of the guide, with a
+confirmation, and are on by default on the dev server. Test the planner unless a story is about the
+search; set `localStorage['highline-finder.dev'] = '0'` to see what a visitor sees locally.
+
+- **Planning a line:** a green "Plan a line" button, then tap the map for A and for B. Picking a
+  found line in developer mode does the same: its two anchors become the planned line.
 - **The map:** candidate lines drawn in red from a district-wide zoom inward; below that zoom they
   collapse into clustered "hotspots". Background is a slider between orthophoto (satellite),
   hillshade and OSM, or a mix of them.
@@ -29,7 +36,7 @@ against the real ground.
 - **Filters:** score, length, exposure, canopy, offlevel, anchor class, and a sag slider that
   re-measures every line against the terrain.
 - **Lines of your own:** drag either anchor of a selected line and it re-measures as it moves;
-  right-click the map for "Set custom point A / B" to plan a span anywhere in Germany. An "optimise"
+  right-click the map for "Set point A / B" to plan a span anywhere in Germany. An "optimise"
   button searches for something better nearby. Rig heights per end.
 - **Orientation:** a crosshair button centres the map on the device's location; a "Google Maps ↗"
   link opens the same view in satellite imagery; an "i" button opens the guide.

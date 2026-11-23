@@ -212,8 +212,6 @@ const SCORE_COLOR: maplibregl.ExpressionSpecification = [
   70, '#22c55e',
 ]
 
-const SELECTED: maplibregl.ExpressionSpecification = ['boolean', ['feature-state', 'sel'], false]
-
 /**
  * Round ends and corners for anything that draws a highline.
  *
@@ -237,8 +235,7 @@ export const EMPHASIS_MS = 220
  *
  * The swell is scaled by zoom because the problem is. At z15 a 400 m line already crosses the
  * screen and needs no help; at z9 it is a few pixels of hairline, and four times the width is the
- * difference between seeing it and not. The selected line stays the widest thing on the map
- * throughout, so selection still reads at any point in the animation.
+ * difference between seeing it and not.
  *
  * A continuous parameter rather than a flag because MapView animates this itself, a frame at a
  * time. Handing MapLibre a `line-width-transition` and two endpoints would be less code, and it is
@@ -248,24 +245,14 @@ export const EMPHASIS_MS = 220
 export function lineWidth(
   emphasis: number,
 ): maplibregl.DataDrivenPropertyValueSpecification<number> {
-  if (emphasis <= 0) return ['case', SELECTED, 4, 1.8]
+  if (emphasis <= 0) return 1.8
   const mix = (from: number, to: number) => from + (to - from) * emphasis
-  return [
-    'interpolate', ['linear'], ['zoom'],
-    9, ['case', SELECTED, mix(4, 11), mix(1.8, 8)],
-    15, ['case', SELECTED, mix(4, 6), mix(1.8, 3.6)],
-  ]
+  return ['interpolate', ['linear'], ['zoom'], 9, mix(1.8, 8), 15, mix(1.8, 3.6)]
 }
 
-/** The unselected lines stop being dimmed as they swell, so faint ones come forward too. */
-export const lineOpacity = (
-  emphasis: number,
-): maplibregl.DataDrivenPropertyValueSpecification<number> => [
-  'case',
-  SELECTED,
-  1,
-  0.7 + 0.3 * Math.min(1, Math.max(0, emphasis)),
-]
+/** The lines stop being dimmed as they swell, so faint ones come forward too. */
+export const lineOpacity = (emphasis: number): number =>
+  0.7 + 0.3 * Math.min(1, Math.max(0, emphasis))
 
 /**
  * Feature ids must be numeric: MapLibre cannot use a non-numeric string id with feature-state, and
@@ -633,12 +620,15 @@ function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
 }
 
 interface Props {
-  /** Null until meta.json lands, which the map is built and usable before. */
+  /** Null until meta.json lands, which the map is built and usable before. Never in lite mode. */
   meta: DatasetMeta | null
+  /** What the band around the planned line is measured with. Null until it is known. */
+  params: Params | null
   visible: Candidate[]
   /** Swell the found lines, while the control that counts them is under the pointer. */
   emphasiseLines: boolean
-  selected: Candidate | null
+  /** Whether the planned line's panel is open, which is what a tap on bare map closes first. */
+  open: boolean
   basemapMix: number
   anchorDump: AnchorDump | null
   hotspots: DrawnSpots | null
@@ -661,6 +651,9 @@ interface Props {
   custom: CustomPoints
   showLines: boolean
   onSelect: (id: string | null) => void
+  /** Which point the next click on the map places, or null when a click means what it usually does. */
+  placing: 'a' | 'b' | null
+  onPlace: (at: LatLon) => void
   onSetCustom: (which: 'a' | 'b', at: LatLon | null) => void
   onClearCustom: () => void
   onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
@@ -669,9 +662,10 @@ interface Props {
 
 export function MapView({
   meta,
+  params,
   visible,
   emphasiseLines,
-  selected,
+  open,
   basemapMix,
   anchorDump,
   hotspots,
@@ -688,6 +682,8 @@ export function MapView({
   custom,
   showLines,
   onSelect,
+  placing,
+  onPlace,
   onSetCustom,
   onClearCustom,
   onMoveAnchor,
@@ -699,8 +695,10 @@ export function MapView({
   const menuRef = useRef(menu)
   menuRef.current = menu
   /** Read in the same handlers, to tell a tap that clears something from a tap that clears nothing. */
-  const selectedRef = useRef(selected)
-  selectedRef.current = selected
+  const openRef = useRef(open)
+  openRef.current = open
+  const placingRef = useRef({ placing, onPlace })
+  placingRef.current = { placing, onPlace }
   const el = useRef<HTMLDivElement>(null)
   const map = useRef<MlMap | null>(null)
   const popup = useRef<maplibregl.Popup | null>(null)
@@ -1168,7 +1166,7 @@ export function MapView({
         paint: { 'line-color': '#22c55e', 'line-width': 3.5 },
       })
       for (const id of ['custom', 'customCasing']) {
-        m.on('click', id, () => onSelectRef.current(PLANNED_ID))
+        m.on('click', id, () => placingRef.current.placing || onSelectRef.current(PLANNED_ID))
         m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer' })
         m.on('mouseleave', id, () => { m.getCanvas().style.cursor = '' })
       }
@@ -1177,7 +1175,7 @@ export function MapView({
       // `glyphs` source in the style, and there is no reason to fetch a font for two letters.
       m.on('click', 'lines-hit', (e) => {
         const f = e.features?.[0]
-        if (f) onSelectRef.current(String(f.properties!.cid))
+        if (f && !placingRef.current.placing) onSelectRef.current(String(f.properties!.cid))
       })
       const openMenu = (e: maplibregl.MapMouseEvent) =>
         setMenu({ x: e.point.x, y: e.point.y, lat: e.lngLat.lat, lon: e.lngLat.lng })
@@ -1187,13 +1185,19 @@ export function MapView({
       })
 
       m.on('click', (e) => {
+        // Placing takes every click, a line under the pointer included: the point goes where the
+        // finger went, not onto whatever happened to be drawn there.
+        if (placingRef.current.placing) {
+          placingRef.current.onPlace({ lat: e.lngLat.lat, lon: e.lngLat.lng })
+          return
+        }
         // Must include every selectable layer, or clicking one of them selects and then this
         // immediately deselects it again -- both handlers fire, and this one runs last.
         const hit = m.queryRenderedFeatures(e.point, {
           layers: ['lines-hit', 'custom', 'customCasing'].filter((id) => m.getLayer(id)),
         })
         if (hit.length) return setMenu(null)
-        const dismissed = !!selectedRef.current || !!menuRef.current
+        const dismissed = openRef.current || !!menuRef.current
         onSelectRef.current(null)
         setMenu(null)
         // With a finger there is no second button to ask for the menu with, so a tap on bare map
@@ -1307,15 +1311,6 @@ export function MapView({
     const v = showLines ? 'visible' : 'none'
     for (const id of ['lines', 'lines-hit']) m.setLayoutProperty(id, 'visibility', v)
   }, [showLines, ready])
-
-  useEffect(() => {
-    const m = map.current
-    if (!m || !ready) return
-
-    m.removeFeatureState({ source: 'lines' })
-    const index = selected ? visible.findIndex((c) => c.id === selected.id) : -1
-    if (index >= 0) m.setFeatureState({ source: 'lines', id: index }, { sel: true })
-  }, [selected, visible, ready])
 
   useEffect(() => {
     const m = map.current
@@ -1473,42 +1468,33 @@ export function MapView({
     m.easeTo({ center: [fix.lon, fix.lat], zoom: Math.max(m.getZoom(), LINES_FROM + 2) })
   }, [fix, ready])
 
-  /** The band, for whichever line is open -- found or planned, both measured across the same lens. */
+  useEffect(() => {
+    if (ready) map.current!.getCanvas().style.cursor = placing ? 'crosshair' : ''
+  }, [placing, ready])
+
+  /** The band the planned line is measured across. */
   useEffect(() => {
     const m = map.current
     if (!m || !ready) return
     const src = m.getSource('band') as maplibregl.GeoJSONSource | undefined
-    const ends = selected
-      ? { a: { lat: selected.a.lat, lon: selected.a.lon }, b: { lat: selected.b.lat, lon: selected.b.lon } }
-      : custom.a && custom.b
-        ? { a: custom.a, b: custom.b }
-        : null
-    src?.setData(ends && meta ? bandFeature(ends.a, ends.b, meta.params) : emptyCollection)
-  }, [selected, custom, meta, ready])
+    src?.setData(
+      custom.a && custom.b && params ? bandFeature(custom.a, custom.b, params) : emptyCollection,
+    )
+  }, [custom, params, ready])
 
   /**
-   * The two anchor handles, for whichever line is being looked at.
+   * The two anchor handles of the planned line, a single placed point included.
    *
-   * One set, not one per kind of line. Dragging a found line's anchor forks it into the planned
-   * line, which means the selection changes mid-gesture -- so the same DOM elements have to serve
-   * both, and are created once and thereafter only repositioned and restyled. Recreating them would
-   * destroy the element the browser is tracking the gesture on, which is what previously turned a
-   * drag into a series of jumps.
-   *
-   * Positions follow the selection when there is one, and fall back to the placed custom points so
-   * a single point placed on its own is still visible and movable.
+   * Created once and thereafter only repositioned. Recreating them would destroy the element the
+   * browser is tracking the gesture on, which is what previously turned a drag into a series of
+   * jumps.
    */
   useEffect(() => {
     const m = map.current
     if (!m || !ready) return
 
-    const planning = !selected || selected.id === PLANNED_ID
-    const at: Record<'a' | 'b', LatLon | null> = selected
-      ? { a: { lat: selected.a.lat, lon: selected.a.lon }, b: { lat: selected.b.lat, lon: selected.b.lon } }
-      : custom
-
     for (const which of ['a', 'b'] as const) {
-      const pt = at[which]
+      const pt = custom[which]
       const existing = anchorMarkers.current[which]
 
       if (!pt) {
@@ -1517,18 +1503,13 @@ export function MapView({
         continue
       }
       if (existing) {
-        // classList, not className: MapLibre positions markers through its own `maplibregl-marker`
-        // class (position: absolute, origin at the container's top left), so overwriting className
-        // drops the element back into static flow and its transform lands dozens of pixels off.
-        existing.getElement().classList.toggle('custom-marker', planning)
-        existing.getElement().classList.toggle('anchor-marker', !planning)
         // Never fight the pointer: while this end is being dragged the marker is authoritative.
         if (dragging.current !== which) existing.setLngLat([pt.lon, pt.lat])
         continue
       }
 
       const node = document.createElement('div')
-      node.className = planning ? 'custom-marker' : 'anchor-marker'
+      node.className = 'custom-marker'
       node.textContent = which.toUpperCase()
       const marker = new maplibregl.Marker({ element: node, draggable: true })
         .setLngLat([pt.lon, pt.lat])
@@ -1547,7 +1528,7 @@ export function MapView({
       })
       anchorMarkers.current[which] = marker
     }
-  }, [selected, custom, ready])
+  }, [custom, ready])
 
   useEffect(() => {
     const m = map.current
@@ -1572,7 +1553,7 @@ export function MapView({
               setMenu(null)
             }}
           >
-            Set custom point A
+            Set point A
           </button>
           <button
             onClick={() => {
@@ -1580,7 +1561,7 @@ export function MapView({
               setMenu(null)
             }}
           >
-            Set custom point B
+            Set point B
           </button>
           {(custom.a || custom.b) && (
             <button

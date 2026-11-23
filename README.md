@@ -21,6 +21,11 @@ npm run pipeline      # downloads rasters, computes candidates.json
 npm run dev           # browse the results
 ```
 
+The deployed page opens as a planner only: place two anchors anywhere in Germany, measure the span,
+send the link. The found lines, hotspots and filters are behind **Developer mode** at the bottom of
+the guide ("i"), which `npm run dev` switches on by default. See
+[`src/web/devMode.ts`](src/web/devMode.ts).
+
 Custom areas of interest — one rectangle, or several:
 
 ```bash

@@ -17,10 +17,9 @@ import type { CustomPoints, LatLon } from './planPoints.js'
  * every parameter present in a URL is something the sharer actually changed -- which makes a shared
  * link readable, and means adding a new control with a new default does not invalidate old links.
  *
- * A selected candidate is stored twice over -- by id, and by the geometry needed to rebuild it as a
- * planned line. Ids are derived from anchor coordinates, so regenerating the dataset with different
- * parameters can move an anchor and orphan the id. The geometry then still reproduces the same line,
- * measured live, which is the difference between a stale link and a broken one.
+ * An open line is stored as its two points and rig heights, and nothing else: a line picked from the
+ * dataset is measured live from those like any other, so a link to it survives the dataset being
+ * regenerated or not being loaded at all.
  */
 
 /** Slider positions, and the values at which each slider is not filtering anything. */
@@ -60,7 +59,6 @@ const FILTER_PARAMS: Record<keyof Filters, string> = {
 export interface UrlState {
   /** south, west, north, east. */
   bbox: [number, number, number, number] | null
-  lineId: string | null
   custom: CustomPoints
   rig: RigHeights | null
   sagPct: number | null
@@ -88,7 +86,6 @@ export interface UrlState {
 
 const EMPTY: UrlState = {
   bbox: null,
-  lineId: null,
   custom: { a: null, b: null },
   rig: null,
   sagPct: null,
@@ -204,7 +201,6 @@ export function parseUrl(search: string): UrlState {
   return {
     ...EMPTY,
     bbox: at ? (at as [number, number, number, number]) : null,
-    lineId: q.get('line'),
     custom: { a: point(q.get('a')), b: point(q.get('b')) },
     rig: rig ? { a: rig[0]!, b: rig[1]! } : null,
     sagPct: sag ? sag[0]! : null,
@@ -221,7 +217,6 @@ export function parseUrl(search: string): UrlState {
 export function toSearch(s: UrlState): string {
   const q = new URLSearchParams()
   if (s.bbox) q.set('at', bboxText(s.bbox))
-  if (s.lineId) q.set('line', s.lineId)
   if (s.custom.a) q.set('a', `${coord(s.custom.a.lat)},${coord(s.custom.a.lon)}`)
   if (s.custom.b) q.set('b', `${coord(s.custom.b.lat)},${coord(s.custom.b.lon)}`)
   if (s.rig) q.set('rig', `${s.rig.a.toFixed(2)},${s.rig.b.toFixed(2)}`)

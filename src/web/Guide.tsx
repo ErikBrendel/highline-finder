@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRemembered } from './remembered.js'
 import { CoverageMap } from './CoverageMap.js'
+import { DEV_MODE, setDevMode } from './devMode.js'
 import type { Region } from '../shared/types.js'
 
 /**
@@ -76,8 +77,7 @@ const LineGuide = () => (
       One span, measured against the public survey of the ground it crosses.
     </p>
     <p className="lead quiet">
-      A computed line, not a logged spot: it was found by reading the terrain. Nothing here records
-      whether anyone has ever rigged it.
+      A planned line, not a logged spot. Nothing here records whether anyone has ever rigged it.
     </p>
 
     <h2><span className="ico">📐</span>What was measured</h2>
@@ -106,7 +106,52 @@ const LineGuide = () => (
   </>
 )
 
-/** For someone who arrived at the map. The original guide, and still the longer of the two. */
+/**
+ * For someone who arrived at the map without the search: a planner, and nothing to browse.
+ *
+ * Placing the two anchors comes first, because on this map it is the only thing there is to do and
+ * nothing else on screen says how.
+ */
+const PlannerGuide = () => (
+  <>
+    <p className="lead">
+      Plan a highline anywhere in Germany, measured against the public survey of the ground it
+      crosses, and send it to someone as a link.
+    </p>
+
+    <h2><span className="ico">✏️</span>Plan a line</h2>
+    <ul>
+      <li>
+        Press <b>Plan a line</b>, then tap the map twice: once for each anchor. Right-clicking the
+        map, or tapping it on a phone, sets either point on its own.
+      </li>
+      <li>Drag either anchor to move it. The profile re-measures as it moves.</li>
+      <li>
+        <b>Sag</b> and the <b>rig height</b> at each end are in the line&rsquo;s panel;{' '}
+        <b>optimise</b> walks both anchors to a better spot nearby.
+      </li>
+    </ul>
+
+    <h2><span className="ico">🔗</span>Share it</h2>
+    <ul>
+      <li>
+        The address bar follows the line and the view, so <b>share</b> sends exactly what you are
+        looking at. Whoever opens it can move the anchors and send their version back.
+      </li>
+    </ul>
+
+    <h2><span className="ico">🛰️</span>The data</h2>
+    <ul>
+      <li>Terrain, canopy and buildings, published free and open by the state surveys.</li>
+      <li>How much there is to measure against differs by state:</li>
+    </ul>
+    <CoverageMap regions={null} />
+
+    <Caveat />
+  </>
+)
+
+/** For someone who arrived at the map with the search on. The original guide. */
 const MapGuide = ({ regions }: { regions: Region[] | null }) => (
   <>
     <p className="lead">
@@ -153,7 +198,7 @@ const MapGuide = ({ regions }: { regions: Region[] | null }) => (
     <h2><span className="ico">✏️</span>Lines of your own</h2>
     <ul>
       <li>Drag either anchor of a selected line; it re-measures as it moves.</li>
-      <li>Right-click the map for <b>Set custom point A</b> / <b>B</b> to plan a span anywhere.</li>
+      <li>Right-click the map for <b>Set point A</b> / <b>B</b> to plan a span anywhere.</li>
       <li>The address bar follows the view, so a link is the map as you left it.</li>
       <li>The crosshair beside the zoom buttons puts the map where you are.</li>
     </ul>
@@ -223,9 +268,53 @@ export function Guide({
           </button>
         </div>
         <div className="body">
-          {kind === 'line' ? <LineGuide /> : <MapGuide regions={regions} />}
+          {kind === 'line' ? (
+            <LineGuide />
+          ) : DEV_MODE ? (
+            <MapGuide regions={regions} />
+          ) : (
+            <PlannerGuide />
+          )}
+          <DevSwitch />
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The way into the automated search, which is off by default.
+ *
+ * Findable rather than hidden: anyone curious enough to read to the bottom of the guide can switch
+ * it on. The confirmation is there because what it switches on is unfinished and much heavier to
+ * load, and that should be a decision rather than a stray click.
+ */
+function DevSwitch() {
+  const [asking, setAsking] = useState(false)
+  if (DEV_MODE) {
+    return (
+      <div className="devswitch">
+        Developer mode is on: found lines, hotspots and filters are shown.{' '}
+        <button onClick={() => setDevMode(false)}>Turn off</button>
+      </div>
+    )
+  }
+  if (!asking) {
+    return (
+      <div className="devswitch">
+        <button onClick={() => setAsking(true)}>Developer mode (work in progress)</button>
+      </div>
+    )
+  }
+  return (
+    <div className="devswitch" data-asking>
+      <p>
+        <b>Switch on the automated search?</b> It shows tens of thousands of lines found by a
+        program, over Berlin and Brandenburg only. It is unfinished: many of them are not riggable,
+        and the data takes a while to load. The page reloads.
+      </p>
+      <button onClick={() => setDevMode(true)}>Switch on</button>
+      <button onClick={() => setAsking(false)}>Cancel</button>
     </div>
   )
 }

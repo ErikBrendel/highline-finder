@@ -95,56 +95,35 @@ describe('applyShading', () => {
 })
 
 describe('line emphasis', () => {
-  /** Reads a width expression at one zoom, for both the selected and the unselected case. */
-  const at = (expr: unknown, zoom: number): { plain: number; selected: number } => {
-    // ['interpolate', ['linear'], ['zoom'], z0, caseExpr, z1, caseExpr] or a bare case expression.
-    const branch = (e: unknown, sel: boolean): number =>
-      Array.isArray(e) && e[0] === 'case' ? (sel ? (e[2] as number) : (e[3] as number)) : (e as number)
-    if (!Array.isArray(expr) || expr[0] !== 'interpolate') {
-      return { plain: branch(expr, false), selected: branch(expr, true) }
-    }
-    const stops: [number, unknown][] = []
-    for (let i = 3; i < expr.length; i += 2) stops.push([expr[i] as number, expr[i + 1]])
-    const [z0, e0] = stops[0]!
-    const [z1, e1] = stops[stops.length - 1]!
-    const t = Math.min(1, Math.max(0, (zoom - z0) / (z1 - z0)))
-    const lerp = (sel: boolean) => branch(e0, sel) + (branch(e1, sel) - branch(e0, sel)) * t
-    return { plain: lerp(false), selected: lerp(true) }
+  /** Reads a width expression at one zoom. */
+  const at = (expr: unknown, zoom: number): number => {
+    // ['interpolate', ['linear'], ['zoom'], z0, w0, z1, w1] or a bare width.
+    if (!Array.isArray(expr)) return expr as number
+    const [z0, w0, z1, w1] = expr.slice(3) as number[]
+    const t = Math.min(1, Math.max(0, (zoom - z0!) / (z1! - z0!)))
+    return w0! + (w1! - w0!) * t
   }
 
   it('draws every line wider when emphasised, at every zoom the map reaches', () => {
     for (const zoom of [6, 9, 12, 15, 18]) {
-      const plain = at(lineWidth(0), zoom)
-      const loud = at(lineWidth(1), zoom)
-      expect(loud.plain).toBeGreaterThan(plain.plain)
-      expect(loud.selected).toBeGreaterThan(plain.selected)
-    }
-  })
-
-  it('keeps the selected line the widest thing on the map, emphasised or not', () => {
-    for (const zoom of [9, 12, 15]) {
-      for (const emphasis of [0, 0.5, 1]) {
-        const { plain, selected } = at(lineWidth(emphasis), zoom)
-        expect(selected).toBeGreaterThan(plain)
-      }
+      expect(at(lineWidth(1), zoom)).toBeGreaterThan(at(lineWidth(0), zoom))
     }
   })
 
   it('helps most where a line is only a few pixels long', () => {
     // The whole point: at z15 a 400 m line already crosses the screen, at z9 it is a hairline.
-    const boost = (zoom: number) => at(lineWidth(1), zoom).plain / at(lineWidth(0), zoom).plain
+    const boost = (zoom: number) => at(lineWidth(1), zoom) / at(lineWidth(0), zoom)
     expect(boost(9)).toBeGreaterThan(boost(15))
   })
 
-  it('stops dimming the unselected lines as they swell, and dims them again as they settle', () => {
-    const unselected = (e: number) => (lineOpacity(e) as [string, unknown, number, number])[3]
-    expect(unselected(0)).toBeCloseTo(0.7)
-    expect(unselected(0.5)).toBeCloseTo(0.85)
-    expect(unselected(1)).toBeCloseTo(1)
+  it('stops dimming the lines as they swell, and dims them again as they settle', () => {
+    expect(lineOpacity(0)).toBeCloseTo(0.7)
+    expect(lineOpacity(0.5)).toBeCloseTo(0.85)
+    expect(lineOpacity(1)).toBeCloseTo(1)
   })
 
   it('grows smoothly rather than jumping, so a half-finished swell is half-way', () => {
-    const width = (e: number) => at(lineWidth(e), 9).plain
+    const width = (e: number) => at(lineWidth(e), 9)
     expect(width(0.5)).toBeGreaterThan(width(0))
     expect(width(0.5)).toBeLessThan(width(1))
   })

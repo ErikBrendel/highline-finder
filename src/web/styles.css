@@ -454,6 +454,24 @@ header[data-measuring] .spacer { flex: none; }
 }
 .guide .warn b { color: #fcd34d; }
 .guide .body b { color: var(--text); font-weight: 600; }
+/* At the very bottom and quiet: findable by the curious, not offered to everyone. */
+.guide .devswitch {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+.guide .devswitch button {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 5px; cursor: pointer; padding: 2px 8px; font-size: 11px; margin-right: 6px;
+}
+.guide .devswitch button:hover { color: var(--text); }
+.guide .devswitch[data-asking] {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
 
 
 
@@ -482,20 +500,6 @@ header[data-measuring] .spacer { flex: none; }
 .basemaps .ticks button:hover { color: var(--text); }
 .basemaps .ticks button[data-active=true] { color: var(--accent); font-weight: 600; }
 
-.anchor-marker {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--line);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-}
-
 /* When a region was last computed, stamped in the middle of its box. Debug view only. */
 .chunkstamp {
   padding: 2px 6px;
@@ -507,6 +511,24 @@ header[data-measuring] .spacer { flex: none; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* The one way to start a line that needs no instructions, so it is the loudest thing in the column. */
+.planbtn {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px;
+  background: #22c55e;
+  color: #05240f;
+  border: 1px solid #16a34a;
+}
+.planbtn:hover { background: #4ade80; }
+.planbtn[data-active=true] {
+  background: rgba(15, 17, 21, 0.9);
+  color: #4ade80;
+  border-color: #22c55e;
 }
 
 .cachebadge {
@@ -1013,8 +1035,6 @@ header[data-measuring] .spacer { flex: none; }
   border-radius: 5px; cursor: pointer; padding: 3px 9px; font-size: 11px;
 }
 .rig button:disabled { opacity: 0.4; cursor: default; }
-.anchor-marker { cursor: grab; }
-.anchor-marker:active { cursor: grabbing; }
 
 /*
  * A finger-sized handle around a pen-sized one.
@@ -1028,8 +1048,8 @@ header[data-measuring] .spacer { flex: none; }
  * itself, so this hangs off it rather than resizing it. `touch-action: none` keeps the browser's
  * own pan from claiming the gesture before the drag handler sees it.
  */
-.anchor-marker, .custom-marker { touch-action: none; }
-.anchor-marker::before, .custom-marker::before {
+.custom-marker { touch-action: none; }
+.custom-marker::before {
   content: '';
   position: absolute;
   inset: -12px;

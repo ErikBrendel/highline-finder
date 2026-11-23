@@ -14,13 +14,12 @@ import type {
   MaskCells,
   Params,
   Region,
-  StoredProfile,
   TileUsage,
 } from '../shared/types.js'
-import { rescoreAtSag, rescoreForDisplay } from '../shared/scoring.js'
-import {
-  VIEWER_PROFILE, buildProfile, measuredHalfWidth, packProfile, unpackProfile,
-} from '../shared/profile.js'
+import { rescoreAtSag } from '../shared/scoring.js'
+import { VIEWER_PROFILE, measuredHalfWidth, unpackProfile } from '../shared/profile.js'
+import { DEFAULT_PARAMS } from '../pipeline/params.js'
+import { DEV_MODE } from './devMode.js'
 import {
   BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer,
 } from './MapView.js'
@@ -305,13 +304,6 @@ const Label = ({ full, short }: { full: string; short: string }) => (
   </>
 )
 
-/** Whether these placed points are just a candidate's own coordinates written back. */
-function sameLine(points: CustomPoints, c: Candidate): boolean {
-  const near = (p: LatLon | null, a: { lat: number; lon: number }) =>
-    !!p && Math.abs(p.lat - a.lat) < 1e-5 && Math.abs(p.lon - a.lon) < 1e-5
-  return near(points.a, c.a) && near(points.b, c.b)
-}
-
 export function App() {
   // Read once. The URL is an input at startup and an output thereafter; treating it as live state
   // both ways is how a URL writer and a URL reader start feeding each other.
@@ -340,7 +332,13 @@ export function App() {
   const [minExposure, setMinExposure] = useState(filter('minExposure'))
   const [maxCanopy, setMaxCanopy] = useState(filter('maxCanopy'))
   const [maxOffLevel, setMaxOffLevel] = useState(filter('maxOffLevel'))
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  /**
+   * Whether the planned line's panel is open.
+   *
+   * There is one line that can be open, and it is always the planned one: picking a found line
+   * places the planned line's two points on its anchors. A link with both points opens on it.
+   */
+  const [open, setOpen] = useState(!!initial.custom.a && !!initial.custom.b)
   const [bbox, setBbox] = useState(initial.bbox)
   // Google's map zoom is the same web-mercator scale MapLibre uses, so it transfers directly.
   const [zoom, setZoom] = useState(13)
@@ -413,6 +411,14 @@ export function App() {
   const [rig, setRig] = useState<RigHeights | null>(initial.rig)
   const [optimizing, setOptimizing] = useState(false)
   /**
+   * Which point the next click on the map places, while the "plan a line" button is being followed.
+   *
+   * The context menu does the same, and nobody finds a context menu without being told -- on a
+   * phone not even then. On a map whose only use is placing two points, the way to place them has
+   * to be on screen.
+   */
+  const [placing, setPlacing] = useState<'a' | 'b' | null>(null)
+  /**
    * Reach of the run in progress, and the reach the button is offering next.
    *
    * The offer is the whole feature. One click asks "is there something better right here"; while a
@@ -439,9 +445,6 @@ export function App() {
   const [coverVersion, setCoverVersion] = useState(0)
   /** Why the elevation for the planned line could not be had, or null while it can. */
   const [terrainFailed, setTerrainFailed] = useState<string | null>(null)
-  const [fetchedProfile, setFetchedProfile] = useState<{ id: string; profile: StoredProfile } | null>(
-    null,
-  )
   const [layerError, setLayerError] = useState<string | null>(null)
   /** Whether the pointer is on the lines count, which is the cue to make them easy to spot. */
   const [emphasiseLines, setEmphasiseLines] = useState(false)
@@ -449,7 +452,7 @@ export function App() {
   const [full, setFull] = useState(initial.full ?? false)
   // Which guide this reader gets: the one for the view they are actually in. `full` can be set
   // without a line to be full of, so both have to hold.
-  const guide = useGuide(full && selectedId ? 'line' : 'map')
+  const guide = useGuide(full && open ? 'line' : 'map')
   /**
    * Following the device, and the last position it gave.
    *
@@ -477,23 +480,19 @@ export function App() {
       setLocating(false)
     })
   }, [locating])
-  /** Why the selected candidate has no chart, or null while it might still get one. */
-  const [profileFailed, setProfileFailed] = useState<string | null>(null)
-
   const load = <T,>(file: string) =>
     fetch(`${import.meta.env.BASE_URL}${file}`).then((r) =>
       r.ok ? (r.json() as Promise<T>) : Promise.reject(new Error(`HTTP ${r.status}`)),
     )
 
   useEffect(() => {
+    if (!DEV_MODE) return
     load<DatasetMeta>('meta.json')
       .then((m) => {
         // A file from an older pipeline would otherwise fail deep inside rendering, which reads as
         // a broken app rather than as stale output.
         if (!m?.regions?.length) throw new Error('no regions in it — re-run `npm run pipeline`')
         setMeta(m)
-        const floor = m.params.sagRatio * 100
-        setSagPct((cur) => Math.max(floor, cur ?? floor))
       })
       .catch((e: unknown) => {
         report('loading meta.json, which describes the run', e)
@@ -501,24 +500,22 @@ export function App() {
       })
   }, [])
 
+  /**
+   * What every line is measured with. The dataset's own in dev mode, so a picked line is measured
+   * the way the search measured it; the current defaults otherwise, with no file to wait for.
+   */
+  const params: Params | null = DEV_MODE ? (meta?.params ?? null) : DEFAULT_PARAMS
+  const sagFloor = params ? params.sagRatio * 100 : null
   useEffect(() => {
+    if (sagFloor !== null) setSagPct((cur) => Math.max(sagFloor, cur ?? sagFloor))
+  }, [sagFloor])
+
+  useEffect(() => {
+    if (!DEV_MODE) return
     load<{ lines: ByKind<Candidate[]> }>('candidates.json')
       .then((d) => {
         if (!d?.lines?.natural) throw new Error('no lines in it — re-run `npm run pipeline`')
         setLines(d.lines)
-        // A shared candidate is restored by id if the dataset still has it. If regenerating moved
-        // the anchor that names it, the link's own geometry rebuilds the same line as a planned
-        // one instead -- stale rather than broken.
-        const found = LINE_KINDS.flatMap((k) => d.lines[k]).find((c) => c.id === initial.lineId)
-        if (found) {
-          setSelectedId(found.id)
-          // The point parameters are either that candidate's own fallback geometry or a planned
-          // line the sharer had placed as well. Identical coordinates mean the former, and
-          // adopting it would draw a duplicate line on top of the candidate.
-          if (sameLine(initial.custom, found)) setCustom({ a: null, b: null })
-        } else if (initial.custom.a && initial.custom.b) {
-          setSelectedId(PLANNED_ID)
-        }
       })
       .catch((e: unknown) => {
         report('loading candidates.json, which is every line found', e)
@@ -619,6 +616,7 @@ export function App() {
   }
 
   useEffect(() => {
+    if (!DEV_MODE) return
     fetch(`${import.meta.env.BASE_URL}hotspots.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(setHotspots)
@@ -679,7 +677,7 @@ export function App() {
   // measurement: an effect that writes what another effect reads is how this file previously
   // managed to feed itself.
   useEffect(() => {
-    if (!customUtm || !meta) return
+    if (!customUtm || !params) return
     let stale = false
     // This effect runs on every move, so the line supplies itself as it goes. The optimiser is the
     // one thing that cannot work that way -- see wanderMargin.
@@ -690,7 +688,7 @@ export function App() {
     // no attachment height and produces no line at all rather than a partial one. See
     // DRAG_LOOKAHEAD.
     Promise.all([
-      ensureTerrain(a, b, measuredHalfWidth(span, meta.params)),
+      ensureTerrain(a, b, measuredHalfWidth(span, params)),
       ensureTerrain(a, a, DRAG_LOOKAHEAD),
       ensureTerrain(b, b, DRAG_LOOKAHEAD),
     ])
@@ -707,7 +705,7 @@ export function App() {
     return () => {
       stale = true
     }
-  }, [customUtm, meta])
+  }, [customUtm, params])
 
   /**
    * The layers a planned line is measured against, beyond the two elevation rasters.
@@ -733,7 +731,7 @@ export function App() {
    * fetch delivers a window that was genuinely missing.
    */
   const planned: PlannedLine | null = useMemo(() => {
-    if (!meta || !customUtm || sagPct === null) return null
+    if (!params || !customUtm || sagPct === null) return null
     void terrainVersion
     return planLine(
       customUtm.a,
@@ -744,7 +742,7 @@ export function App() {
       // The viewer's resolution, like the selected line's. The optimiser calls planLine too and
       // deliberately does not get this: it evaluates dozens of positions a step, and it is choosing
       // where to put an anchor rather than reporting what is under one.
-      { ...meta.params, ...VIEWER_PROFILE },
+      { ...params, ...VIEWER_PROFILE },
       rig,
       scene,
       // A dragged anchor crosses into ground still being fetched constantly, and a chart of most of
@@ -756,17 +754,17 @@ export function App() {
           customUtm.a,
           customUtm.b,
           Math.hypot(customUtm.b.e - customUtm.a.e, customUtm.b.n - customUtm.a.n),
-          meta.params,
+          params,
         ),
       },
     )
-  }, [meta, customUtm, sagPct, terrainVersion, rig, scene])
+  }, [params, customUtm, sagPct, terrainVersion, rig, scene])
 
   /**
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a
    * placeholder chart, so placing a line always produces the panel it is going to fill.
    */
-  const planPending = selectedId === PLANNED_ID && !!custom.a && !!custom.b && !planned
+  const planPending = open && !!custom.a && !!custom.b && !planned
 
   /**
    * Adopts a new pair of planned points. Selection happens here rather than in an effect: it is a
@@ -779,14 +777,27 @@ export function App() {
     setCustom(next)
     const complete = !!next.a && !!next.b
     if (!complete) setRig(null)
-    setSelectedId((cur) => {
-      if (!complete) return cur === PLANNED_ID ? null : cur
-      // `select` is the difference between asking to see a line and merely moving one. Placing a
-      // point is a request for the panel; dragging an anchor is not, so a panel the user has closed
-      // stays closed while they rearrange things. An open one follows the line it is describing
-      // either way, including when a dragged candidate forks into the planned line.
-      return select || cur !== null ? PLANNED_ID : null
-    })
+    // `select` is the difference between asking to see a line and merely moving one. Placing a
+    // point is a request for the panel; dragging an anchor is not, so a panel the user has closed
+    // stays closed while they rearrange things.
+    setOpen((cur) => complete && (select || cur))
+  }
+
+  /**
+   * What a click on the map asks for: a found line, the planned line, or neither.
+   *
+   * A found line is not selected as itself. Its two anchors become the planned line's, with the
+   * rig heights the search chose, so it is measured live like any other and every control in the
+   * panel works on it without first having to turn it into something else.
+   */
+  const select = (id: string | null) => {
+    if (id === null) return setOpen(false)
+    if (id === PLANNED_ID) return setOpen(true)
+    const found = visible.find((c) => c.id === id)
+    if (!found) return
+    commit({ a: { lat: found.a.lat, lon: found.a.lon }, b: { lat: found.b.lat, lon: found.b.lon } }, true)
+    const rigged = Number.isFinite(found.a.aFrame) && Number.isFinite(found.b.aFrame)
+    setRig(rigged ? { a: found.a.aFrame, b: found.b.aFrame } : null)
   }
 
   /** Turns one anchor class on or off. All three off is a legitimate setting: no lines. */
@@ -797,6 +808,20 @@ export function App() {
       return next
     })
 
+  /**
+   * One step of the button's placement: A starts a new line, B finishes it and opens it. The line
+   * already on the map survives until the first tap, so changing your mind costs nothing.
+   */
+  const placeNext = (at: LatLon) => {
+    if (placing === 'a') {
+      commit({ a: at, b: null }, true)
+      setPlacing('b')
+    } else {
+      commit({ a: custom.a, b: at }, true)
+      setPlacing(null)
+    }
+  }
+
   /** Places one end of the planned line. */
   const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) =>
     commit(place(custom, which, at), true)
@@ -805,66 +830,23 @@ export function App() {
   // second would put the first end back.
   const clearCustom = () => commit({ a: null, b: null }, false)
 
-  /**
-   * Dragging an anchor handle. Dragging one that belongs to a *found* line forks that line into the
-   * planned one, which is the quick way to ask "what if this candidate started three metres over
-   * there" -- the candidate itself is untouched and the copy becomes the thing under the pointer.
-   */
-  const moveAnchor = (which: 'a' | 'b', at: LatLon) => {
-    const from =
-      selected && selected.id !== PLANNED_ID
-        ? {
-            a: { lat: selected.a.lat, lon: selected.a.lon },
-            b: { lat: selected.b.lat, lon: selected.b.lon },
-          }
-        : custom
-    commit(place(from, which, at), false)
-  }
-
-  /**
-   * Seeds the planned line from the selected dataset one, so an edit forks instead of vanishing.
-   *
-   * Dragging an anchor has always done this -- see `moveAnchor`. Setting a rig height or asking for
-   * an optimisation is the same kind of edit and has to fork the same way, or the control would
-   * appear to do nothing at all: a found line's figures come from the dataset and nothing in the
-   * browser can write to them. Forking is what makes every control in the panel mean the same thing
-   * whichever kind of line is open.
-   */
-  const forkSelected = () => {
-    if (!selected || selected.id === PLANNED_ID) return
-    commit(
-      {
-        a: { lat: selected.a.lat, lon: selected.a.lon },
-        b: { lat: selected.b.lat, lon: selected.b.lon },
-      },
-      true,
-    )
-  }
+  /** Dragging an anchor handle. */
+  const moveAnchor = (which: 'a' | 'b', at: LatLon) => commit(place(custom, which, at), false)
 
   /**
    * Swaps which end is called A.
    *
    * The line does not move: the profile is read from the other end, the chart's left becomes its
    * right and the bearing turns through 180 degrees. Worth a button because which end is A decides
-   * how the whole view is laid out, and there is no other way to choose it -- on a found line it
-   * was decided by whichever anchor the search happened to reach first.
-   *
-   * Forks a found line, like every other edit. The rig heights are carried across swapped, and
-   * seeded from the found line's own where the planner has not set any, so that flipping leaves the
-   * physical line exactly as it was rather than handing it back to the auto-rigger to re-choose.
+   * how the whole view is laid out, and there is no other way to choose it -- on a picked line it
+   * was decided by whichever anchor the search happened to reach first. Rig heights go with their
+   * ends.
    */
   const flipAnchors = () => {
-    const found = selected && selected.id !== PLANNED_ID ? selected : null
-    const from = found
-      ? {
-          a: { lat: found.a.lat, lon: found.a.lon },
-          b: { lat: found.b.lat, lon: found.b.lon },
-        }
-      : custom
-    if (!from.a || !from.b) return
-    const held = rig ?? (found ? { a: found.a.aFrame, b: found.b.aFrame } : null)
-    commit({ a: from.b, b: from.a }, true)
-    setRig(held && Number.isFinite(held.a) && Number.isFinite(held.b) ? { a: held.b, b: held.a } : null)
+    if (!custom.a || !custom.b) return
+    const held = rig
+    commit({ a: custom.b, b: custom.a }, true)
+    setRig(held && { a: held.b, b: held.a })
   }
 
   /**
@@ -921,22 +903,26 @@ export function App() {
     [view, visible],
   )
   /**
-   * Whether the view has left the searched ground entirely.
+   * Whether the view has left the ground everything is known about.
    *
-   * Panning off the state is not an error and nothing stops it -- the basemap keeps working, so the
-   * map looks fine and is simply empty, which reads as "this tool found nothing in my town" rather
-   * than "this tool has never looked at my town". The two are worth telling apart, and the first
-   * person to press the locate button from somewhere that is not Brandenburg will need it.
+   * In dev mode that is the searched ground. Panning off it is not an error and nothing stops it --
+   * the basemap keeps working, so the map looks fine and is simply empty, which reads as "this tool
+   * found nothing in my town" rather than "this tool has never looked at my town". Measured against
+   * the areas actually searched rather than a rectangle round the state, so it is the honest
+   * boundary: overlap even one of them and there was a search here.
    *
-   * Measured against the areas actually searched rather than a rectangle round the state, so it is
-   * the honest boundary: overlap even one of them and there was a search here.
+   * Without the search there is nothing to have left but the surface model: a line placed by hand
+   * is measured anywhere a survey reaches, and what changes is only whether trees are known about.
    */
   const offMap = useMemo(() => {
-    if (!view || !meta) return null
-    const searched = meta.regions.some((r) =>
-      r.aois.some((a) => overlaps(view, [a.south, a.west, a.north, a.east])),
-    )
-    if (searched) return null
+    if (!view) return null
+    if (DEV_MODE) {
+      if (!meta) return null
+      const searched = meta.regions.some((r) =>
+        r.aois.some((a) => overlaps(view, [a.south, a.west, a.north, a.east])),
+      )
+      if (searched) return null
+    }
     // Two different nothings. Ground the search never covered can still be measured by hand, and
     // saying only "nothing here" would send someone away from a tool that would have answered them.
     const [e, n] = toUtm33((view[0] + view[2]) / 2, (view[1] + view[3]) / 2)
@@ -945,17 +931,12 @@ export function App() {
     // tiers the guide's coverage map draws are the same question, and the guide is shut by the
     // time anyone has panned this far.
     if (!source) return { where: 'nothing' as const, surface: false }
+    if (!DEV_MODE && source.hasSurface) return null
     return { where: 'plannable' as const, surface: source.hasSurface }
   }, [view, meta])
 
   // The planned line is exempt from every filter and from the validity gate, by design.
-  const selected = useMemo(
-    () =>
-      (selectedId === PLANNED_ID
-        ? planned?.candidate
-        : visible.find((c) => c.id === selectedId)) ?? null,
-    [visible, selectedId, planned],
-  )
+  const selected = open ? (planned?.candidate ?? null) : null
 
   /**
    * The optimiser, run as an animation rather than to completion.
@@ -980,7 +961,7 @@ export function App() {
   }, [offer])
 
   useEffect(() => {
-    if (!optimizing || !meta || sagPct === null || !customUtm) return
+    if (!optimizing || !params || sagPct === null || !customUtm) return
     const origin = customUtm
     let timer: ReturnType<typeof setTimeout>
     let stopped = false
@@ -1006,7 +987,7 @@ export function App() {
             ground: groundSampler,
             surface: surfaceSampler,
             sagRatio: sagPct / 100,
-            params: meta.params,
+            params,
             rig,
             scene,
             reach,
@@ -1019,7 +1000,7 @@ export function App() {
               ensureTerrain(
                 plan.a,
                 plan.b,
-                scanMargin(Math.hypot(plan.b.e - plan.a.e, plan.b.n - plan.a.n), at, meta.params),
+                scanMargin(Math.hypot(plan.b.e - plan.a.e, plan.b.n - plan.a.n), at, params),
               ),
           },
           spacing,
@@ -1048,86 +1029,19 @@ export function App() {
     // a dependency -- otherwise every step would restart the run and reset that origin. `reach` is
     // set in the same click that starts the run, so it is already current when this effect runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optimizing, meta, sagPct, rig])
-
-  /**
-   * A profile for the selected line, when the dataset does not carry one.
-   *
-   * The dataset carries none, so the chart and the exact metrics are built for the one line being
-   * looked at instead of for all of them up front -- from the same elevation service and the same
-   * buildProfile the planner uses, but at the viewer's resolution rather than the search's. A metre
-   * apart instead of four, which is the difference between seeing a gully and averaging over it.
-   *
-   * The metrics below are re-derived from this profile, so they are finer than the ones the search
-   * assigned. That is the point: a clearance figure that stepped over a four-metre gap was wrong.
-   * It does mean the number in the panel can differ slightly from the one the list sorted on.
-   */
-  useEffect(() => {
-    if (!meta || !selected || selected.profile) return
-    const a = { e: selected.a.e, n: selected.a.n }
-    const b = { e: selected.b.e, n: selected.b.n }
-    let stale = false
-    setProfileFailed(null)
-    // Only as wide as the profile reads. A selected line does not move, so anything beyond the band
-    // it samples would be fetched to be looked at and thrown away.
-    const band = measuredHalfWidth(selected.length, meta.params)
-    Promise.all([ensureTerrain(a, b, band), ensureCover(a, b)])
-      .then(() => {
-        if (stale) return
-        const fine = { ...meta.params, ...VIEWER_PROFILE }
-        const built = buildProfile(
-          a, b, selected.a.anchor, selected.b.anchor, selected.length,
-          groundSampler, surfaceSampler, fine, { water },
-        )
-        // Holes are drawn as holes rather than thrown away with the rest of the line. Only a
-        // profile with nothing in it at all is a failure: that means the service has no cover here,
-        // which is a different sentence and one the panel can act on.
-        const holes = built.filter((sample) => Number.isNaN(sample.ground)).length
-        if (holes === built.length) {
-          const why = `elevation is missing along the whole of this line`
-          report('building a profile for the selected line', new Error(why))
-          setProfileFailed(why)
-          return
-        }
-        setFetchedProfile({ id: selected.id, profile: packProfile(built, fine) })
-      })
-      .catch((e: unknown) => {
-        report('building a profile for the selected line', e)
-        if (!stale) setProfileFailed(failureText(e))
-      })
-    return () => {
-      stale = true
-    }
-    // terrainVersion rebuilds this as each window lands, so a selected line fills in piece by piece
-    // like a dragged one does. The fetch inside is a no-op once nothing is missing, so the rebuilds
-    // stop of their own accord rather than needing a guard.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, selected, terrainVersion, coverVersion])
-
-  /** The selected line with its stored profile, or the fetched one, or neither yet. */
-  const remeasured = useMemo(() => {
-    if (!selected || !meta || sagPct === null || selected.profile) return null
-    const profile = fetchedProfile?.id === selected.id ? fetchedProfile.profile : null
-    if (!profile) return null
-    // Now that a profile exists, the figures are recomputed at the chosen sag rather than staying at
-    // the one they were generated with -- and for display rather than for filtering, so a line the
-    // finer measurement disqualifies is described instead of vanishing. See rescoreForDisplay.
-    return rescoreForDisplay({ ...selected, profile }, sagPct / 100, meta.params)
-  }, [selected, meta, sagPct, fetchedProfile])
-
-  const detailed = remeasured?.candidate ?? selected
+  }, [optimizing, params, sagPct, rig])
 
   const shownProfile = useMemo(() => {
-    if (!detailed?.profile || sagPct === null || !meta) return null
+    if (!selected?.profile || sagPct === null || !params) return null
     return unpackProfile(
-      detailed.profile,
-      detailed.length,
-      detailed.a.anchor,
-      detailed.b.anchor,
+      selected.profile,
+      selected.length,
+      selected.a.anchor,
+      selected.b.anchor,
       sagPct / 100,
-      meta.params,
+      params,
     )
-  }, [detailed, sagPct, meta])
+  }, [selected, sagPct, params])
 
   /**
    * Ground a little way past each anchor, for the chart to draw behind the span.
@@ -1141,7 +1055,7 @@ export function App() {
    * where the survey does.
    */
   const wings = useMemo(() => {
-    const c = detailed
+    const c = selected
     if (!c || !(c.length > 0)) return null
     const margin = c.length * WING_FRACTION
     const [de, dn] = [(c.b.e - c.a.e) / c.length, (c.b.n - c.a.n) / c.length]
@@ -1173,12 +1087,12 @@ export function App() {
     // toward ground that was never measured.
     if (before.length < 2 && after.length < 2) return null
     return { before, after, margin }
-  }, [detailed, terrainVersion, coverVersion])
+  }, [selected, terrainVersion, coverVersion])
 
   const shownEnds = useMemo(
     () =>
-      detailed && { a: { e: detailed.a.e, n: detailed.a.n }, b: { e: detailed.b.e, n: detailed.b.n } },
-    [detailed],
+      selected && { a: { e: selected.a.e, n: selected.a.n }, b: { e: selected.b.e, n: selected.b.n } },
+    [selected],
   )
 
   /**
@@ -1190,11 +1104,11 @@ export function App() {
    */
   const canopyKnown = useMemo(
     () =>
-      !shownEnds || !meta
+      !shownEnds || !params
         ? true
-        : canopyOver(shownEnds.a, shownEnds.b, detailed!.length, meta.params),
+        : canopyOver(shownEnds.a, shownEnds.b, selected!.length, params),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shownEnds, meta, terrainVersion],
+    [shownEnds, params, terrainVersion],
   )
 
   /**
@@ -1205,9 +1119,7 @@ export function App() {
    * Overpass instance. Buildings need no equivalent -- they arrive with the elevation, since they
    * are part of the measurement rather than an annotation on it.
    *
-   * One fetch serves both because a planned line *is* the shown line whenever one is placed, so the
-   * corridor is the same and so is the cache key. A found candidate carries the crossings the
-   * pipeline measured, and only wants the water half.
+   * One fetch serves both, because the shown line is always the planned one.
    */
   useEffect(() => {
     if (!shownEnds) return
@@ -1248,56 +1160,50 @@ export function App() {
   /**
    * The URL, rewritten in place as the view changes.
    *
-   * A selected candidate also carries the geometry needed to rebuild it, so the link survives the
-   * dataset being regenerated with a different anchor. There is only one pair of point parameters,
-   * so a planned line the user placed themselves wins over that fallback -- and on load the two
-   * are told apart by whether the coordinates match the candidate.
+   * The dataset's controls are written only in dev mode. Outside it they cannot be changed, and a
+   * link from a dev session would otherwise carry its filters through every reshare.
    */
-  const search = useMemo(() => {
-    const planning = selectedId === PLANNED_ID || !!custom.a || !!custom.b
-    const fallback = planning ? null : selected
-    // The sag default is not a constant: the dataset was generated at some sag and the control
-    // cannot go below it, so that floor is the default and only a tightened sag belongs in a link.
-    const sagFloor = meta ? meta.params.sagRatio * 100 : null
-    return toSearch({
-      bbox,
-      lineId: selectedId && selectedId !== PLANNED_ID ? selectedId : null,
-      custom: fallback
-        ? {
-            a: { lat: fallback.a.lat, lon: fallback.a.lon },
-            b: { lat: fallback.b.lat, lon: fallback.b.lon },
-          }
-        : custom,
-      rig: fallback ? { a: fallback.a.aFrame, b: fallback.b.aFrame } : rig,
-      sagPct: sagPct === null ? null : changed(sagPct, sagFloor),
-      basemapMix: changed(basemapMix, MIX_MAX),
-      showLines: changed(showLines, true),
-      showHotspots: changed(showHotspots, true),
-      showAreas: changed(showAreas, false),
-      full: changed(full, false),
-      // Every class on is the default, so only a narrowed selection is worth a parameter.
-      kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
-      filters: movedFilters({
-        minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
+  const search = useMemo(
+    () =>
+      toSearch({
+        bbox,
+        custom,
+        rig,
+        // The sag default is not a constant: the control cannot go below the floor the dataset was
+        // generated at, so that floor is the default and only a tightened sag belongs in a link.
+        sagPct: sagPct === null ? null : changed(sagPct, sagFloor),
+        basemapMix: changed(basemapMix, MIX_MAX),
+        showAreas: changed(showAreas, false),
+        full: changed(full, false),
+        ...(DEV_MODE
+          ? {
+              showLines: changed(showLines, true),
+              showHotspots: changed(showHotspots, true),
+              // Every class on is the default, so only a narrowed selection is worth a parameter.
+              kinds: kinds.size === LINE_KINDS.length ? null : LINE_KINDS.filter((k) => kinds.has(k)),
+              filters: movedFilters({
+                minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
+              }),
+            }
+          : { showLines: null, showHotspots: null, kinds: null, filters: {} }),
       }),
-    })
-  }, [
-    bbox, selectedId, selected, custom, rig, sagPct, basemapMix, meta,
-    showLines, showHotspots, showAreas, full, kinds,
-    minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
-  ])
+    [
+      bbox, custom, rig, sagPct, sagFloor, basemapMix, showLines, showHotspots, showAreas, full,
+      kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
+    ],
+  )
 
   useEffect(() => {
     // replaceState, not pushState: panning the map should not fill the back button.
     history.replaceState(null, '', search ? `?${search}` : window.location.pathname)
   }, [search])
 
-  if (error) return <div className="loading">Failed to load candidates.json &mdash; {error}</div>
+  if (error) return <div className="loading">Failed to load the dataset &mdash; {error}</div>
 
   /**
    * Everything below tolerates there being no dataset yet, and that is the point.
    *
-   * candidates.json is four megabytes over the wire, and the whole page used to be one
+   * candidates.json is four megabytes over the wire, and in dev mode the whole page used to be one
    * `Loading…` in the corner until it landed. Nothing about the map needs it: the basemaps, the
    * borders, the terrain probe and placing a line by hand all work on their own, so they are on
    * screen within a frame and the found lines drop in on top when they arrive. Every readout that
@@ -1410,6 +1316,7 @@ export function App() {
             </div>
           </div>
 
+          {DEV_MODE && (
           <div className="toggles">
             {/* Pointing at the count is the natural gesture when hunting for the lines it counts,
                 so it is also what swells them. Focus as well as hover, for a keyboard. */}
@@ -1469,6 +1376,7 @@ export function App() {
               {activeFilters > 0 && <span className="count">{activeFilters}</span>}
             </button>
           </div>
+          )}
           {layerError && <div className="togglenote">{layerError}</div>}
           {locateError && <div className="togglenote">{locateError}</div>}
           {import.meta.env.DEV && debugLayer !== 'none' && (
@@ -1480,7 +1388,7 @@ export function App() {
             />
           )}
 
-          {showFilters && !bounds && (
+          {DEV_MODE && showFilters && !bounds && (
             <div className="filters">
               <div className="note" style={{ marginBottom: 0 }}>
                 Every range here is fitted to the dataset &mdash; the longest line in it, the sag it
@@ -1489,7 +1397,7 @@ export function App() {
             </div>
           )}
 
-          {showFilters && meta && bounds && (
+          {DEV_MODE && showFilters && meta && bounds && (
             <div className="filters">
               <h2>Rigging</h2>
               <Slider
@@ -1577,14 +1485,28 @@ export function App() {
             </div>
           )}
 
+          <button
+            className="planbtn"
+            data-active={placing !== null}
+            onClick={() => setPlacing(placing ? null : 'a')}
+            title={placing ? 'Stop placing' : 'Place two anchors on the map'}
+          >
+            {placing
+              ? `Tap the map for point ${placing.toUpperCase()} — cancel`
+              : custom.a && custom.b
+                ? 'Plan a new line'
+                : 'Plan a line'}
+          </button>
+
           <CacheBadge />
         </div>
 
           <MapView
             meta={meta}
+            params={params}
             visible={visible}
             emphasiseLines={emphasiseLines}
-            selected={selected}
+            open={open}
             basemapMix={basemapMix}
             anchorDump={anchorDump}
             hotspots={showHotspots ? shownHotspots : null}
@@ -1600,7 +1522,9 @@ export function App() {
             onLocate={setLocating}
             custom={custom}
             showLines={showLines}
-            onSelect={setSelectedId}
+            onSelect={select}
+            placing={placing}
+            onPlace={placeNext}
             onSetCustom={setCustomPoint}
             onClearCustom={clearCustom}
             onMoveAnchor={moveAnchor}
@@ -1614,9 +1538,13 @@ export function App() {
             <div className="offmap" data-where={offMap.where}>
               {offMap.where === 'plannable' ? (
                 <>
-                  No lines were searched here &mdash; that covers Berlin and Brandenburg only. You
-                  can still <b>right-click to place two anchors</b> and have a line measured against
-                  the survey for this ground.{' '}
+                  {DEV_MODE && (
+                    <>
+                      No lines were searched here &mdash; that covers Berlin and Brandenburg only.
+                      You can still <b>right-click to place two anchors</b> and have a line measured
+                      against the survey for this ground.{' '}
+                    </>
+                  )}
                   {offMap.surface ? (
                     <>Ground and canopy are both read here.</>
                   ) : (
@@ -1638,20 +1566,19 @@ export function App() {
             </div>
           )}
 
-          {(selected || planPending) && meta && (
+          {(selected || planPending) && params && (
             <Details
-              c={detailed}
+              c={selected}
               profile={shownProfile}
               wings={wings}
               cover={cover}
-              params={meta.params}
+              params={params}
               roadState={roadState}
               onRoof={onRoof}
               optimizing={optimizing}
               offer={offer}
               onOptimize={() => {
                 if (optimizing) return endRun()
-                forkSelected()
                 setReach(offer ?? 1)
                 setOffer(null)
                 // The button is the two-ended run, whatever the last 3D drop asked for.
@@ -1660,11 +1587,10 @@ export function App() {
               }}
               planned={planned}
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
-              failed={selectedId === PLANNED_ID ? terrainFailed : profileFailed}
-              violations={remeasured?.violations ?? null}
+              failed={terrainFailed}
               fetching={fetchingElevation}
               canopyKnown={canopyKnown}
-              sag={bounds && { pct: bounds.sag, floor: bounds.sagFloor }}
+              sag={sagPct !== null && sagFloor !== null ? { pct: sagPct, floor: sagFloor } : null}
               onSag={setSagPct}
               full={full}
               onFull={setFull}
@@ -1676,11 +1602,8 @@ export function App() {
               onGuide={guide.show}
               guideOpen={guide.open}
               rig={rig}
-              onRig={(next) => {
-                forkSelected()
-                setRig(next)
-              }}
-              onClose={() => setSelectedId(null)}
+              onRig={setRig}
+              onClose={() => setOpen(false)}
             />
           )}
         </div>
@@ -1688,7 +1611,7 @@ export function App() {
 
       {guide.open && (
         <Guide
-          kind={full && selectedId ? 'line' : 'map'}
+          kind={full && open ? 'line' : 'map'}
           onClose={guide.close}
           regions={meta?.regions ?? null}
         />

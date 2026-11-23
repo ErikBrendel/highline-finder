@@ -39,7 +39,7 @@ impression and search-help." Expect nothing of the tool past that first impressi
 
 ## User stories
 ### S1 — A line lands in the group chat
-- **Arrives:** a link from Erik in a chat, opened by tapping it. `?at=51.8741,14.5635,51.8862,14.5743&line=470422.5_5747566.5__470232.5_5748022.5&full=1`
+- **Arrives:** a link from Erik in a chat, opened by tapping it. `?at=51.8741,14.5635,51.8862,14.5743&a=51.8780907,14.5703238&b=51.8821804,14.5675244&rig=1.50,1.40&full=1`
 - **Device:** phone
 - **Wants:** "Is this worth a Saturday?"
 - **Done when:** they can say yes or no and name the one thing that decided it — the length, the
@@ -59,7 +59,7 @@ impression and search-help." Expect nothing of the tool past that first impressi
 - **Without the tool:** go and look. Still necessary — this only decides whether the trip happens.
 
 ### S3 — A wish-line, not a plan
-- **Arrives:** a link posted with "wish-line" in the chat text. `?at=51.4776,14.0464,51.4879,14.0603&line=434469.5_5703802.5__434062.5_5704067.5&full=1`
+- **Arrives:** a link posted with "wish-line" in the chat text. `?at=51.4776,14.0464,51.4879,14.0603&a=51.4815766,14.0563007&b=51.4839118,14.0503909&full=1`
 - **Device:** phone
 - **Wants:** "Could this ever work, or is it a dream?"
 - **Done when:** they can tell how plausible the tool thinks it is — the score and clearance read as a

@@ -1,6 +1,7 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
-import { PLANNED_ID, type PlannedLine, type RigHeights } from '../shared/plan.js'
+import type { PlannedLine, RigHeights } from '../shared/plan.js'
+import { DEV_MODE } from './devMode.js'
 import { TRUNK_FRACTION, rigMeans, rigRange, type Standing } from '../shared/anchoring.js'
 import type { Cover } from './landcover.js'
 import { CHART_NARROW, CHART_WIDE, ProfileChart, type Wings } from './ProfileChart.js'
@@ -181,8 +182,7 @@ interface Props {
    */
   c: Candidate | null
   /**
-   * Null while it is still being built. A candidate from a dataset generated without stored
-   * profiles has its figures immediately but its chart a moment later.
+   * Null while it is still being built.
    */
   profile: ProfileSample[] | null
   /** Ground beyond the anchors, for context behind the span. Null when there is none to be had. */
@@ -192,10 +192,9 @@ interface Props {
   /** The run's parameters, for the clearance rule the chart draws. */
   params: Params
   /**
-   * Whether the road network under a planned line is known yet.
+   * Whether the road network under the line is known yet.
    *
-   * Only a planned line has one: a found candidate carries the crossings the pipeline measured. It
-   * has to be said out loud, because "no roads found" and "roads not checked" look identical on the
+   * It has to be said out loud, because "no roads found" and "roads not checked" look identical on the
    * chart and only one of them means the line is safe to believe.
    */
   roadState: 'ok' | 'loading' | 'failed'
@@ -216,15 +215,6 @@ interface Props {
    * exact and the canopy ones describe a bare field. Which is only acceptable while it is said.
    */
   canopyKnown: boolean
-  /**
-   * Hard constraints the *re-measured* line fails, for a line out of the dataset. Null before the
-   * finer profile has been built, and empty once it has and the line still clears everything.
-   *
-   * It can be non-empty for a line the search accepted, and that is not a contradiction: the search
-   * measured it every four metres and this measures it every one, so a margin of a couple of
-   * centimetres can go either way. The panel says which measurement it is showing.
-   */
-  violations: string[] | null
   /**
    * The sag every line is measured at, and the lowest the dataset allows.
    *
@@ -273,7 +263,7 @@ const MIN_WIDTH = 360
 const KEEP_VISIBLE = 40
 
 export function Details({
-  c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching, violations,
+  c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
   canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
   rig, onRig, onFlip, onGuide, guideOpen, onClose,
 }: Props) {
@@ -464,15 +454,6 @@ export function Details({
     grip.addEventListener('pointercancel', stop)
   }
 
-  /**
-   * Whether this is still the line the search produced.
-   *
-   * The only thing the panel branches on any more, and it is provenance rather than mode: a dataset
-   * line can say "the search accepted this and a finer measurement disagrees", and a line you made
-   * cannot, because nothing accepted it. Every control is the same either way -- editing a found
-   * line forks it, exactly as dragging its anchor always has, and from then on it is one you made.
-   */
-  const fromDataset = !!c && c.id !== PLANNED_ID
   /** Stations the elevation service has not covered. See planLine's `tolerateGaps`. */
   const unmeasured = profile?.filter((s) => Number.isNaN(s.ground)).length ?? 0
   const pctUnmeasured = profile?.length
@@ -546,7 +527,7 @@ export function Details({
             }),
           },
         ]),
-    {
+    ...(DEV_MODE ? [{
       label: 'Score: exp / len / canopy / clear / level',
       // Dashed per component rather than through `stat`, which blanks a whole row at the first
       // NaN: the canopy is unknown everywhere without a surface model, and the four parts that
@@ -559,7 +540,7 @@ export function Details({
               .join('/')
           })()
         : DASH,
-    },
+    }] : []),
   ]
 
   return (
@@ -845,28 +826,13 @@ export function Details({
           ))}
         </dl>
 
-        {/* A dataset line, re-measured. The search accepted it at its own resolution; this is what a
-            metre apart makes of it, which is occasionally not the same answer. */}
-        {fromDataset && violations && violations.length > 0 && (
-          <div className="violations">
-            <b>Measured again at 1 m, this line would not qualify:</b>
-            <ul>
-              {violations.map((v) => (
-                <li key={v}>{v}</li>
-              ))}
-            </ul>
-            <div>
-              The search sampled it every four metres and accepted it. Neither figure is wrong; the
-              finer one is the one to walk in on.
-            </div>
-          </div>
-        )}
-
-        {!fromDataset && planned && (
+        {planned && (
           planned.violations.length > 0 ? (
             <div className="violations">
               <b>
-                Would not qualify as a candidate &mdash; costing {planned.penalty.toFixed(1)} score:
+                {DEV_MODE
+                  ? `Would not qualify as a candidate — costing ${planned.penalty.toFixed(1)} score:`
+                  : 'Breaks a hard limit:'}
               </b>
               <ul>
                 {planned.violations.map((v) => (
@@ -876,7 +842,9 @@ export function Details({
             </div>
           ) : (
             <div className="note" style={{ margin: '8px 0 0' }}>
-              Meets every hard constraint — the search would have accepted this line.
+              {DEV_MODE
+                ? 'Meets every hard constraint — the search would have accepted this line.'
+                : 'Clears every hard limit this tool checks.'}
             </div>
           )
         )}

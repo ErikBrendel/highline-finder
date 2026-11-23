@@ -62,7 +62,7 @@ place where a tool can beat the status quo outright.
 
 ### S3 — What the roof end actually is
 - **Arrives:** opening the best urban line in the one covered area.
-  `?line=418347.5_5856059.5__418262.5_5856107.5&full=1`
+  `?a=52.8480797,13.7875373&b=52.8484982,13.7862634&full=1`
 - **Device:** desktop
 - **Wants:** "Which building is this, how high is the end it hangs from, and is that a real height or
   a model's guess?"

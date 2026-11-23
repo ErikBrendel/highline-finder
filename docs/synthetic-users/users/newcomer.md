@@ -30,7 +30,7 @@ whole mechanism, and a map cannot replace it.
 
 ## User stories
 ### S1 — What am I looking at?
-- **Arrives:** the group's link, tapped from the chat. `?at=51.8741,14.5635,51.8862,14.5743&line=470422.5_5747566.5__470232.5_5748022.5&full=1`
+- **Arrives:** the group's link, tapped from the chat. `?at=51.8741,14.5635,51.8862,14.5743&a=51.8780907,14.5703238&b=51.8821804,14.5675244&rig=1.50,1.40&full=1`
 - **Device:** phone
 - **Wants:** "What is this screen, and which line are they talking about?"
 - **Done when:** they can say in one sentence what is being proposed and roughly how big it is.
