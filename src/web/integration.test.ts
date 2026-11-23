@@ -55,10 +55,10 @@ describe('integration', () => {
     expect(own.sort()).toEqual(['BB', 'BE', 'MV', 'NW', 'ST'])
   })
 
-  it('ranks a searched state above a measured one above a bare one', () => {
+  it('ranks searched above buildings above measured above bare', () => {
     // Without the dataset Brandenburg is only as good as its survey makes it; lines are what
     // lift it, and they are the one fact here that does not come from a service.
-    expect(tierOf(byCode('BB'))).toBe('measured')
+    expect(tierOf(byCode('BB'))).toBe('buildings')
     const searched = integration(new Set(['Brandenburg']))
     expect(tierOf(searched.find((f) => f.code === 'BB')!)).toBe('searched')
     expect(tierOf(byCode('NW'))).toBe('measured')

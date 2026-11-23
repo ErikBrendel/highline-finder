@@ -20,7 +20,8 @@ import { DEV_MODE } from './devMode.js'
 
 const TIERS: { id: Tier; label: string; hint: string }[] = [
   { id: 'searched', label: 'Searched', hint: 'lines already found, ready to browse' },
-  { id: 'measured', label: 'Full measurement', hint: 'plan by hand, ground and canopy both read' },
+  { id: 'buildings', label: 'Full measurement', hint: 'ground, canopy, and roofs to anchor on' },
+  { id: 'measured', label: 'Ground and canopy', hint: 'no building outlines, a roof reads as trees' },
   { id: 'terrain', label: 'Terrain only', hint: 'plan by hand, nothing known about the trees' },
 ]
 

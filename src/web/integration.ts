@@ -44,14 +44,15 @@ export interface StateFacts {
 /**
  * What the colour on the map means, worst to best.
  *
- * Three bands rather than five columns, because a square two hundred pixels wide cannot say four
+ * Four bands rather than six columns, because a square two hundred pixels wide cannot say five
  * things at once and the hover says them all anyway. They are ordered by what changes the answer
- * most: whether a line was found for you, then whether the trees are measured, then nothing.
+ * most: whether a line was found for you, then whether roofs are known as roofs, then whether the
+ * trees are measured, then nothing.
  */
-export type Tier = 'terrain' | 'measured' | 'searched'
+export type Tier = 'terrain' | 'measured' | 'buildings' | 'searched'
 
 export const tierOf = (f: StateFacts): Tier =>
-  f.lines ? 'searched' : f.canopy ? 'measured' : 'terrain'
+  f.lines ? 'searched' : f.buildings && f.canopy ? 'buildings' : f.canopy ? 'measured' : 'terrain'
 
 /**
  * A point that is definitely inside a state, for asking the sources what they hold there.

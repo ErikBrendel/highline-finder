@@ -1415,7 +1415,8 @@ header[data-fit~='notitle'] h1 { display: none; }
 .coverage .state circle { stroke: rgba(28, 33, 48, 0.55); stroke-width: 1.1; }
 .coverage .state { cursor: pointer; outline: none; }
 .coverage .state[data-tier='searched'] > * { fill: #38bdf8; }
-.coverage .state[data-tier='measured'] > * { fill: #3f7d3f; }
+.coverage .state[data-tier='buildings'] > * { fill: #2c5e2c; }
+.coverage .state[data-tier='measured'] > * { fill: #7fae6e; }
 .coverage .state[data-tier='terrain'] > * { fill: #b8bfcc; }
 .coverage .state:hover > *,
 .coverage .state[data-on] > * { filter: brightness(1.15) saturate(1.2); }
@@ -1455,7 +1456,8 @@ header[data-fit~='notitle'] h1 { display: none; }
   width: 9px; height: 9px; border-radius: 2px; flex: none; align-self: center;
 }
 .coverage .legend i[data-tier='searched'] { background: #38bdf8; }
-.coverage .legend i[data-tier='measured'] { background: #3f7d3f; }
+.coverage .legend i[data-tier='buildings'] { background: #2c5e2c; }
+.coverage .legend i[data-tier='measured'] { background: #7fae6e; }
 .coverage .legend i[data-tier='terrain'] { background: #b8bfcc; }
 
 @media (max-width: 560px) {
