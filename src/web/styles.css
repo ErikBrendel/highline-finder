@@ -1,11 +1,22 @@
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --panel-2: #1e222b;
-  --border: #2a2f3a;
-  --text: #e6e8ec;
-  --muted: #8b93a3;
-  --accent: #38bdf8;
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --panel-2: #eef0f3;
+  --border: #d5d9e0;
+  --text: #1c2130;
+  --muted: #5d6677;
+  --accent: #0284c7;
+  /* Panels laid over the map: opaque enough to read, translucent enough to keep the place. */
+  --overlay: rgba(255, 255, 255, 0.94);
+  --shadow: rgba(15, 23, 42, 0.16);
+  /* Text and edges for something that went wrong, and for a caution. */
+  --bad-text: #b91c1c;
+  --bad-edge: rgba(220, 38, 38, 0.35);
+  --bad-wash: rgba(220, 38, 38, 0.06);
+  --warn-text: #854d0e;
+  --warn-edge: rgba(202, 138, 4, 0.45);
+  --warn-wash: rgba(234, 179, 8, 0.1);
   --ground: #6b5847;
   --canopy: #3f7d3f;
   --building: #9aa4b8;
@@ -15,12 +26,12 @@
   --crown: #6d9a55;
   --brought: #a8763f;
   /* What a stem is made of above everything standing there: not wood, so not brown. */
-  --metal: #b9c0cc;
+  --metal: #8a93a3;
   --line: #f43f5e;
   /* Roads and railways in the profile: the carriageway slab, its icon and the clearance it wants. */
-  --road: #c9b458;
+  --road: #a68a1f;
   /* Anything failing a hard constraint, so a too-low crossing reads as a problem at a glance. */
-  --bad: #f87171;
+  --bad: #dc2626;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -101,7 +112,7 @@ header[data-measuring] .spacer { flex: none; }
   display: flex;
   gap: 4px;
   padding: 4px;
-  background: rgba(15, 17, 21, 0.9);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -172,15 +183,15 @@ header[data-measuring] .spacer { flex: none; }
 .togglenote {
   padding: 5px 8px;
   font-size: 10px;
-  color: #fca5a5;
-  background: rgba(15, 17, 21, 0.9);
-  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: var(--bad-text);
+  background: var(--overlay);
+  border: 1px solid var(--bad-edge);
   border-radius: 6px;
 }
 
 .filters {
   padding: 10px 12px;
-  background: rgba(15, 17, 21, 0.92);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -244,12 +255,12 @@ header[data-measuring] .spacer { flex: none; }
   -webkit-appearance: none; appearance: none;
   width: 14px; height: 14px; margin-top: 4px;
   border-radius: 50%; background: var(--text);
-  border: 2px solid var(--bg); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--shadow);
 }
 .banded input[type=range]::-moz-range-thumb {
   width: 14px; height: 14px;
   border-radius: 50%; background: var(--text);
-  border: 2px solid var(--bg); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--shadow);
 }
 
 .rangefill {
@@ -325,7 +336,7 @@ header[data-measuring] .spacer { flex: none; }
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(9, 10, 13, 0.6);
+  background: rgba(15, 23, 42, 0.35);
   animation: guide-fade 170ms ease-out;
 }
 /*
@@ -398,7 +409,7 @@ header[data-measuring] .spacer { flex: none; }
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 10px 40px var(--shadow);
 }
 .guide .head {
   display: flex;
@@ -447,12 +458,12 @@ header[data-measuring] .spacer { flex: none; }
 .guide .warn {
   margin-top: 16px;
   padding: 8px 10px;
-  border: 1px solid rgba(234, 179, 8, 0.4);
-  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid var(--warn-edge);
+  background: var(--warn-wash);
   border-radius: 6px;
-  color: #e6d9a8;
+  color: var(--warn-text);
 }
-.guide .warn b { color: #fcd34d; }
+.guide .warn b { color: var(--warn-text); }
 .guide .body b { color: var(--text); font-weight: 600; }
 /* At the very bottom and quiet: findable by the curious, not offered to everyone. */
 .guide .devswitch {
@@ -488,7 +499,7 @@ header[data-measuring] .spacer { flex: none; }
 
 .basemaps {
   display: flex; flex-direction: column; gap: 2px;
-  background: rgba(15,17,21,0.88);
+  background: var(--overlay);
   padding: 7px 9px 5px; border: 1px solid var(--border); border-radius: 6px;
 }
 .basemaps input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
@@ -526,8 +537,8 @@ header[data-measuring] .spacer { flex: none; }
 }
 .planbtn:hover { background: #4ade80; }
 .planbtn[data-active=true] {
-  background: rgba(15, 17, 21, 0.9);
-  color: #4ade80;
+  background: var(--overlay);
+  color: #15803d;
   border-color: #22c55e;
 }
 
@@ -538,7 +549,7 @@ header[data-measuring] .spacer { flex: none; }
   padding: 4px 6px 4px 9px;
   font-size: 10px;
   color: var(--muted);
-  background: rgba(15, 17, 21, 0.88);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 6px;
   font-variant-numeric: tabular-nums;
@@ -555,7 +566,7 @@ header[data-measuring] .spacer { flex: none; }
 .cachebadge button:hover { color: var(--text); }
 
 .anchor-popup .maplibregl-popup-content {
-  background: rgba(15, 17, 21, 0.95);
+  background: var(--overlay);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -563,7 +574,7 @@ header[data-measuring] .spacer { flex: none; }
   font-size: 10px;
   line-height: 1.5;
   font-variant-numeric: tabular-nums;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 10px var(--shadow);
 }
 .anchor-popup .maplibregl-popup-tip { display: none; }
 .anchor-popup .dirs { color: var(--accent); }
@@ -580,7 +591,7 @@ header[data-measuring] .spacer { flex: none; }
   font-weight: 800;
   border: 2px solid #fff;
   cursor: grab;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 1px 5px var(--shadow);
 }
 .custom-marker:active { cursor: grabbing; }
 
@@ -590,11 +601,11 @@ header[data-measuring] .spacer { flex: none; }
   min-width: 170px;
   display: flex;
   flex-direction: column;
-  background: rgba(15, 17, 21, 0.97);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 16px var(--shadow);
 }
 .mapmenu button {
   text-align: left;
@@ -621,12 +632,12 @@ header[data-measuring] .spacer { flex: none; }
   padding: 7px 9px;
   font-size: 11px;
   line-height: 1.5;
-  color: #fca5a5;
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.28);
+  color: var(--bad-text);
+  background: var(--bad-wash);
+  border: 1px solid var(--bad-edge);
   border-radius: 5px;
 }
-.violations b { color: #fecaca; }
+.violations b { color: var(--bad-text); }
 /* The same box, waiting rather than failing: a check still running is not a verdict. */
 .violations[data-tone='wait'] {
   color: var(--muted);
@@ -647,10 +658,10 @@ header[data-measuring] .spacer { flex: none; }
   /* Set inline while the right edge is being dragged; unset falls back to the default. */
   width: var(--details-w, min(560px, calc(100% - 320px)));
   max-height: calc(100% - 20px);
-  background: rgba(15, 17, 21, 0.96);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 4px 20px var(--shadow);
   /* The frame stays put and the body scrolls inside it, so the drag grip below cannot scroll away
      from the edge it resizes. */
   display: flex;
@@ -856,7 +867,7 @@ header[data-measuring] .spacer { flex: none; }
   text-align: center;
   padding: 0 20px;
 }
-.scenenote[data-bad='true'] { color: #fca5a5; }
+.scenenote[data-bad='true'] { color: var(--bad-text); }
 /* Top right, opposite the legend, and out of the way of a drag that starts anywhere in the middle
    of the scene. Off by default in appearance rather than in position: the glyph stays put and only
    its colour says which way the switch is set. */
@@ -871,7 +882,7 @@ header[data-measuring] .spacer { flex: none; }
   line-height: 1;
   cursor: pointer;
   border-radius: 5px;
-  background: rgba(15, 17, 21, 0.72);
+  background: var(--overlay);
   color: var(--muted);
   border: 1px solid var(--border);
 }
@@ -885,7 +896,7 @@ header[data-measuring] .spacer { flex: none; }
   font-size: 10px;
   line-height: 1.3;
   color: var(--muted);
-  background: rgba(15, 17, 21, 0.6);
+  background: var(--overlay);
   border-radius: 4px;
   padding: 2px 5px;
   pointer-events: none;
@@ -907,7 +918,7 @@ header[data-measuring] .spacer { flex: none; }
   gap: 6px;
   font-size: 10px;
   color: var(--muted);
-  background: rgba(15, 17, 21, 0.72);
+  background: var(--overlay);
   border-radius: 5px;
   padding: 3px 7px;
   /* Transparent as a whole, so the corner it sits in still turns the camera; only the buttons
@@ -945,7 +956,7 @@ header[data-measuring] .spacer { flex: none; }
 }
 .stats dt { color: var(--muted); }
 .stats dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
-.stats dd.neg { color: #fb7185; }
+.stats dd.neg { color: var(--bad-text); }
 
 /* Wrapping, because it is a row of keys and not a row of columns: without it the seven items share
    the width equally and each one's phrase is broken down a strip a few characters wide. */
@@ -1072,7 +1083,7 @@ header[data-measuring] .spacer { flex: none; }
   border-radius: 999px;
   font-size: 11px;
   color: var(--muted);
-  background: rgba(15, 17, 21, 0.85);
+  background: var(--overlay);
   border: 1px solid var(--border);
   pointer-events: none;
 }
@@ -1105,7 +1116,7 @@ header[data-measuring] .spacer { flex: none; }
 }
 .details .optimize:hover { color: var(--text); }
 .details .optimize[data-running='true'] {
-  color: #22c55e; border-color: rgba(34, 197, 94, 0.6); cursor: default;
+  color: #15803d; border-color: rgba(34, 197, 94, 0.6); cursor: default;
   animation: optimise-pulse 1s ease-in-out infinite;
 }
 /* The two-second window in which clicking again doubles the reach. */
@@ -1164,10 +1175,10 @@ header[data-measuring] .spacer { flex: none; }
   font-size: 12px;
   line-height: 1.55;
   color: var(--text);
-  background: rgba(15, 17, 21, 0.92);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 20px var(--shadow);
   pointer-events: none;
 }
 .offmap[data-where='nothing'] {
@@ -1178,7 +1189,7 @@ header[data-measuring] .spacer { flex: none; }
 /* Legend for whichever debug view is active. */
 .legendbox {
   padding: 9px 11px;
-  background: rgba(15, 17, 21, 0.92);
+  background: var(--overlay);
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 11px;
@@ -1194,7 +1205,7 @@ header[data-measuring] .spacer { flex: none; }
 .legendbox .key { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 5px; }
 .legendbox .key i {
   flex: none; width: 11px; height: 11px; margin-top: 2px; border-radius: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(0, 0, 0, 0.2);
 }
 .legendbox .key span { line-height: 1.35; }
 .legendbox .about { color: var(--muted); line-height: 1.5; margin-top: 8px; }
@@ -1242,12 +1253,12 @@ header[data-fit~='notitle'] h1 { display: none; }
   max-height: 70vh;
   display: flex;
   flex-direction: column;
-  background: #1a1113;
-  border: 1px solid rgba(248, 113, 113, 0.5);
+  background: #fef2f2;
+  border: 1px solid var(--bad-edge);
   border-radius: 8px;
-  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 6px 28px var(--shadow);
   font-size: 12px;
-  color: #fecaca;
+  color: var(--bad-text);
 }
 /* A fatal one replaces the app, so it gets the whole window rather than a corner of it. */
 .crash[data-fatal='true'] { inset: 12px; }
@@ -1256,19 +1267,19 @@ header[data-fit~='notitle'] h1 { display: none; }
   align-items: center;
   gap: 8px;
   padding: 9px 11px;
-  border-bottom: 1px solid rgba(248, 113, 113, 0.25);
+  border-bottom: 1px solid var(--bad-edge);
 }
 .crash-head .spacer { flex: 1; }
 .crash-head button {
   background: transparent;
-  border: 1px solid rgba(248, 113, 113, 0.4);
-  color: #fecaca;
+  border: 1px solid var(--bad-edge);
+  color: var(--bad-text);
   border-radius: 5px;
   padding: 3px 9px;
   font-size: 11px;
   cursor: pointer;
 }
-.crash-head button:hover { background: rgba(248, 113, 113, 0.12); }
+.crash-head button:hover { background: var(--bad-wash); }
 .crash pre {
   margin: 0;
   padding: 10px 12px;
@@ -1277,7 +1288,7 @@ header[data-fit~='notitle'] h1 { display: none; }
   word-break: break-word;
   font-size: 11px;
   line-height: 1.55;
-  color: #f5d0d0;
+  color: var(--bad-text);
   user-select: text;
 }
 
@@ -1297,10 +1308,10 @@ header[data-fit~='notitle'] h1 { display: none; }
   align-items: center;
   max-width: min(520px, calc(100vw - 24px));
   font-size: 11px;
-  color: #fcd9b6;
+  color: var(--warn-text);
 }
 .softfail > button {
-  background: rgba(26, 17, 19, 0.92);
+  background: var(--overlay);
   border: 1px solid rgba(251, 146, 60, 0.45);
   color: inherit;
   border-radius: 6px;
@@ -1314,15 +1325,15 @@ header[data-fit~='notitle'] h1 { display: none; }
   padding: 8px 10px;
   max-height: 40vh;
   overflow: auto;
-  background: rgba(26, 17, 19, 0.96);
+  background: var(--overlay);
   border: 1px solid rgba(251, 146, 60, 0.3);
   border-radius: 6px;
 }
 .softfail li { display: flex; flex-direction: column; gap: 1px; padding: 4px 0; }
 .softfail li + li { border-top: 1px solid rgba(251, 146, 60, 0.15); }
-.softfail li strong { color: #fdba74; font-weight: 600; }
-.softfail li span { color: #d6c3b4; word-break: break-word; }
-.softfail .times { color: #fb923c; }
+.softfail li strong { color: #9a3412; font-weight: 600; }
+.softfail li span { color: var(--warn-text); word-break: break-word; }
+.softfail .times { color: #c2410c; }
 
 /* Why a chart is missing, in the space the chart would have taken. */
 .chartfail { display: flex; flex-direction: column; gap: 6px; max-width: 46ch; text-align: left; }
@@ -1360,13 +1371,13 @@ header[data-fit~='notitle'] h1 { display: none; }
  * dot in the background colour reads as a hole punched in a state rather than as a state of its
  * own. A pale ring says "this small thing is separate", which is the only thing the dot is for.
  */
-.coverage .state circle { stroke: rgba(230, 232, 236, 0.6); stroke-width: 1.1; }
+.coverage .state circle { stroke: rgba(28, 33, 48, 0.55); stroke-width: 1.1; }
 .coverage .state { cursor: pointer; outline: none; }
 .coverage .state[data-tier='searched'] > * { fill: #38bdf8; }
 .coverage .state[data-tier='measured'] > * { fill: #3f7d3f; }
-.coverage .state[data-tier='terrain'] > * { fill: #4a5162; }
+.coverage .state[data-tier='terrain'] > * { fill: #b8bfcc; }
 .coverage .state:hover > *,
-.coverage .state[data-on] > * { filter: brightness(1.45); }
+.coverage .state[data-on] > * { filter: brightness(1.15) saturate(1.2); }
 .coverage .state[data-on] path,
 .coverage .state[data-on] circle { stroke: var(--text); stroke-width: 1.1; }
 .coverage .state:focus-visible > * { stroke: var(--accent); stroke-width: 1.4; }
@@ -1404,7 +1415,7 @@ header[data-fit~='notitle'] h1 { display: none; }
 }
 .coverage .legend i[data-tier='searched'] { background: #38bdf8; }
 .coverage .legend i[data-tier='measured'] { background: #3f7d3f; }
-.coverage .legend i[data-tier='terrain'] { background: #4a5162; }
+.coverage .legend i[data-tier='terrain'] { background: #b8bfcc; }
 
 @media (max-width: 560px) {
   .coverage { grid-template-columns: 1fr; justify-items: center; }

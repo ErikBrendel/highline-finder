@@ -779,7 +779,7 @@ export function MapView({
           ]),
         ),
         layers: [
-          { id: 'bg', type: 'background', paint: { 'background-color': '#0f1115' } },
+          { id: 'bg', type: 'background', paint: { 'background-color': '#e5e8ec' } },
           ...BLEND_STOPS.map((_, i) => ({
             id: `base${i}`,
             type: 'raster' as const,

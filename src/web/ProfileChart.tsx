@@ -547,8 +547,8 @@ export function ProfileChart({
     >
       {ticks.map((t) => (
         <g key={t}>
-          <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="#2a2f3a" strokeWidth="1" />
-          <text x={PAD.left - 6} y={y(t) + 4} fill="#8b93a3" fontSize="10" textAnchor="end">
+          <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth="1" />
+          <text x={PAD.left - 6} y={y(t) + 4} fill="var(--muted)" fontSize="10" textAnchor="end">
             {t}
           </text>
         </g>
@@ -612,9 +612,9 @@ export function ProfileChart({
         <>
           <line
             x1={x(deepest.d)} x2={x(deepest.d)} y1={y(deepest.line)} y2={y(deepest.ground)}
-            stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 2"
+            stroke="var(--accent)" strokeWidth="1" strokeDasharray="3 2"
           />
-          <text x={x(deepest.d) + 5} y={(y(deepest.line) + y(deepest.ground)) / 2} fill="#38bdf8" fontSize="10">
+          <text x={x(deepest.d) + 5} y={(y(deepest.line) + y(deepest.ground)) / 2} fill="var(--accent)" fontSize="10">
             {c.exposure.toFixed(1)} m air
           </text>
         </>
@@ -624,9 +624,9 @@ export function ProfileChart({
         <>
           <line
             x1={x(tightest.d)} x2={x(tightest.d)} y1={y(tightest.line)} y2={y(tightest.groundMax)}
-            stroke="#fbbf24" strokeWidth="1" strokeDasharray="3 2"
+            stroke="#b45309" strokeWidth="1" strokeDasharray="3 2"
           />
-          <text x={x(tightest.d) + 5} y={y(tightest.groundMax) - 4} fill="#fbbf24" fontSize="10">
+          <text x={x(tightest.d) + 5} y={y(tightest.groundMax) - 4} fill="#b45309" fontSize="10">
             {c.clearanceMin.toFixed(1)} m
           </text>
         </>
@@ -675,11 +675,11 @@ export function ProfileChart({
         <g key={`gap-${from}`}>
           <rect
             x={x(from)} y={PAD.top} width={Math.max(2, x(to) - x(from))} height={ih}
-            fill="var(--panel, #12151b)" opacity="0.96"
+            fill="var(--panel)" opacity="0.96"
           />
           <rect
             x={x(from)} y={PAD.top} width={Math.max(2, x(to) - x(from))} height={ih}
-            fill="none" stroke="#8b93a3" strokeWidth="1" strokeDasharray="4 3" opacity="0.8"
+            fill="none" stroke="var(--muted)" strokeWidth="1" strokeDasharray="4 3" opacity="0.8"
           />
         </g>
       ))}
@@ -689,7 +689,7 @@ export function ProfileChart({
       {gaps.length > 0 && (
         <text
           x={x((gaps[0]![0] + gaps[0]![1]) / 2)} y={PAD.top + ih / 2}
-          fill="#8b93a3" fontSize="10" textAnchor="middle"
+          fill="var(--muted)" fontSize="10" textAnchor="middle"
         >
           {fetching ? 'loading…' : 'not surveyed'}
         </text>
@@ -730,21 +730,21 @@ export function ProfileChart({
         <g pointerEvents="none">
           <line
             x1={hoverX} x2={hoverX} y1={PAD.top} y2={PAD.top + ih}
-            stroke="#e6e8ec" strokeWidth="1" strokeDasharray="2 2" opacity="0.7"
+            stroke="var(--text)" strokeWidth="1" strokeDasharray="2 2" opacity="0.7"
           />
-          <circle cx={hoverX} cy={y(hover.line)} r="3" fill="#e6e8ec" />
-          {hoverKnown && <circle cx={hoverX} cy={y(hover.ground)} r="3" fill="#e6e8ec" />}
+          <circle cx={hoverX} cy={y(hover.line)} r="3" fill="var(--text)" />
+          {hoverKnown && <circle cx={hoverX} cy={y(hover.ground)} r="3" fill="var(--text)" />}
           <rect
             x={readoutFlipped ? hoverX - 148 : hoverX + 6} y={PAD.top + 2}
             width="142" height={!hoverKnown ? 20 : hover.halfWidth > 0 ? 48 : 34} rx="4"
-            fill="rgba(15,17,21,0.92)" stroke="#2a2f3a"
+            fill="var(--overlay)" stroke="var(--border)"
           />
           {/* Bridged ground is a drawing convenience, so the readout refuses to quote it rather
               than reporting an interpolation as a measurement. */}
           {!hoverKnown && (
             <text
               x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 15}
-              fill="#8b93a3" fontSize="11"
+              fill="var(--muted)" fontSize="11"
             >
               ground not surveyed here
             </text>
@@ -752,7 +752,7 @@ export function ProfileChart({
           {hoverKnown && (
             <text
               x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 15}
-              fill="#e6e8ec" fontSize="11"
+              fill="var(--text)" fontSize="11"
             >
               {(hover.line - hover.ground).toFixed(1)} m above ground
             </text>
@@ -760,7 +760,7 @@ export function ProfileChart({
           {hoverKnown && (
             <text
               x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 29}
-              fill="#8b93a3" fontSize="11"
+              fill="var(--muted)" fontSize="11"
             >
               ground at {hover.ground.toFixed(1)} m
             </text>
@@ -768,7 +768,7 @@ export function ProfileChart({
           {hoverKnown && hover.halfWidth > 0 && (
             <text
               x={readoutFlipped ? hoverX - 140 : hoverX + 14} y={PAD.top + 43}
-              fill="#8b93a3" fontSize="11"
+              fill="var(--muted)" fontSize="11"
             >
               {(hover.line - hover.groundMax).toFixed(1)} m within &plusmn;
               {hover.halfWidth.toFixed(1)} m
@@ -780,11 +780,11 @@ export function ProfileChart({
       {/* A and B stand under the anchors themselves, so the span they name is the stretch between
           them rather than the whole plot; the length goes in the middle of that stretch, where it
           cannot collide with either however narrow the wings make the gap to the plot edge. */}
-      <text x={x(0)} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="middle">A</text>
-      <text x={x(c.length / 2)} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="middle">
+      <text x={x(0)} y={H - 6} fill="var(--muted)" fontSize="10" textAnchor="middle">A</text>
+      <text x={x(c.length / 2)} y={H - 6} fill="var(--muted)" fontSize="10" textAnchor="middle">
         {c.length.toFixed(0)} m
       </text>
-      <text x={x(c.length)} y={H - 6} fill="#8b93a3" fontSize="10" textAnchor="middle">B</text>
+      <text x={x(c.length)} y={H - 6} fill="var(--muted)" fontSize="10" textAnchor="middle">B</text>
     </svg>
   )
 }

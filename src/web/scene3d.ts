@@ -161,10 +161,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
 
   const scene = new Scene()
-  scene.background = new Color('#0f1115')
+  scene.background = new Color('#dfe6ee')
   // Fades the square edge of the patch into the background, so what is drawn ends because the world
   // got far away rather than because the data stopped in a straight line.
-  scene.fog = new Fog('#0f1115', input.radius * 1.6, input.radius * 3.4)
+  scene.fog = new Fog('#dfe6ee', input.radius * 1.6, input.radius * 3.4)
 
   /**
    * The ground, built whole every time rather than attribute by attribute.
