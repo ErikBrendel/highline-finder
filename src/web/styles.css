@@ -1467,3 +1467,69 @@ header[data-fit~='notitle'] h1 { display: none; }
   .coverage svg { width: 200px; }
   .coverage .detail { width: 100%; }
 }
+
+/* The kept lines: a column beside the map, over it on a phone. */
+.layout { position: relative; }
+header .spotsbtn {
+  flex: none;
+  font: inherit; font-size: 11px; color: var(--accent);
+  border: 1px solid var(--border); border-radius: 5px; padding: 3px 7px;
+  background: transparent; cursor: pointer; white-space: nowrap;
+}
+header .spotsbtn:hover, header .spotsbtn[data-active] { border-color: var(--accent); }
+.spots {
+  flex: none; width: 280px; display: flex; flex-direction: column; gap: 10px;
+  padding: 10px 12px; overflow-y: auto;
+  background: var(--panel); border-right: 1px solid var(--border); font-size: 13px;
+}
+@media (max-width: 720px) {
+  .spots {
+    position: absolute; z-index: 6; left: 0; top: 0; bottom: 0; width: min(300px, 88vw);
+    box-shadow: 4px 0 20px var(--shadow);
+  }
+}
+.spots button {
+  font: inherit; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 5px; padding: 4px 9px; cursor: pointer;
+}
+.spots button:hover:not(:disabled) { border-color: var(--accent); }
+.spots button:disabled { opacity: 0.45; cursor: default; }
+.spots button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.spots button.danger { color: var(--bad-text); background: transparent; }
+.spots button.danger[data-asking] { background: var(--bad-wash); border-color: var(--bad-edge); }
+.spotshead { display: flex; align-items: center; gap: 8px; }
+.spotshead strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spotshead .close, .spotshead .back { background: transparent; border-color: transparent; padding: 0 6px; font-size: 16px; }
+.spots .unsaved {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--warn-text); background: var(--warn-wash); border: 1px solid var(--warn-edge);
+  border-radius: 4px; padding: 0 4px;
+}
+.spotlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.spotlist li { display: flex; gap: 4px; align-items: stretch; }
+.spotlist li > button:first-child {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  text-align: left; background: transparent;
+}
+.spotlist li > button:first-child[data-active] { border-color: var(--accent); background: var(--panel-2); }
+.spotlist .title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spots .sub { font-size: 11px; color: var(--muted); }
+.spots .placing { font-size: 12px; color: var(--muted); font-style: italic; padding: 4px 9px; }
+.spots .note { color: var(--muted); font-size: 12px; margin: 0; }
+.spots label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.spots textarea.grow {
+  font: inherit; font-size: 13px; color: var(--text); resize: none; width: 100%;
+  border: 1px solid var(--border); border-radius: 5px; padding: 5px 7px; background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.spots .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.spotsfoot { margin-top: auto; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.savesheet { display: flex; flex-direction: column; gap: 10px; }
+.savesheet .targets { display: flex; flex-direction: column; gap: 6px; }
+.savesheet .targets label { flex-direction: row; align-items: baseline; gap: 6px; font-size: 13px; color: var(--text); }
+.details .keep {
+  font: inherit; font-size: 11px; color: #fff; background: var(--accent);
+  border: 1px solid var(--accent); border-radius: 5px; padding: 2px 8px; cursor: pointer;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.details .keep[data-saved] { color: var(--accent); background: transparent; border-color: var(--border); }

@@ -607,6 +607,48 @@ function bandFeature(a: LatLon, b: LatLon, p: Params): GeoJSON.FeatureCollection
   }
 }
 
+export interface SavedDrawn {
+  spot: string
+  line: number
+  a: LatLon
+  b: LatLon
+  /** In the spot being worked in. */
+  working: boolean
+  /** Pointed at from the list. */
+  lit: boolean
+}
+
+/** Each kept line, and a dot per spot at the middle of its anchors for when the lines are too small. */
+function savedFeatures(saved: SavedDrawn[]): GeoJSON.FeatureCollection {
+  const props = (s: SavedDrawn) => ({ spot: s.spot, line: s.line, working: s.working, lit: s.lit })
+  const spots = new Map<string, SavedDrawn[]>()
+  for (const s of saved) spots.set(s.spot, [...(spots.get(s.spot) ?? []), s])
+  return {
+    type: 'FeatureCollection',
+    features: [
+      ...saved.map((s) => ({
+        type: 'Feature' as const,
+        properties: props(s),
+        geometry: { type: 'LineString' as const, coordinates: [[s.a.lon, s.a.lat], [s.b.lon, s.b.lat]] },
+      })),
+      ...[...spots.values()].map((lines) => {
+        const ends = lines.flatMap((l) => [l.a, l.b])
+        return {
+          type: 'Feature' as const,
+          properties: { ...props(lines[0]!), lit: lines.some((l) => l.lit) },
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [
+              ends.reduce((sum, p) => sum + p.lon, 0) / ends.length,
+              ends.reduce((sum, p) => sum + p.lat, 0) / ends.length,
+            ],
+          },
+        }
+      }),
+    ],
+  }
+}
+
 function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
   return {
     type: 'FeatureCollection',
@@ -658,6 +700,11 @@ interface Props {
   onSetCustom: (which: 'a' | 'b', at: LatLon | null) => void
   onClearCustom: () => void
   onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
+  /** The kept lines other than the one being planned, drawn faintly. */
+  saved: SavedDrawn[]
+  onOpenSaved: (spot: string, line: number) => void
+  /** Where to fly to; a new key flies again. */
+  focus: { bbox: [number, number, number, number]; key: number } | null
   onViewport: (bbox: [number, number, number, number], zoom: number) => void
 }
 
@@ -688,6 +735,9 @@ export function MapView({
   onSetCustom,
   onClearCustom,
   onMoveAnchor,
+  saved,
+  onOpenSaved,
+  focus,
   onViewport,
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
@@ -726,6 +776,8 @@ export function MapView({
   const removeOverlay = useRef<(() => void) | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
+  const onOpenSavedRef = useRef(onOpenSaved)
+  onOpenSavedRef.current = onOpenSaved
   // Read when the layer is first added, which can happen after the pointer is already on the button.
   const emphasiseLinesRef = useRef(emphasiseLines)
   emphasiseLinesRef.current = emphasiseLines
@@ -1149,6 +1201,43 @@ export function MapView({
         },
       })
 
+      m.addSource('saved', { type: 'geojson', data: emptyCollection })
+      m.addLayer({
+        id: 'saved',
+        type: 'line',
+        source: 'saved',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: { ...SPAN_CAPS },
+        paint: {
+          'line-color': ['case', ['get', 'lit'], '#facc15', '#22c55e'],
+          'line-width': ['case', ['get', 'lit'], 5, ['get', 'working'], 3, 2.5],
+          'line-opacity': ['case', ['get', 'lit'], 1, ['get', 'working'], 0.8, 0.45],
+        },
+      })
+      // A spot is a few metres across, so zoomed out it is drawn as a dot or it is not seen at all.
+      m.addLayer({
+        id: 'saved-dot',
+        type: 'circle',
+        source: 'saved',
+        maxzoom: 13,
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+          'circle-radius': 6,
+          'circle-color': ['case', ['get', 'lit'], '#facc15', '#22c55e'],
+          'circle-opacity': ['case', ['get', 'lit'], 1, 0.6],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#052e16',
+        },
+      })
+      for (const id of ['saved', 'saved-dot']) {
+        m.on('click', id, (e) => {
+          const f = e.features?.[0]
+          if (f && !placingRef.current.placing) onOpenSavedRef.current(String(f.properties!.spot), Number(f.properties!.line))
+        })
+        m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer' })
+        m.on('mouseleave', id, () => { m.getCanvas().style.cursor = '' })
+      }
+
       // The planned line sits above the found ones: it is never filtered out, so it must never be
       // hidden behind them either.
       m.addSource('custom', { type: 'geojson', data: emptyCollection })
@@ -1195,7 +1284,7 @@ export function MapView({
         // Must include every selectable layer, or clicking one of them selects and then this
         // immediately deselects it again -- both handlers fire, and this one runs last.
         const hit = m.queryRenderedFeatures(e.point, {
-          layers: ['lines-hit', 'custom', 'customCasing'].filter((id) => m.getLayer(id)),
+          layers: ['lines-hit', 'custom', 'customCasing', 'saved', 'saved-dot'].filter((id) => m.getLayer(id)),
         })
         if (hit.length) return setMenu(null)
         const dismissed = openRef.current || !!menuRef.current
@@ -1260,7 +1349,11 @@ export function MapView({
       const b = m.getBounds()
       onViewportRef.current([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()], m.getZoom())
     })
+    // The window is not the only thing that sizes the map: the list of kept lines opens beside it.
+    const sizing = new ResizeObserver(() => m.resize())
+    sizing.observe(el.current)
     return () => {
+      sizing.disconnect()
       removeOverlay.current?.()
       removeOverlay.current = null
       popup.current?.remove()
@@ -1436,6 +1529,21 @@ export function MapView({
     const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
     src?.setData(custom.a && custom.b ? lineFeature(custom.a, custom.b) : emptyCollection)
   }, [custom, ready])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('saved') as maplibregl.GeoJSONSource | undefined
+    src?.setData(savedFeatures(saved))
+  }, [saved, ready])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready || !focus) return
+    const [south, west, north, east] = focus.bbox
+    userMoved.current = true
+    m.fitBounds([[west, south], [east, north]], { padding: 80, maxZoom: 17, duration: 800 })
+  }, [focus, ready])
 
   /**
    * The location dot, and the one camera move it is allowed.

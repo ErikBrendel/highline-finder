@@ -23,7 +23,11 @@ import { DEV_MODE } from './devMode.js'
 import {
   BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer,
 } from './MapView.js'
-import { place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
+import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
+import { useSpots } from './useSpots.js'
+import { spotTitle, type Spot, type SpotLine } from './spots.js'
+import { SpotsPanel, type Lit } from './SpotsPanel.js'
+import type { SavedDrawn } from './MapView.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import {
@@ -413,7 +417,59 @@ export function App() {
   }, [])
 
   const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
-  const [line, setLine] = useState<LineSpec>(initial.line)
+  /**
+   * The kept lines, and the spot being worked in. The planner's line is always that spot's active
+   * line: a switch of line comes in through `loadLine`, and every change goes back out through the
+   * sync below.
+   */
+  const spots = useSpots(initial.line, (l) => loadLine(l))
+  const specOf = (l: SpotLine | null | undefined): LineSpec | null => l ? { a: l.a, b: l.b, rig: l.rig, sag: l.sag } : null
+  const [line, setLine] = useState<LineSpec>(() => specOf(spots.spot.lines[spots.working.line]) ?? initial.line)
+  const loadLine = (l: SpotLine | null) => {
+    setOptimizing(false)
+    setPlacing(null)
+    setLine(specOf(l) ?? NO_LINE)
+  }
+  useEffect(() => spots.sync(line), [line])
+  const [spotsOpen, setSpotsOpen] = useRemembered('highline-finder.spotsopen', false)
+  const [saving, setSaving] = useState(false)
+  const [lit, setLit] = useState<Lit | null>(null)
+  const [focus, setFocus] = useState<{ bbox: [number, number, number, number]; key: number } | null>(null)
+  const focusOn = (s: Spot) => {
+    const ends = s.lines.flatMap((l) => [l.a, l.b])
+    const lats = ends.map((p) => p.lat)
+    const lons = ends.map((p) => p.lon)
+    setFocus({ bbox: [Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)], key: Date.now() })
+  }
+  const savedDrawn: SavedDrawn[] = useMemo(
+    () =>
+      [...spots.lib.spots, spots.lib.draft].flatMap((s) =>
+        s.lines.flatMap((l, i) =>
+          s.id === spots.working.spot && i === spots.working.line
+            ? []
+            : [{
+                spot: s.id,
+                line: i,
+                a: l.a,
+                b: l.b,
+                working: s.id === spots.working.spot,
+                lit: lit?.spot === s.id && (lit.line === null || lit.line === i),
+              }],
+        ),
+      ),
+    [spots.lib, spots.working, lit],
+  )
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      e.preventDefault()
+      if (e.shiftKey) spots.redo()
+      else spots.undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
   // null means "as level and as high as the ground allows", the same choice the search makes.
   const [optimizing, setOptimizing] = useState(false)
   /**
@@ -796,6 +852,8 @@ export function App() {
     const found = visible.find((c) => c.id === id)
     if (!found) return
     const rigged = Number.isFinite(found.a.aFrame) && Number.isFinite(found.b.aFrame)
+    // A saved spot changes only by being worked on; a line picked from the map is exploring.
+    spots.toDraft()
     commit({
       a: { lat: found.a.lat, lon: found.a.lon },
       b: { lat: found.b.lat, lon: found.b.lon },
@@ -831,7 +889,10 @@ export function App() {
 
   // One call, not two setCustomPoint calls: both would read the same pre-update `custom`, so the
   // second would put the first end back.
-  const clearCustom = () => commit({ a: null, b: null }, false)
+  const clearCustom = () => {
+    commit({ a: null, b: null }, false)
+    spots.deselect()
+  }
 
   /** Dragging an anchor handle. */
   const moveAnchor = (which: 'a' | 'b', at: LatLon) => commit(place(line, which, at), false)
@@ -1276,6 +1337,14 @@ export function App() {
         >
           <Label full="GitHub ↗" short="GH ↗" />
         </a>
+        <button
+          className="spotsbtn"
+          data-active={spotsOpen || undefined}
+          onClick={() => setSpotsOpen(!spotsOpen)}
+          title="Lines you have kept"
+        >
+          <Label full={`My lines${spots.lib.spots.length ? ` (${spots.lib.spots.length})` : ''}`} short="Mine" />
+        </button>
         <ShareButton className="share" />
         <button
           className="guidebtn"
@@ -1288,6 +1357,24 @@ export function App() {
       </header>
 
       <div className="layout">
+        {spotsOpen && (
+          <SpotsPanel
+            spots={spots}
+            centre={bbox && { lat: (bbox[0] + bbox[2]) / 2, lon: (bbox[1] + bbox[3]) / 2 }}
+            saving={saving}
+            onSaving={setSaving}
+            onLit={setLit}
+            onFocus={focusOn}
+            onAddLine={() => {
+              spots.addLine()
+              setPlacing('a')
+            }}
+            onClose={() => {
+              setSpotsOpen(false)
+              setSaving(false)
+            }}
+          />
+        )}
         <div className="mapwrap">
           <div className="controls">
           <div className="basemaps">
@@ -1485,7 +1572,11 @@ export function App() {
           <button
             className="planbtn"
             data-active={placing !== null}
-            onClick={() => setPlacing(placing ? null : 'a')}
+            onClick={() => {
+              if (placing) return setPlacing(null)
+              spots.toDraft()
+              setPlacing('a')
+            }}
             title={placing ? 'Stop placing' : 'Place two anchors on the map'}
           >
             {placing
@@ -1525,6 +1616,12 @@ export function App() {
             onSetCustom={setCustomPoint}
             onClearCustom={clearCustom}
             onMoveAnchor={moveAnchor}
+            saved={savedDrawn}
+            onOpenSaved={(spot, i) => {
+              spots.open(spot, i)
+              setOpen(true)
+            }}
+            focus={focus}
             onViewport={(b, z) => {
               setBbox(b)
               setZoom(z)
@@ -1595,6 +1692,29 @@ export function App() {
               guideOpen={guide.open}
               rig={line.rig}
               onRig={setRig}
+              keep={
+                spots.isDraft ? (
+                  <button
+                    className="keep"
+                    onClick={() => {
+                      setSpotsOpen(true)
+                      setSaving(true)
+                    }}
+                    title="Keep this line, on its own or with others nearby"
+                  >
+                    save
+                  </button>
+                ) : (
+                  <button
+                    className="keep"
+                    data-saved="true"
+                    onClick={() => setSpotsOpen(true)}
+                    title="Saved; changes are kept as you make them"
+                  >
+                    saved &middot; {spotTitle(spots.spot)}
+                  </button>
+                )
+              }
               onClose={() => setOpen(false)}
             />
           )}

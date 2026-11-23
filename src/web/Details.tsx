@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 import type { Candidate, LineKind, Params, ProfileSample } from '../shared/types.js'
 import type { PlannedLine, RigHeights } from '../shared/plan.js'
 import { DEV_MODE } from './devMode.js'
@@ -240,6 +240,8 @@ interface Props {
   onGuide: () => void
   guideOpen: boolean
   onClose: () => void
+  /** Saving the line, or where it is saved. */
+  keep: ReactNode
 }
 
 /** The anchor class in terms of the two ends, rather than the one word the filter uses. */
@@ -264,7 +266,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
   canopy, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onGuide, guideOpen, onClose,
+  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep,
 }: Props) {
   /**
    * How much room the profile has, which is the only thing that decides how it is drawn.
@@ -605,6 +607,7 @@ export function Details({
           </span>
         )}
         <span className="headbtns">
+          {keep}
           {/* The header carries this everywhere else, and the full view covers the header. Without
               it there is no way back to the guide from a link that opens straight into this. */}
           {full && (
