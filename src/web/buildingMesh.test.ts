@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { CUT_RGB, buildingMesh, footprints, type BuildingCells } from './buildingMesh.js'
+import { buildingMesh, footprints, type BuildingCells } from './buildingMesh.js'
+import { CUT_RGB } from './terrainMesh.js'
 
 const SIDE = 40
 const centre = { e: SIDE / 2, n: SIDE / 2 }
@@ -77,7 +78,8 @@ describe('buildingMesh', () => {
     const mesh = buildingMesh(square((c, j) => (c < 10 && j > 5 && j < 30 ? 62 : NaN)), centre, 0)
     const walls = faces(mesh).filter((f) => Math.abs(f.normal[1]!) < 1e-6 && Math.hypot(f.normal[0]!, f.normal[2]!) > 0)
     const cut = walls.filter((f) => f.cut)
-    expect(cut).toHaveLength(2)
+    // 24 m of building cut, 12 m tall, in a quad beside each cell.
+    expect(cut.reduce((sum, f) => sum + Math.hypot(...f.normal) / 2, 0)).toBeCloseTo(24 * 12, 4)
     // Out of the square is west, -x in the scene.
     for (const f of cut) expect(f.normal[0]!).toBeLessThan(0)
     // The other three are facades, each facing away from the building's middle.
@@ -94,5 +96,20 @@ describe('buildingMesh', () => {
     const onCut = walls.filter((f) => f.mid[0]! < -SIDE / 2 + 1e-4)
     expect(onCut.length).toBeGreaterThan(0)
     expect(walls.filter((f) => f.cut)).toEqual(onCut)
+  })
+
+  it('tops the cut with the roof of each cell beside it, not a line between its corners', () => {
+    const roofAt = (_: number, j: number) => 60 + (j % 3)
+    const cells = turned(roofAt, 0.5)
+    const { positions: p } = buildingMesh(cells, centre, 0)
+    const whole = (j: number) => [j - 1, j, j + 1].every((r) => [0, 1].every((c) => !Number.isNaN(cells.roof[r * SIDE + c]!)))
+    let checked = 0
+    for (let v = 0; v < p.length / 3; v++) {
+      const [x, height, y] = [p[v * 3]! + SIDE / 2, p[v * 3 + 1]!, SIDE / 2 - p[v * 3 + 2]!]
+      if (x !== 0 || height === 50 || y % 1 !== 0.5 || !whole(y - 0.5)) continue
+      checked++
+      expect(height).toBeCloseTo(roofAt(0, y - 0.5), 4)
+    }
+    expect(checked).toBeGreaterThan(5)
   })
 })

@@ -1,6 +1,6 @@
 import cdt2d from 'cdt2d'
 import type { Pos } from '../shared/grid.js'
-import { COVER, COVER_RGB, type MeshData } from './terrainMesh.js'
+import { COVER, COVER_RGB, CUT_RGB, type MeshData } from './terrainMesh.js'
 
 /**
  * Buildings for the 3D view, as solids with walls fitted to the survey rather than cut out of it.
@@ -28,9 +28,6 @@ export interface BuildingCells {
   /** Bare earth, for the foot of each wall. */
   ground: Float32Array
 }
-
-/** The colour of a building's section where the edge of the model cuts through it. */
-export const CUT_RGB: [number, number, number] = [0.72, 0.34, 0.3]
 
 type Pt = [number, number]
 
@@ -350,6 +347,25 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
   }
   const onEdge = (a: Pt, b: Pt) =>
     (a[0] === 0 && b[0] === 0) || (a[0] === w && b[0] === w) || (a[1] === 0 && b[1] === 0) || (a[1] === h && b[1] === h)
+  /**
+   * A loop with a point beside every cell along each cut, so the cut's top follows the roof the
+   * cells measured rather than running straight between the two corners, and the roof does not fan
+   * out from those corners in slivers.
+   */
+  const alongCuts = (loop: Pt[]): Pt[] =>
+    loop.flatMap((a, i) => {
+      const b = loop[(i + 1) % loop.length]!
+      if (!onEdge(a, b)) return [a]
+      const axis = a[0] === b[0] ? 1 : 0
+      const [from, to] = [a[axis], b[axis]]
+      const step = Math.sign(to - from)
+      const between: Pt[] = []
+      for (let k = Math.floor(Math.min(from, to)) + 0.5; k < Math.max(from, to); k++) {
+        if (k > Math.min(from, to)) between.push(axis === 0 ? [k, a[1]] : [a[0], k])
+      }
+      if (step < 0) between.reverse()
+      return [a, ...between]
+    })
 
   /**
    * The roof over one building, in two parts. Wherever four neighbouring cell centres are all clear
@@ -484,7 +500,7 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
   for (const footprint of footprints(cells)) {
     const { traced } = footprint
     let rim: ((p: Pt) => number) | null = null
-    const fitted = [footprint.fitted, traced].find(
+    const fitted = [footprint.fitted.map(alongCuts), traced.map(alongCuts)].find(
       (loops, k) => (k === 0 || footprint.fitted !== traced) && (rim = roofOver(loops, traced[0]!)),
     )
     if (!fitted || !rim) continue

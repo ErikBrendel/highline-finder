@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { overlay, polyline, type Seg } from './segments.js'
-import { COVER, COVER_RGB, colorsOf, coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, CUT_RGB, colorsOf, coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -167,11 +167,35 @@ describe('the two mesh layers', () => {
     }))
     const heights = (layer: 'solid' | 'earth') => {
       const mesh = meshOf(built, 0, layer)
-      return new Set([...mesh.indices].map((v) => mesh.positions[v * 3 + 1]))
+      const sheet = [...mesh.indices].filter((v) => mesh.colors[v * 3] !== Math.fround(CUT_RGB[0]))
+      return new Set(sheet.map((v) => mesh.positions[v * 3 + 1]))
     }
     expect(heights('solid')).toEqual(new Set([62]))
     expect(heights('earth')).toEqual(new Set([50]))
     expect(meshOf(built, 0, 'canopy').indices).toHaveLength(0)
+  })
+
+  it('closes a building the edge of the model cuts through, with walls facing out', () => {
+    const built = samplePatch(centre, 10, 2, flat({
+      ground: () => 50, surface: () => 62, building: () => true,
+    }))
+    const { positions: p, colors, indices } = meshOf(built, 0)
+    const vec = (v: number) => [p[v * 3]!, p[v * 3 + 1]!, p[v * 3 + 2]!]
+    let walls = 0
+    for (let t = 0; t < indices.length; t += 3) {
+      const [a, b, c] = [indices[t]!, indices[t + 1]!, indices[t + 2]!].map(vec) as number[][]
+      if (colors[indices[t]! * 3] !== Math.fround(CUT_RGB[0])) continue
+      walls++
+      // The face normal, (b - a) x (c - a), against the direction from the centre to the wall.
+      const [ux, uy, uz] = [b![0]! - a![0]!, b![1]! - a![1]!, b![2]! - a![2]!]
+      const [vx, vy, vz] = [c![0]! - a![0]!, c![1]! - a![1]!, c![2]! - a![2]!]
+      const normal = [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx]
+      const mid = [(a![0]! + b![0]! + c![0]!) / 3, (a![2]! + b![2]! + c![2]!) / 3]
+      expect(normal[0]! * mid[0]! + normal[2]! * mid[1]!).toBeGreaterThan(0)
+      expect(Math.min(a![1]!, b![1]!, c![1]!)).toBe(50)
+    }
+    // Four sides of one cell, two triangles each.
+    expect(walls).toBe(8)
   })
 
   /**
