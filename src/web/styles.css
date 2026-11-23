@@ -904,6 +904,8 @@ header[data-measuring] .spacer { flex: none; }
   max-width: calc(100% - 16px);
 }
 .spin3d:hover { color: var(--text); border-color: var(--muted); }
+/* Beside it, the same kind of switch: buildings with fitted walls, or the raw cell grid. */
+.walls3d { right: 40px; }
 .spin3d[data-on] { color: var(--accent); border-color: var(--accent); }
 
 /* Says what the two shapes on the ground are, since a few pixels of silhouette is not always

@@ -38,8 +38,17 @@ type Pt = [number, number]
 const FIT_TOLERANCE = 0.75
 /** Below this angle two neighbouring walls are one wall, and their corner stays where it was. */
 const MIN_CORNER = Math.sin((15 * Math.PI) / 180)
-/** A roof point this close to a wall would be a sliver; the wall's own vertices carry the edge. */
-const CLEAR_OF_WALL = 0.2
+/**
+ * Whether a wall runs through the cell centred at `p`. Such a cell's surface reading is part roof,
+ * part street or facade -- a blend that measures neither, and along a turned wall a staircase of
+ * them is what makes the roof's edge come out stepped. The roof is drawn from the cells the wall
+ * leaves whole, and the wall's top from the nearest of those.
+ */
+const straddles = (p: Pt, [a, b]: [Pt, Pt]) => {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+  const reach = len ? (Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1])) / (2 * len) : 0.5
+  return distanceToSegment(p, a, b) < reach - 0.01
+}
 
 /**
  * The boundary of the cells `inside` names, as closed loops of cell corners.
@@ -316,13 +325,13 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
   }
   const cell = (x: number, y: number) =>
     Math.min(h - 1, Math.max(0, Math.floor(y))) * w + Math.min(w - 1, Math.max(0, Math.floor(x)))
-  /** The roof at a wall's corner: the nearest building cell's, since a corner is between cells. */
-  const roofNear = ([x, y]: Pt): number => {
+  /** The roof at a wall's corner: the nearest building cell's `whole` says may carry it. */
+  const roofNear = ([x, y]: Pt, whole: (c: number, j: number) => boolean = () => true): number => {
     let best = NaN
     let far = Infinity
     for (let j = Math.floor(y) - 3; j <= Math.floor(y) + 2; j++) {
       for (let c = Math.floor(x) - 3; c <= Math.floor(x) + 2; c++) {
-        if (c < 0 || j < 0 || c >= w || j >= h || Number.isNaN(roof[j * w + c]!)) continue
+        if (c < 0 || j < 0 || c >= w || j >= h || Number.isNaN(roof[j * w + c]!) || !whole(c, j)) continue
         const d = Math.hypot(c + 0.5 - x, j + 0.5 - y)
         if (d < far) {
           far = d
@@ -339,11 +348,11 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
    * The roof over one building, in two parts. Wherever four neighbouring cell centres are all clear
    * of the walls, the quad between them is drawn exactly as the terrain grid draws it, split along
    * the same diagonal: every height, slope and step the cells measured is where it was. Only the
-   * band between the outermost centres and the fitted walls is new, and it is triangulated with
-   * both as constraints. False where the triangulation refuses the outline, which then gets another
-   * try as traced.
+   * band between the outermost whole cells and the fitted walls is new, and it is triangulated with
+   * both as constraints. Gives the height of the wall's top at a corner, or null where the
+   * triangulation refuses the outline, which then gets another try as traced.
    */
-  const roofOver = (loops: Pt[][], within: Pt[]): boolean => {
+  const roofOver = (loops: Pt[][], within: Pt[]): ((p: Pt) => number) | null => {
     const walls = loops.flatMap((l) => l.map((p, i): [Pt, Pt] => [p, l[(i + 1) % l.length]!]))
     const xs = within.map((p) => p[0])
     const ys = within.map((p) => p[1])
@@ -370,7 +379,7 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
         if (Number.isNaN(roof[(y0 + j) * w + x0 + c]!)) continue
         const centreOf: Pt = [x0 + c + 0.5, y0 + j + 0.5]
         if (!contains(loops[0]!, centreOf) || loops.slice(1).some((l) => contains(l, centreOf))) continue
-        if (near[j * bw + c] && walls.some(([a, b]) => distanceToSegment(centreOf, a, b) < CLEAR_OF_WALL)) continue
+        if (near[j * bw + c] && walls.some((wall) => straddles(centreOf, wall))) continue
         usable[j * bw + c] = 1
       }
     }
@@ -423,9 +432,14 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
       const at = loop.map((p) => point(p, id(p)))
       at.forEach((a, i) => edges.push([a, at[(i + 1) % at.length]!]))
     }
+    // A building too narrow to have a whole cell near the corner keeps the blend it has.
+    const top = (p: Pt) => {
+      const whole = roofNear(p, (c, j) => isUsable(c - x0, j - y0))
+      return Number.isNaN(whole) ? roofNear(p) : whole
+    }
     for (const loop of loops) {
-      if (loop.some((p) => Number.isNaN(roofNear(p)))) return false
-      constrain(loop, (p) => () => vertex(p, roofNear(p), grey))
+      if (loop.some((p) => Number.isNaN(top(p)))) return null
+      constrain(loop, (p) => () => vertex(p, top(p), grey))
     }
     const quadCorner = ([x, y]: Pt): Pt => [x0 + x + 0.5, y0 + y + 0.5]
     for (const loop of traceLoops((c, j) => quad[j * bw + c] === 1, bw, bh)) {
@@ -445,7 +459,7 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
     try {
       faces = cdt2d(points, edges, { exterior: false })
     } catch {
-      return false
+      return null
     }
     for (const [a, b, c] of faces) triangle(ids[a]!, ids[b]!, ids[c]!, [0, 1, 0])
     for (let j = 0; j + 1 < bh; j++) {
@@ -456,21 +470,23 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
         triangle(se, ne, nw, [0, 1, 0])
       }
     }
-    return true
+    return top
   }
 
   for (const footprint of footprints(cells)) {
     const { traced } = footprint
+    let top: ((p: Pt) => number) | null = null
     const fitted = [footprint.fitted, traced].find(
-      (loops, k) => (k === 0 || footprint.fitted !== traced) && roofOver(loops, traced[0]!),
+      (loops, k) => (k === 0 || footprint.fitted !== traced) && (top = roofOver(loops, traced[0]!)),
     )
-    if (!fitted) continue
+    if (!fitted || !top) continue
+    const topAt: (p: Pt) => number = top
 
     for (const loop of fitted) {
       loop.forEach((a, i) => {
         const b = loop[(i + 1) % loop.length]!
         const rgb = onEdge(a, b) ? CUT_RGB : grey
-        const [ta, tb] = [roofNear(a), roofNear(b)]
+        const [ta, tb] = [topAt(a), topAt(b)]
         const [fa, fb] = [ground[cell(a[0], a[1])]!, ground[cell(b[0], b[1])]!]
         if (Number.isNaN(ta + tb + fa + fb)) return
         const ids = [vertex(a, ta, rgb), vertex(b, tb, rgb), vertex(a, fa, rgb), vertex(b, fb, rgb)]

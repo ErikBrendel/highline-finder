@@ -227,8 +227,11 @@ export function Terrain3D({
   const ground = useRef<Ground | null>(null)
   /** The heights as read, kept so a lake arriving later repaints them without reading them again. */
   const patch = useRef<Patch | null>(null)
-  /** The buildings as solids of their own, once the fine pass has drawn them; the ground is then bare earth. */
+  /** The buildings as solids of their own, where drawn so; the ground is then bare earth under them. */
   const roofs = useRef<MeshData | null>(null)
+  /** Those solids for the fine pass, built on first use and kept until the ground is read again. */
+  const fittedRoofs = useRef<MeshData | null>(null)
+  const fineRead = useRef(false)
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [failed, setFailed] = useState<string | null>(null)
   const [measured, setMeasured] = useState(1)
@@ -246,6 +249,10 @@ export function Terrain3D({
    * in a link.
    */
   const [spin, setSpin] = useRemembered('highline-finder.spin3d', true)
+  /** Buildings with fitted walls, or the raw cell grid they are fitted to. */
+  const [fitWalls, setFitWalls] = useRemembered('highline-finder.fitwalls3d', true)
+  const fitWallsRef = useRef(fitWalls)
+  fitWallsRef.current = fitWalls
   const spinRef = useRef(spin)
   spinRef.current = spin
   useEffect(() => {
@@ -567,6 +574,8 @@ export function Terrain3D({
       // replacing the ground does not lift or drop the span hanging over it.
       g.datum = rough.low
       roofs.current = null
+      fittedRoofs.current = null
+      fineRead.current = false
       const mesh = meshOf(rough, g.datum)
       if (!mesh.indices.length) throw new Error('no elevation for the ground around this line')
 
@@ -611,10 +620,9 @@ export function Terrain3D({
       const fine = samplePatch(g.centre, g.halfSide, side, readers)
       if (dropped) return
       patch.current = fine
+      fineRead.current = true
       setMeasured(fine.measured)
-      roofs.current = buildingMesh(buildingCellsOver(g.centre, g.halfSide), g.centre, g.datum)
-      scene.current?.setMesh(meshOf(fine, g.datum, 'earth'), meshOf(fine, g.datum, 'canopy'), roofs.current)
-      redrape(g)
+      redraw.current()
 
       /**
        * And now the rest of the square's land cover, which the picture does not wait for.
@@ -673,17 +681,34 @@ export function Terrain3D({
    */
   const repaint = useRef(() => {
     const read = patch.current
-    if (!read || !scene.current || !ground.current) return
+    if (!read) return
     read.cover.set(
       coverOf(read, { building: onBuilding, water: (e, n) => water.covers(e, n) }),
     )
-    const datum = ground.current.datum
-    scene.current.setMesh(
-      meshOf(read, datum, roofs.current ? 'earth' : 'solid'), meshOf(read, datum, 'canopy'), roofs.current,
-    )
-    redrape(ground.current)
+    redraw.current()
   })
   useEffect(() => onCoverChange(() => repaint.current()), [])
+
+  /**
+   * Puts the surfaces as read into the scene: the buildings fitted where they are wanted and the
+   * fine pass is in, otherwise as the cell grid carries them.
+   */
+  const redraw = useRef(() => {
+    const read = patch.current
+    const g = ground.current
+    if (!read || !scene.current || !g) return
+    if (fitWallsRef.current && fineRead.current) {
+      fittedRoofs.current ??= buildingMesh(buildingCellsOver(g.centre, g.halfSide), g.centre, g.datum)
+      roofs.current = fittedRoofs.current
+    } else {
+      roofs.current = null
+    }
+    scene.current.setMesh(
+      meshOf(read, g.datum, roofs.current ? 'earth' : 'solid'), meshOf(read, g.datum, 'canopy'), roofs.current,
+    )
+    redrape(g)
+  })
+  useEffect(() => redraw.current(), [fitWalls])
 
   /** The chart's pointer, as a fraction of the span, so the scene need not know about metres. */
   useEffect(() => {
@@ -732,6 +757,17 @@ export function Terrain3D({
           aria-label={spin ? 'Stop the camera circling' : 'Let the camera circle on its own'}
         >
           &#x27f3;
+        </button>
+      )}
+      {state === 'ready' && (
+        <button
+          className="spin3d walls3d"
+          data-on={fitWalls || undefined}
+          onClick={() => setFitWalls(!fitWalls)}
+          title={fitWalls ? 'Show buildings as the raw 1 m height cells' : 'Show buildings with walls fitted to the cells'}
+          aria-label={fitWalls ? 'Show buildings as the raw 1 m height cells' : 'Show buildings with walls fitted to the cells'}
+        >
+          &#x25b1;
         </button>
       )}
       {state === 'ready' && picked && onMoveAnchor && (
