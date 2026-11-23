@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { spanGeometry, type LatLon } from './planPoints.js'
 import {
-  exportText, nearbySpots, parseExport, spotTitle, titleOf, type Spot,
+  exportText, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type Spot,
 } from './spots.js'
+import { ShareButton } from './ShareButton.js'
 import type { Spots } from './useSpots.js'
 import { failureText } from './report.js'
 
@@ -141,7 +142,7 @@ export function SpotsPanel({ spots, centre, saving, onSaving, onLit, onFocus, on
   onAddLine: () => void
   onClose: () => void
 }) {
-  const [inSpot, setInSpot] = useState(saving || spots.working.spot !== spots.lib.draft.id)
+  const [inSpot, setInSpot] = useState(saving || spots.working.spot !== spots.lib.draft.id || spots.spot.lines.length > 1)
   const [note, setNote] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -292,6 +293,18 @@ export function SpotsPanel({ spots, centre, saving, onSaving, onLit, onFocus, on
             <button onClick={spots.undo} disabled={!spots.canUndo} title="Undo (Ctrl+Z)">undo</button>
             <button onClick={spots.redo} disabled={!spots.canRedo} title="Redo (Ctrl+Shift+Z)">redo</button>
           </div>
+          {spot.lines.length > 0 && (
+            <div className="row">
+              {active && <ShareButton label="share line" title="Send a link to this line, with its name and notes" />}
+              {spot.lines.length > 1 && (
+                <ShareButton
+                  label="share spot"
+                  title="Send a link to all lines of this spot; it opens as a copy the other person can save"
+                  url={() => `${location.href.split('#')[0]}#${spotHash(spot)}`}
+                />
+              )}
+            </div>
+          )}
           {isDraft ? (
             spot.lines.length > 0 && (
               <div className="row">

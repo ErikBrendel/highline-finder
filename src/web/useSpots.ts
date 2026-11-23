@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { RigHeights } from '../shared/plan.js'
 import type { LineSpec } from './planPoints.js'
 import {
-  defaultLineName, emptySpot, findLine, loadLibrary, merged, newId, sameAnchors, storeLibrary,
+  defaultLineName, emptySpot, findLine, loadLibrary, merged, newId, sameAnchors, sameLines, storeLibrary,
   type Library, type Spot, type SpotLine,
 } from './spots.js'
 
@@ -24,22 +24,42 @@ interface History {
 const sameRig = (p: RigHeights | null, q: RigHeights | null) =>
   p === q || (!!p && !!q && p.a === q.a && p.b === q.b)
 
+/** What the link the page was opened with brings: a line, maybe named, and maybe a whole spot. */
+export interface Arrival {
+  line: LineSpec
+  name: string | null
+  spot: Spot | null
+}
+
 /**
- * Where the page starts: on the saved line the URL names, or in the draft.
+ * Where the page starts: on the saved line or spot the link names, or in the draft.
  *
- * A line in the URL that is nowhere saved replaces the draft, and the draft it replaced is the first
- * step of undo.
+ * A line or spot in the link that is nowhere held replaces the draft, and the draft it replaced is
+ * the first step of undo.
  */
-export function startingPoint(lib: Library, url: LineSpec): { lib: Library; working: Working; replaced: Spot | null } {
-  const { a, b } = url
+export function startingPoint(lib: Library, { line: { a, b, rig, sag }, name, spot: shared }: Arrival): {
+  lib: Library
+  working: Working
+  replaced: Spot | null
+} {
+  const indexIn = (s: Spot) => (a && b ? Math.max(0, s.lines.findIndex((l) => sameAnchors(l, a, b))) : 0)
+  const intoDraft = (draft: Spot) => ({
+    lib: { ...lib, draft },
+    working: { spot: draft.id, line: indexIn(draft) },
+    replaced: lib.draft.lines.length ? lib.draft : null,
+  })
+  if (shared) {
+    const held = [...lib.spots, lib.draft].find((s) => sameLines(s, shared))
+    if (held) return { lib, working: { spot: held.id, line: indexIn(held) }, replaced: null }
+    return intoDraft({ ...shared, id: lib.draft.id })
+  }
   if (a && b) {
     const saved = findLine(lib.spots, a, b)
     if (saved) return { lib, working: { spot: saved.spot.id, line: saved.index }, replaced: null }
     const inDraft = lib.draft.lines.findIndex((l) => sameAnchors(l, a, b))
     if (inDraft >= 0) return { lib, working: { spot: lib.draft.id, line: inDraft }, replaced: null }
-    if (!lib.draft.lines.length) return { lib, working: { spot: lib.draft.id, line: 0 }, replaced: null }
-    const draft = { ...emptySpot(), id: lib.draft.id }
-    return { lib: { ...lib, draft }, working: { spot: draft.id, line: 0 }, replaced: lib.draft }
+    const line = { id: newId(), name: name ?? defaultLineName(a, b), a, b, rig, sag }
+    return intoDraft({ ...emptySpot(), id: lib.draft.id, lines: [line] })
   }
   return { lib, working: { spot: lib.draft.id, line: Math.max(0, lib.draft.lines.length - 1) }, replaced: null }
 }
@@ -51,8 +71,12 @@ export function startingPoint(lib: Library, url: LineSpec): { lib: Library; work
  * state, and every switch of line goes through here so the two cannot disagree. Everything the
  * planner then does to the line comes back through `sync`.
  */
-export function useSpots(url: LineSpec, load: (line: SpotLine | null) => void) {
-  const [start] = useState(() => startingPoint(loadLibrary(), url))
+export function useSpots(url: Arrival, load: (line: SpotLine | null) => void) {
+  const [start] = useState(() => {
+    const at = startingPoint(loadLibrary(), url)
+    if (at.replaced) storeLibrary(at.lib)
+    return at
+  })
   const [lib, setLib] = useState(start.lib)
   const [working, setWorking] = useState(start.working)
   const libRef = useRef(lib)

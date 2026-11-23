@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react'
  * view, which covers the header and is the place a specific line gets sent from.
  */
 
-const WORDS = { idle: 'share', copied: 'copied', failed: 'copy failed' } as const
+const WORDS = { copied: 'copied', failed: 'copy failed' } as const
 
 // The sheet is the better path only where the targets are chat apps and the alternative is copy,
 // switch app, paste. Desktop Chrome and Safari also offer `share`, but there it opens a Mail and
@@ -22,14 +22,24 @@ const WORDS = { idle: 'share', copied: 'copied', failed: 'copy failed' } as cons
 const wantsSheet = () =>
   typeof navigator.share === 'function' && matchMedia('(pointer: coarse)').matches
 
-export function ShareButton({ className }: { className: string }) {
-  const [state, setState] = useState<keyof typeof WORDS>('idle')
+export function ShareButton({
+  className,
+  label = 'share',
+  title = 'Send a link to exactly this view',
+  url = () => location.href,
+}: {
+  className?: string
+  label?: string
+  title?: string
+  url?: () => string
+}) {
+  const [state, setState] = useState<keyof typeof WORDS | 'idle'>('idle')
   // Cleared on unmount, because the full view's button goes away the moment the line is closed and
   // a timer that outlives it would set state on nothing.
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  const say = (word: keyof typeof WORDS) => {
+  const say = (word: typeof state) => {
     setState(word)
     clearTimeout(timer.current)
     timer.current = setTimeout(() => setState('idle'), 2000)
@@ -37,7 +47,7 @@ export function ShareButton({ className }: { className: string }) {
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(location.href)
+      await navigator.clipboard.writeText(url())
       say('copied')
     } catch (e: unknown) {
       // A refused clipboard needs no toast -- the button is already saying it in the one place the
@@ -50,7 +60,7 @@ export function ShareButton({ className }: { className: string }) {
   const share = async () => {
     if (!wantsSheet()) return copy()
     try {
-      await navigator.share({ url: location.href })
+      await navigator.share({ url: url() })
       // The sheet was the feedback, and nothing went to the clipboard, so the label stays put.
     } catch (e: unknown) {
       // Dismissing the sheet is a decision, not a failure, and must not read as one.
@@ -64,10 +74,10 @@ export function ShareButton({ className }: { className: string }) {
     <button
       className={className}
       onClick={() => void share()}
-      title="Send a link to exactly this view"
+      title={title}
       data-state={state}
     >
-      {WORDS[state]}
+      {state === 'idle' ? label : WORDS[state]}
     </button>
   )
 }

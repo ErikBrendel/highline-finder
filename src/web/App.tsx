@@ -25,7 +25,7 @@ import {
 } from './MapView.js'
 import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
 import { useSpots } from './useSpots.js'
-import { spotTitle, type Spot, type SpotLine } from './spots.js'
+import { defaultLineName, spotFromHash, spotTitle, type Spot, type SpotLine } from './spots.js'
 import { SpotsPanel, type Lit } from './SpotsPanel.js'
 import type { SavedDrawn } from './MapView.js'
 import { toUtm33 } from '../shared/geo.js'
@@ -323,6 +323,7 @@ export function App() {
   // Read once. The URL is an input at startup and an output thereafter; treating it as live state
   // both ways is how a URL writer and a URL reader start feeding each other.
   const [initial] = useState(() => parseUrl(window.location.search))
+  const [sharedSpot] = useState(() => spotFromHash(window.location.hash))
   const header = useRef<HTMLElement>(null)
   // Measured once the row is in the document, and re-applied on every resize thereafter.
   useEffect(() => (header.current ? fitHeader(header.current) : undefined), [])
@@ -352,7 +353,7 @@ export function App() {
    * There is one line that can be open, and it is always the planned one: picking a found line
    * places the planned line's two points on its anchors. A link with both points opens on it.
    */
-  const [open, setOpen] = useState(!!initial.line.a && !!initial.line.b)
+  const [open, setOpen] = useState((!!initial.line.a && !!initial.line.b) || !!sharedSpot)
   const [bbox, setBbox] = useState(initial.bbox)
   // Google's map zoom is the same web-mercator scale MapLibre uses, so it transfers directly.
   const [zoom, setZoom] = useState(13)
@@ -425,7 +426,7 @@ export function App() {
    * line: a switch of line comes in through `loadLine`, and every change goes back out through the
    * sync below.
    */
-  const spots = useSpots(initial.line, (l) => loadLine(l))
+  const spots = useSpots({ line: initial.line, name: initial.name, spot: sharedSpot }, (l) => loadLine(l))
   const specOf = (l: SpotLine | null | undefined): LineSpec | null => l ? { a: l.a, b: l.b, rig: l.rig, sag: l.sag } : null
   const [line, setLine] = useState<LineSpec>(() => specOf(spots.spot.lines[spots.working.line]) ?? initial.line)
   const loadLine = (l: SpotLine | null) => {
@@ -435,6 +436,8 @@ export function App() {
   }
   useEffect(() => spots.sync(line), [line])
   const [spotsOpen, setSpotsOpen] = useRemembered('highline-finder.spotsopen', false)
+  const activeName = spots.spot.lines[spots.working.line]?.name
+  const ownName = activeName && line.a && line.b && activeName !== defaultLineName(line.a, line.b) ? activeName : null
   const [saving, setSaving] = useState(false)
   const [lit, setLit] = useState<Lit | null>(null)
   const [focus, setFocus] = useState<{ bbox: [number, number, number, number]; key: number } | null>(null)
@@ -444,6 +447,11 @@ export function App() {
     const lons = ends.map((p) => p.lon)
     setFocus({ bbox: [Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)], key: Date.now() })
   }
+  useEffect(() => {
+    if (!sharedSpot) return
+    setSpotsOpen(true)
+    if (!initial.bbox) focusOn(spots.spot)
+  }, [])
   const savedDrawn: SavedDrawn[] = useMemo(
     () =>
       [...spots.lib.spots, spots.lib.draft].flatMap((s) =>
@@ -1277,6 +1285,7 @@ export function App() {
       toSearch({
         bbox,
         line,
+        name: ownName,
         basemapMix: changed(basemapMix, MIX_MAX),
         showAreas: changed(showAreas, false),
         full: changed(full, false),
@@ -1293,7 +1302,7 @@ export function App() {
           : { showLines: null, showHotspots: null, kinds: null, filters: {} }),
       }),
     [
-      bbox, line, basemapMix, showLines, showHotspots, showAreas, full,
+      bbox, line, ownName, basemapMix, showLines, showHotspots, showAreas, full,
       kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
     ],
   )

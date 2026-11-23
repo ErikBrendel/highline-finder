@@ -16,6 +16,7 @@ const everything: UrlState = {
     rig: { a: 0.5, b: 1.2 },
     sag: 6.5,
   },
+  name: 'Quarry edge\nbolts on the left & tree on the right',
   basemapMix: 1.4,
   showLines: false,
   showHotspots: false,

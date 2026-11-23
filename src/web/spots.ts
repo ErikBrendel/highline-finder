@@ -115,6 +115,10 @@ export function merged(mine: Spot[], incoming: Spot[]): { spots: Spot[]; added: 
   return { spots: out, added }
 }
 
+/** Whether two spots hold the same lines, in whatever order. */
+export const sameLines = (s: Spot, t: Spot) =>
+  s.lines.length === t.lines.length && t.lines.every((l) => s.lines.some((m) => sameAnchors(m, l.a, l.b)))
+
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isPoint = (v: unknown): v is LatLon =>
   !!v && typeof v === 'object' && isNum((v as LatLon).lat) && isNum((v as LatLon).lon)
@@ -155,6 +159,55 @@ export function parseExport(text: string): Spot[] {
 
 export const exportText = (spots: Spot[]) =>
   JSON.stringify({ app: 'highline-finder', version: 1, spots }, null, 1)
+
+type Packed = [string, [string, number, number, number, number, number | null, number | null, number | null][]]
+
+const round = (v: number, digits: number) => Number(v.toFixed(digits))
+
+/**
+ * A spot as a link fragment: compact JSON in base64url, small enough for a chat message with twenty
+ * lines in it. A fragment rather than a parameter, so it never reaches a server log.
+ */
+export function spotHash(s: Spot): string {
+  const packed: Packed = [
+    s.name,
+    s.lines.map((l) => [
+      l.name,
+      round(l.a.lat, 7), round(l.a.lon, 7), round(l.b.lat, 7), round(l.b.lon, 7),
+      l.rig ? round(l.rig.a, 2) : null, l.rig ? round(l.rig.b, 2) : null,
+      l.sag,
+    ]),
+  ]
+  const binary = String.fromCharCode(...new TextEncoder().encode(JSON.stringify(packed)))
+  return `spot=${btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`
+}
+
+/** The spot a link fragment carries, with ids of its own; null when there is none or it is broken. */
+export function spotFromHash(hash: string): Spot | null {
+  const raw = new URLSearchParams(hash.replace(/^#/, '')).get('spot')
+  if (!raw) return null
+  try {
+    const binary = atob(raw.replace(/-/g, '+').replace(/_/g, '/'))
+    const packed = JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)))) as unknown
+    if (!Array.isArray(packed) || !Array.isArray(packed[1])) return null
+    const spot = asSpot({
+      name: packed[0],
+      lines: (packed[1] as unknown[]).map((l) =>
+        Array.isArray(l) && {
+          name: l[0],
+          a: { lat: l[1], lon: l[2] },
+          b: { lat: l[3], lon: l[4] },
+          rig: { a: l[5], b: l[6] },
+          sag: l[7],
+        },
+      ),
+    })
+    return spot?.lines.length ? { ...spot, id: newId(), lines: spot.lines.map((l) => ({ ...l, id: newId() })) } : null
+  } catch (e) {
+    report('reading a shared spot', e)
+    return null
+  }
+}
 
 export function loadLibrary(): Library {
   try {

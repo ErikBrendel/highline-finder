@@ -59,6 +59,8 @@ export interface UrlState {
   /** south, west, north, east. */
   bbox: [number, number, number, number] | null
   line: LineSpec
+  /** The open line's name, when it has one of its own. */
+  name: string | null
   /** Basemap blend position. Left unclamped here; the caller owns the valid range. */
   basemapMix: number | null
   /** Layer toggles. Null means the default, which is on for both. */
@@ -84,6 +86,7 @@ export interface UrlState {
 const EMPTY: UrlState = {
   bbox: null,
   line: NO_LINE,
+  name: null,
   basemapMix: null,
   showLines: null,
   showHotspots: null,
@@ -202,6 +205,7 @@ export function parseUrl(search: string): UrlState {
       rig: rig ? { a: rig[0]!, b: rig[1]! } : null,
       sag: sag ? sag[0]! : null,
     },
+    name: q.get('name'),
     basemapMix: map ? map[0]! : null,
     showLines: toggle(q.get('lines')),
     showHotspots: toggle(q.get('spots')),
@@ -220,6 +224,7 @@ export function toSearch(s: UrlState): string {
   if (b) q.set('b', `${coord(b.lat)},${coord(b.lon)}`)
   if (rig) q.set('rig', `${rig.a.toFixed(2)},${rig.b.toFixed(2)}`)
   if (sag !== null) q.set('sag', sag.toFixed(1))
+  if (s.name) q.set('name', s.name)
   if (s.basemapMix !== null) q.set('map', s.basemapMix.toFixed(1))
   if (s.showLines === false) q.set('lines', '0')
   if (s.showHotspots === false) q.set('spots', '0')
