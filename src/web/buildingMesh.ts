@@ -356,8 +356,9 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
    * of the walls, the quad between them is drawn exactly as the terrain grid draws it, split along
    * the same diagonal: every height, slope and step the cells measured is where it was. Only the
    * band between the outermost whole cells and the fitted walls is new, and it is triangulated with
-   * both as constraints. Gives the height of the wall's top at a corner, or null where the
-   * triangulation refuses the outline, which then gets another try as traced.
+   * both as constraints. Gives the roof's vertex at each corner of the outline, for the walls to
+   * hang from, or null where the triangulation refuses the outline, which then gets another try as
+   * traced.
    */
   const roofOver = (loops: Pt[][], within: Pt[]): ((p: Pt) => number) | null => {
     const walls = loops.flatMap((l) => l.map((p, i): [Pt, Pt] => [p, l[(i + 1) % l.length]!]))
@@ -477,26 +478,39 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
         triangle(se, ne, nw, [0, 1, 0])
       }
     }
-    return top
+    return (p) => ids[pointAt.get(`${p[0]},${p[1]}`)!]!
   }
 
   for (const footprint of footprints(cells)) {
     const { traced } = footprint
-    let top: ((p: Pt) => number) | null = null
+    let rim: ((p: Pt) => number) | null = null
     const fitted = [footprint.fitted, traced].find(
-      (loops, k) => (k === 0 || footprint.fitted !== traced) && (top = roofOver(loops, traced[0]!)),
+      (loops, k) => (k === 0 || footprint.fitted !== traced) && (rim = roofOver(loops, traced[0]!)),
     )
-    if (!fitted || !top) continue
-    const topAt: (p: Pt) => number = top
+    if (!fitted || !rim) continue
+    const roofAt: (p: Pt) => number = rim
 
+    // A facade hangs from the roof's own rim and shares its feet with the next one, so the normals
+    // round over both edges as the terrain grid's do. Only the shading is soft; the edge stays where
+    // it is. A cut is not part of the building's skin and keeps its own corners.
+    const feet = new Map<string, number>()
     for (const loop of fitted) {
       loop.forEach((a, i) => {
         const b = loop[(i + 1) % loop.length]!
-        const rgb = onEdge(a, b) ? CUT_RGB : grey
-        const [ta, tb] = [topAt(a), topAt(b)]
+        const cut = onEdge(a, b)
+        const rgb = cut ? CUT_RGB : grey
+        const [ra, rb] = [roofAt(a), roofAt(b)]
         const [fa, fb] = [ground[cell(a[0], a[1])]!, ground[cell(b[0], b[1])]!]
-        if (Number.isNaN(ta + tb + fa + fb)) return
-        const ids = [vertex(a, ta, rgb), vertex(b, tb, rgb), vertex(a, fa, rgb), vertex(b, fb, rgb)]
+        if (Number.isNaN(fa + fb)) return
+        const foot = (p: Pt, height: number) => {
+          if (cut) return vertex(p, height, rgb)
+          const k = `${p[0]},${p[1]}`
+          let id = feet.get(k)
+          if (id === undefined) feet.set(k, (id = vertex(p, height, rgb)))
+          return id
+        }
+        const topOf = (r: number, p: Pt) => (cut ? vertex(p, positions[r * 3 + 1]! + datum, rgb) : r)
+        const ids = [topOf(ra, a), topOf(rb, b), foot(a, fa), foot(b, fb)]
         // Inside is on the left of the walk, so outwards is to its right: (dy, -dx) on the map,
         // which is (dy, 0, dx) in the scene, whose z runs south.
         const out: [number, number, number] = [b[1] - a[1], 0, b[0] - a[0]]
