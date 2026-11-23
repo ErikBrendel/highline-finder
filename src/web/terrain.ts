@@ -69,6 +69,8 @@ interface Window {
    * building it belongs to.
    */
   roof: Grid
+  /** 1 where a roof cell is facade the surface model saw from above (see `growRoofs`), NaN elsewhere. */
+  facade: Grid
   /** Where the surface came from. See {@link Canopy}. */
   canopy: Canopy
 }
@@ -198,6 +200,7 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   const n0 = ty * WINDOW
   const grid = () => Grid.filled(WINDOW, WINDOW, e0, n0 + WINDOW, 1)
   const roof = grid()
+  const facade = grid()
   emit({ tx, ty, state: 'loading' })
 
   const mid = { e: e0 + WINDOW / 2, n: n0 + WINDOW / 2 }
@@ -248,11 +251,11 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   // elevation. The roof grid starts all NaN, which is the same answer as open ground. Only asked of
   // a source with a city model -- of any other it would be a 404 per tile.
   if (used.cityModel) {
-    await loadRoofs(used.cityModel, e0, n0, roof).then(() => growRoofs(roof, surface, ground)).catch((e: unknown) =>
+    await loadRoofs(used.cityModel, e0, n0, roof).then(() => growRoofs(roof, surface, ground, facade)).catch((e: unknown) =>
       report(`rasterising buildings into the window at ${e0},${n0}`, e),
     )
   }
-  loaded.set(keyOf(tx, ty), { ground, surface, roof, canopy })
+  loaded.set(keyOf(tx, ty), { ground, surface, roof, facade, canopy })
   emit({ tx, ty, state: 'loaded' })
 }
 
@@ -388,6 +391,12 @@ export function standingGround(
 export function onBuilding(e: number, n: number): boolean {
   const win = loaded.get(keyOf(colAt(e), rowAt(n)))
   return !!win && !Number.isNaN(win.roof.nearest(e, n))
+}
+
+/** Whether a point stands on a building's roof rather than on a facade cell grown onto it. */
+export function onRoof(e: number, n: number): boolean {
+  const win = loaded.get(keyOf(colAt(e), rowAt(n)))
+  return !!win && !Number.isNaN(win.roof.nearest(e, n)) && Number.isNaN(win.facade.nearest(e, n))
 }
 
 /**

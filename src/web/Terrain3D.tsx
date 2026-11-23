@@ -3,7 +3,7 @@ import type { Pos } from '../shared/grid.js'
 import { toWgs84 } from '../shared/geo.js'
 import { lineHeightAt } from '../shared/scoring.js'
 import {
-  bareGround, ensureTerrain, missingWindows, onBuilding, onWindowActivity, standingCell, surfaceSampler,
+  bareGround, ensureTerrain, missingWindows, onBuilding, onRoof, onWindowActivity, standingCell, surfaceSampler,
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
@@ -139,7 +139,7 @@ function buildingCellsOver(centre: Pos, halfSide: number): BuildingCells {
   for (let j = 0; j < h; j++) {
     for (let c = 0; c < w; c++) {
       const [e, n] = [ci0 + c + 0.5, cj0 + j + 0.5]
-      roof[j * w + c] = onBuilding(e, n) ? standingCell(ci0 + c, cj0 + j) : NaN
+      roof[j * w + c] = onRoof(e, n) ? standingCell(ci0 + c, cj0 + j) : NaN
       ground[j * w + c] = bareGround(e, n)
     }
   }

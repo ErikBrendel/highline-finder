@@ -94,11 +94,17 @@ export function rasteriseFaces(faces: LevelFace[], into: Grid): number {
 const EAVES_REACH = 4
 /** How much a cell may read above the roof cell it grows from: survey noise, not a step up. */
 const EAVES_NOISE = 0.5
+/**
+ * How far under the footprint's own roof a grown cell may read and still be roof: eaves and the
+ * tops of loggias, which the surface model sees about two metres down. Further down is facade.
+ */
+const EAVES_DROP = 3
 /** Below this over the terrain a cell is open ground, as `CANOPY_FROM` has it in the 3D view. */
 const STANDING = 2
 
 /**
- * Grows each roof into what the surface model shows standing against it.
+ * Grows each roof into what the surface model shows standing against it, and marks which of the
+ * grown cells are facade.
  *
  * A footprint is the wall line from the cadastre. The surface model also sees what sticks out of
  * it -- eaves, loggias and balconies, a metre to several out -- and the cells straddling the outer
@@ -111,9 +117,15 @@ const STANDING = 2
  * are reached from: a building steps down from its roof to the street, where a tree beside it
  * climbs again to its own crown, and that climb is where the growing stops. Only the cover changes;
  * the height drawn and measured there stays the surface model's own.
+ *
+ * A grown cell reading more than `EAVES_DROP` under the footprint roof it was reached from is a
+ * wall seen from above, not roof. It stays building, so it draws no canopy, but goes into `facade`:
+ * whether one is caught depends on where the wall happens to cross the cell grid, so treated as roof
+ * it put a one-metre notch into the outline every few cells along an otherwise straight wall.
  */
-export function growRoofs(roof: Grid, surface: Grid, ground: Grid): number {
+export function growRoofs(roof: Grid, surface: Grid, ground: Grid, facade: Grid): number {
   const { w, h } = roof
+  const footprintTop = roof.data.map((z, i) => (Number.isNaN(z) ? NaN : Number.isNaN(surface.data[i]!) ? z : surface.data[i]!))
   let grown = 0
   for (let pass = 0; pass < EAVES_REACH; pass++) {
     const before = roof.data.slice()
@@ -126,6 +138,8 @@ export function growRoofs(roof: Grid, surface: Grid, ground: Grid): number {
           if (j < 0 || j >= w * h || Number.isNaN(before[j]!)) continue
           if (top > surface.data[j]! + EAVES_NOISE) continue
           roof.data[i] = before[j]!
+          footprintTop[i] = footprintTop[j]!
+          if (!(top >= footprintTop[j]! - EAVES_DROP)) facade.data[i] = 1
           grown++
           break
         }
