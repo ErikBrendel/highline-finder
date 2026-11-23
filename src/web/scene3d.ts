@@ -54,6 +54,8 @@ export interface SceneInput {
    * is a provisional span between two points; what the drop produces is a measurement.
    */
   onAnchorMoved?: (which: 0 | 1, x: number, z: number) => void
+  /** Called when an anchor is touched and let go without being carried anywhere. */
+  onAnchorTapped?: (which: 0 | 1) => void
   /**
    * Where the camera stood relative to what it was looking at, from a scene being replaced.
    *
@@ -132,7 +134,26 @@ export interface Scene3D {
    * the datum is the coarse pass's, so the two readings sit at exactly the same height.
    */
   setMesh(mesh: MeshData, canopy: MeshData | null): void
+  /**
+   * Flies the camera to one anchor and keeps it there, or back to the whole line.
+   *
+   * Close up is where an anchor can be placed to the decimetre: from the opening view a pixel is
+   * most of a metre, and the camera was not allowed near enough for that to change.
+   */
+  focus(which: 0 | 1 | null): void
+  /**
+   * The two directions on the ground that "up" and "right" on the screen point along, as unit
+   * vectors in the patch's x and z. What a nudge is measured in, so an arrow moves the anchor the
+   * way it points from wherever the camera happens to be standing.
+   */
+  groundAxes(): { forward: [number, number]; right: [number, number] }
 }
+
+/** How far from a focused anchor the camera settles, in metres. */
+const FOCUS_DISTANCE = 30
+
+/** How close the camera may come to a focused anchor, in metres. */
+const FOCUS_NEAREST = 2
 
 /**
  * The canvas shape the default camera height was chosen against.
@@ -451,6 +472,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   // follow the zoom every frame for nothing, since scaling it uniformly is exactly right.
   const ballGeom = new SphereGeometry(1, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
+  const focusMat = new MeshBasicMaterial({ color: '#f43f5e' })
   // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
   // across on a patch hundreds of metres wide, which is a few pixels -- fine to look at, impossible
   // to grab, and hopeless with a finger.
@@ -587,7 +609,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const resumeLater = () => {
     clearTimeout(idle)
     idle = setTimeout(() => {
-      controls.autoRotate = spinning
+      // Never while an anchor is being worked on: it would carry the anchor out from under the arrows.
+      controls.autoRotate = spinning && focused === null
     }, RESUME_AFTER_MS)
   }
   controls.addEventListener('start', pause)
@@ -697,6 +720,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     // it already is and then set a whole optimiser run going for it, which is a lot of machinery
     // for having touched something.
     if (carried) input.onAnchorMoved?.(which, x, z)
+    else input.onAnchorTapped?.(which)
   }
 
   canvas.addEventListener('pointerdown', onDown, { capture: true })
@@ -724,7 +748,39 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
    */
   const startedAt = camera.position.distanceTo(controls.target)
   const zoomThickness = () =>
-    Math.min(2.2, Math.max(0.45, camera.position.distanceTo(controls.target) / startedAt))
+    Math.min(
+      2.2,
+      // Thinner close up to an anchor, or the ball would hide the ground it is being placed on.
+      Math.max(focused === null ? 0.45 : 0.04, camera.position.distanceTo(controls.target) / startedAt),
+    )
+
+  /** Which anchor the camera is held on, and whether it is still on its way there or back. */
+  let focused: 0 | 1 | null = null
+  let travelling = false
+
+  /**
+   * Eases the camera towards the focused anchor, or home to the whole line.
+   *
+   * While focused the target keeps following the ball, so a nudge never walks the anchor out of
+   * the picture. The distance is only steered on the way there and back; in between it is the
+   * viewer's to zoom.
+   */
+  const steer = () => {
+    if (focused === null && !travelling) return
+    const goal =
+      focused === null ? new Vector3(0, input.lookAt * exaggeration, 0) : balls[focused]!.position
+    const offset = camera.position.clone().sub(controls.target)
+    controls.target.lerp(goal, 0.2)
+    if (travelling) {
+      const want = focused === null ? startedAt : FOCUS_DISTANCE
+      offset.setLength(offset.length() + (want - offset.length()) * 0.2)
+      if (Math.abs(offset.length() - want) < want * 0.01 && controls.target.distanceTo(goal) < 0.05) {
+        travelling = false
+        if (focused === null) controls.minDistance = input.radius * 0.3
+      }
+    }
+    camera.position.copy(controls.target).add(offset)
+  }
 
   /**
    * Rebuilt on a step rather than every frame.
@@ -750,6 +806,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
 
   let raf = requestAnimationFrame(function frame() {
     raf = requestAnimationFrame(frame)
+    steer()
     followZoom()
     if (hover && dragging === null) {
       const r = canvas.getBoundingClientRect()
@@ -765,6 +822,24 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   })
 
   return {
+    focus(which) {
+      if (which === focused) return
+      focused = which
+      travelling = true
+      balls.forEach((ball, i) => {
+        ball.material = i === which ? focusMat : ballMat
+      })
+      if (which === null) return resumeLater()
+      controls.minDistance = FOCUS_NEAREST
+      pause()
+    },
+    groundAxes() {
+      const f = controls.target.clone().sub(camera.position)
+      f.y = 0
+      if (f.lengthSq() < 1e-9) f.set(0, 0, -1)
+      f.normalize()
+      return { forward: [f.x, f.z], right: [-f.z, f.x] }
+    },
     setExaggeration(k: number) {
       if (k === exaggeration) return
       // Keep the camera where the viewer put it -- same direction, same distance -- and move only
@@ -855,7 +930,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       orthoMap.value?.dispose()
       for (const m of [
         ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat, ghostMat,
-        ballMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
+        ballMat, focusMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()

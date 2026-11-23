@@ -141,6 +141,9 @@ export function stale(held: Ground | null, a: Pos, b: Pos): boolean {
   )
 }
 
+/** What one press of a nudge arrow moves an anchor by, in metres. */
+const STEPS = [0.1, 0.5, 1, 5]
+
 export function Terrain3D({
   a, b, anchorA, anchorB, sagRatio, hoverAt, onMoveAnchor,
 }: {
@@ -200,6 +203,55 @@ export function Terrain3D({
 
   const moveRef = useRef(onMoveAnchor)
   moveRef.current = onMoveAnchor
+
+  /**
+   * The anchor being placed by hand, and how far one press of an arrow moves it.
+   *
+   * Dragging over terrain hundreds of metres across puts an anchor within a metre at best, and on a
+   * pitched roof the ray flips between roof and ground. Tapping an anchor brings the camera to it
+   * and offers steps instead: exact, and as small as a decimetre.
+   */
+  const [picked, setPicked] = useState<'a' | 'b' | null>(null)
+  const pickedRef = useRef(picked)
+  pickedRef.current = picked
+  const [step, setStep] = useState(0.5)
+  useEffect(() => {
+    scene.current?.focus(picked === null ? null : picked === 'a' ? 0 : 1)
+  }, [picked, state])
+
+  /** Moves the picked anchor `right` and `forward` steps, as the screen sees them. */
+  const nudge = (right: number, forward: number) => {
+    if (!picked || !scene.current || !onMoveAnchor) return
+    const axes = scene.current.groundAxes()
+    const x = (axes.right[0] * right + axes.forward[0] * forward) * step
+    const z = (axes.right[1] * right + axes.forward[1] * forward) * step
+    const from = picked === 'a' ? a : b
+    onMoveAnchor(picked, toWgs84(from.e + x, from.n - z))
+  }
+  const nudgeRef = useRef(nudge)
+  nudgeRef.current = nudge
+
+  useEffect(() => {
+    if (!picked) return
+    const KEYS: Record<string, [number, number]> = {
+      ArrowUp: [0, 1], ArrowDown: [0, -1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+    }
+    const onKey = (e: KeyboardEvent) => {
+      // A focused slider owns its own arrow keys.
+      if (e.target instanceof HTMLInputElement) return
+      if (e.key === 'Escape') {
+        // Captured ahead of the full view's own Escape, which would otherwise leave the view too.
+        e.stopImmediatePropagation()
+        return setPicked(null)
+      }
+      const dir = KEYS[e.key]
+      if (!dir) return
+      e.preventDefault()
+      nudgeRef.current(dir[0], dir[1])
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [picked])
 
   useEffect(() => {
     if (seen || !host.current) return
@@ -443,6 +495,10 @@ export function Terrain3D({
           const { lat, lon } = toWgs84(g.centre.e + x, g.centre.n - z)
           moveRef.current?.(which === 0 ? 'a' : 'b', { lat, lon })
         },
+        onAnchorTapped: (which) => {
+          const end = which === 0 ? 'a' : 'b'
+          setPicked((cur) => (cur === end ? null : end))
+        },
       })
       setState('ready')
 
@@ -580,6 +636,25 @@ export function Terrain3D({
           &#x27f3;
         </button>
       )}
+      {state === 'ready' && picked && onMoveAnchor && (
+        <div className="nudge" role="group" aria-label={`Move anchor ${picked.toUpperCase()}`}>
+          <span className="which">{picked.toUpperCase()}</span>
+          <div className="pad">
+            <button onClick={() => nudge(0, 1)} aria-label="Away from you" style={{ gridArea: 'up' }}>&#9650;</button>
+            <button onClick={() => nudge(-1, 0)} aria-label="Left" style={{ gridArea: 'left' }}>&#9664;</button>
+            <button onClick={() => nudge(1, 0)} aria-label="Right" style={{ gridArea: 'right' }}>&#9654;</button>
+            <button onClick={() => nudge(0, -1)} aria-label="Towards you" style={{ gridArea: 'down' }}>&#9660;</button>
+          </div>
+          <div className="steps">
+            {STEPS.map((m) => (
+              <button key={m} data-active={m === step} onClick={() => setStep(m)}>
+                {m < 1 ? `${m * 100} cm` : `${m} m`}
+              </button>
+            ))}
+          </div>
+          <button className="done" onClick={() => setPicked(null)}>done</button>
+        </div>
+      )}
       {state === 'ready' && (
         <div className="scenelegend">
           <span className="ref">for scale: a person, and a 7 m camper</span>
@@ -602,7 +677,9 @@ export function Terrain3D({
           </span>
           {coverPending && ' finding water and roads…'}
           {measured < 0.995 && ` ${Math.round((1 - measured) * 100)} % unsurveyed ·`}
-          {onMoveAnchor ? ' drag an anchor onto the ground · drag elsewhere to turn' : ' drag to turn'}
+          {onMoveAnchor
+            ? ' drag an anchor onto the ground, or tap it to place it in steps · drag elsewhere to turn'
+            : ' drag to turn'}
         </div>
       )}
     </div>
