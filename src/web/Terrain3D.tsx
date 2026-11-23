@@ -8,8 +8,9 @@ import {
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
 import {
-  COVER, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, solidAt, type CoverClass, standingHeight, type Patch, type Readers,
+  COVER, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, solidAt, type CoverClass, type MeshData, standingHeight, type Patch, type Readers,
 } from './terrainMesh.js'
+import { buildingMesh, type BuildingCells } from './buildingMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Pad, Scene3D } from './scene3d.js'
@@ -116,13 +117,34 @@ const PAD_HALF = 24
 /** How far a pad reaches over the coarse ground around it, in metres. */
 const PAD_OVERLAP = 0.25
 
-/** The cover of one cell, for colouring the pads as the rest of the ground is coloured. */
-const coverAt = (ci: number, cj: number): CoverClass =>
-  onBuilding(ci + 0.5, cj + 0.5)
+/**
+ * The cover of one cell, for colouring the pads as the rest of the ground is coloured: earth under
+ * a building once the buildings are drawn on their own.
+ */
+const padCover = (roofsApart: boolean) => (ci: number, cj: number): CoverClass =>
+  !roofsApart && onBuilding(ci + 0.5, cj + 0.5)
     ? COVER.building
     : water.covers(ci + 0.5, cj + 0.5)
       ? COVER.water
       : COVER.ground
+
+/** The whole cells inside the square the view shows, for `buildingMesh`. */
+function buildingCellsOver(centre: Pos, halfSide: number): BuildingCells {
+  const ci0 = Math.ceil(centre.e - halfSide)
+  const cj0 = Math.ceil(centre.n - halfSide)
+  const w = Math.floor(centre.e + halfSide) - ci0
+  const h = Math.floor(centre.n + halfSide) - cj0
+  const roof = new Float32Array(w * h)
+  const ground = new Float32Array(w * h)
+  for (let j = 0; j < h; j++) {
+    for (let c = 0; c < w; c++) {
+      const [e, n] = [ci0 + c + 0.5, cj0 + j + 0.5]
+      roof[j * w + c] = onBuilding(e, n) ? standingCell(ci0 + c, cj0 + j) : NaN
+      ground[j * w + c] = bareGround(e, n)
+    }
+  }
+  return { ci0, cj0, w, h, roof, ground }
+}
 
 /**
  * Where the line from p to q is inside the box [e0, e1] x [n0, n1], as a range of the way along it,
@@ -205,6 +227,8 @@ export function Terrain3D({
   const ground = useRef<Ground | null>(null)
   /** The heights as read, kept so a lake arriving later repaints them without reading them again. */
   const patch = useRef<Patch | null>(null)
+  /** The buildings as solids of their own, once the fine pass has drawn them; the ground is then bare earth. */
+  const roofs = useRef<MeshData | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [failed, setFailed] = useState<string | null>(null)
   const [measured, setMeasured] = useState(1)
@@ -427,14 +451,21 @@ export function Terrain3D({
     }
     const ends = [a, b].map((p) => ({ ci: Math.floor(p.e) - PAD_HALF, cj: Math.floor(p.n) - PAD_HALF }))
     // The outer ring of each pad takes the coarse ground's height, so the two meet without a seam.
-    // Inside it the pad is the standing surface itself, which is what the anchor in the middle is on.
-    const readers = ends.map(({ ci, cj }): CellReader => (i, j) => {
+    // Inside it the pad is the standing surface itself, which is what the anchor in the middle is on
+    // -- and the track lies on it. Where the buildings are drawn apart, the pad draws the earth
+    // under them instead, as the coarse ground does.
+    const apart = roofs.current !== null
+    const surfaceOf = (earth: boolean) => ends.map(({ ci, cj }): CellReader => (i, j) => {
       const ring = i === ci || j === cj || i === ci + 2 * PAD_HALF - 1 || j === cj + 2 * PAD_HALF - 1
-      if (!ring || !patch.current) return standingCell(i, j)
-      return solidAt(patch.current, i + 0.5 - g.centre.e, -(j + 0.5 - g.centre.n))
+      if (ring && patch.current) {
+        return solidAt(patch.current, i + 0.5 - g.centre.e, -(j + 0.5 - g.centre.n), earth ? 'earth' : 'solid')
+      }
+      return earth && onBuilding(i + 0.5, j + 0.5) ? bareGround(i + 0.5, j + 0.5) : standingCell(i, j)
     })
+    const readers = surfaceOf(false)
+    const drawn = apart ? surfaceOf(true) : readers
     const pads: Pad[] = ends.map(({ ci, cj }, k) => ({
-      mesh: padMesh(readers[k]!, coverAt, ci, cj, 2 * PAD_HALF, g.centre, g.datum),
+      mesh: padMesh(drawn[k]!, padCover(apart), ci, cj, 2 * PAD_HALF, g.centre, g.datum),
       // Cut a little inside the pad's edge: two surfaces meeting exactly on a line leave a crack of
       // unpainted pixels along it, where an overlap leaves none.
       bounds: [
@@ -535,6 +566,7 @@ export function Terrain3D({
       // The coarse pass sets the floor everything is measured from, and the fine one keeps it, so
       // replacing the ground does not lift or drop the span hanging over it.
       g.datum = rough.low
+      roofs.current = null
       const mesh = meshOf(rough, g.datum)
       if (!mesh.indices.length) throw new Error('no elevation for the ground around this line')
 
@@ -580,7 +612,8 @@ export function Terrain3D({
       if (dropped) return
       patch.current = fine
       setMeasured(fine.measured)
-      scene.current?.setMesh(meshOf(fine, g.datum), meshOf(fine, g.datum, 'canopy'))
+      roofs.current = buildingMesh(buildingCellsOver(g.centre, g.halfSide), g.centre, g.datum)
+      scene.current?.setMesh(meshOf(fine, g.datum, 'earth'), meshOf(fine, g.datum, 'canopy'), roofs.current)
       redrape(g)
 
       /**
@@ -645,7 +678,9 @@ export function Terrain3D({
       coverOf(read, { building: onBuilding, water: (e, n) => water.covers(e, n) }),
     )
     const datum = ground.current.datum
-    scene.current.setMesh(meshOf(read, datum), meshOf(read, datum, 'canopy'))
+    scene.current.setMesh(
+      meshOf(read, datum, roofs.current ? 'earth' : 'solid'), meshOf(read, datum, 'canopy'), roofs.current,
+    )
     redrape(ground.current)
   })
   useEffect(() => onCoverChange(() => repaint.current()), [])

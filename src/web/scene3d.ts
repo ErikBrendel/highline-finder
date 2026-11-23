@@ -1,6 +1,6 @@
 import {
   AmbientLight, BufferAttribute, Curve, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
-  DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
+  DoubleSide, FrontSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
   Vector3, Vector4, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture, Texture,
   ClampToEdgeWrapping, SRGBColorSpace,
@@ -124,7 +124,7 @@ export interface Scene3D {
    * replaced -- the geometry, its normals and the camera all stay exactly as they are.
    */
   /**
-   * Replaces the ground and the canopy over it, together.
+   * Replaces the ground, the canopy over it and the buildings on it, together.
    *
    * The view is built from a coarse pass so there is something to look at while the fine one is
    * sampled, and this is the swap; it is also how a lake arriving late is repainted. Both surfaces
@@ -132,8 +132,10 @@ export interface Scene3D {
    * behind and the index asks for vertices the attributes do not have, and nothing draws at all.
    * The span, the camera and the height scale are in terms of the patch rather than the mesh, and
    * the datum is the coarse pass's, so the two readings sit at exactly the same height.
+   *
+   * `buildings` is null where the ground carries the roofs itself, as the coarse pass does.
    */
-  setMesh(mesh: MeshData, canopy: MeshData | null): void
+  setMesh(mesh: MeshData, canopy: MeshData | null, buildings: MeshData | null): void
   /**
    * Flies the camera to one anchor and keeps it there, or back to the whole line.
    *
@@ -240,7 +242,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   /** Where the coarse ground is cut away for a pad: x from-to, z from-to. Empty boxes cut nothing. */
   const holes = { value: [new Vector4(1, 0, 1, 0), new Vector4(1, 0, 1, 0)] }
   const groundMaterial = (cut: boolean) => {
-  const mat = new MeshLambertMaterial({ vertexColors: true, side: cut ? undefined : DoubleSide })
+  const mat = new MeshLambertMaterial({ vertexColors: true, side: cut ? FrontSide : DoubleSide })
   // Two programs from one source: three caches by the hook's text, which is the same for both.
   mat.customProgramCacheKey = () => (cut ? 'ground' : 'pad')
   mat.onBeforeCompile = (shader) => {
@@ -299,6 +301,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   }
   const groundMat = groundMaterial(true)
   const padMat = groundMaterial(false)
+  // Not cut by the pads, which draw the earth under a building rather than its roof.
+  const buildingMat = groundMaterial(false)
   // In front of the coarse ground where the two overlap at a pad's edge, rather than fighting it.
   padMat.polygonOffset = true
   padMat.polygonOffsetFactor = -1
@@ -306,6 +310,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
 
   const ground = new Mesh(geometryOf(input.mesh), groundMat)
   scene.add(ground)
+  const buildings = new Mesh(geometryOf(EMPTY_MESH), buildingMat)
+  scene.add(buildings)
 
   let pads: Mesh[] = []
   const setPads = (next: Pad[]) => {
@@ -592,6 +598,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   /** Everything whose height is baked into its geometry rather than into a scale. */
   const rescale = (k: number) => {
     ground.scale.y = k
+    buildings.scale.y = k
     for (const pad of pads) pad.scale.y = k
     canopy.scale.y = k
     spanMesh.geometry.dispose()
@@ -743,6 +750,9 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     renderer.setSize(w, h, false)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
+    // Resizing clears the canvas, and a ResizeObserver runs after this frame's render: without
+    // drawing again here, the browser paints the cleared canvas, a white flash per resize step.
+    renderer.render(scene, camera)
   }
   resize()
   const observer = new ResizeObserver(resize)
@@ -880,10 +890,11 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       orthoMap.value = texture
       orthoMix.value = ORTHO_MIX
     },
-    setMesh(mesh: MeshData, next: MeshData | null) {
+    setMesh(mesh: MeshData, next: MeshData | null, roofs: MeshData | null) {
       for (const [target, data] of [
         [ground, mesh],
         [canopy, next ?? EMPTY_MESH],
+        [buildings, roofs ?? EMPTY_MESH],
       ] as const) {
         const old = target.geometry
         target.geometry = geometryOf(data)
@@ -928,7 +939,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       disposeProps(propsRoot)
       setPads([])
       for (const g of [
-        ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
+        ground.geometry, buildings.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
         ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
         ...stems.map((m) => m.geometry),
       ]) {
@@ -940,7 +951,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       orthoMap.value?.dispose()
       for (const m of [
-        groundMat, padMat, canopyMat, spanMat, trackMat, overMat,
+        groundMat, padMat, buildingMat, canopyMat, spanMat, trackMat, overMat,
         ballMat, focusMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {

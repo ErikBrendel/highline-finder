@@ -280,7 +280,14 @@ export function colorsOf(cover: Uint8Array): Float32Array {
  * as a separate translucent sheet so the ground beneath it stays visible -- a wood is a thing you
  * can see the shape of the hill through, and a single opaque surface at treetop height is not.
  */
-export type MeshLayer = 'solid' | 'canopy'
+export type MeshLayer = 'solid' | 'earth' | 'canopy'
+
+/**
+ * The height a layer draws at vertex `i`. `earth` is bare earth everywhere, buildings included:
+ * what is under the roofs once `buildingMesh` draws them as solids of their own.
+ */
+const heightOf = (patch: Patch, layer: MeshLayer, i: number) =>
+  layer === 'canopy' || (layer === 'solid' && patch.cover[i] === COVER.building) ? patch.height[i]! : patch.ground[i]!
 
 /**
  * The line from (x0, z0) to (x1, z1), between `from` and `to` of the way along, laid onto the
@@ -315,13 +322,13 @@ export function drape(
 }
 
 /** The drawn solid ground at a point of the scene, NaN off the patch or where it is not drawn. */
-export function solidAt(patch: Patch, x: number, z: number): number {
+export function solidAt(patch: Patch, x: number, z: number, layer: MeshLayer = 'solid'): number {
   const half = ((patch.side - 1) * patch.step) / 2
   const u = (x + half) / patch.step
   const v = (z + half) / patch.step
   const col = Math.min(patch.side - 2, Math.floor(u))
   const row = Math.min(patch.side - 2, Math.floor(v))
-  const quad = quadAt(patch, 'solid', col, row)
+  const quad = quadAt(patch, layer, col, row)
   return quad ? onQuad(quad, u - col, v - row, u - col + v - row <= 1) : NaN
 }
 
@@ -330,14 +337,12 @@ export function solidAt(patch: Patch, x: number, z: number): number {
  * unmeasured, or -- for the canopy -- not canopy at all four corners.
  */
 function quadAt(patch: Patch, layer: MeshLayer, col: number, row: number): Quad | null {
-  const { side, height, ground, cover } = patch
+  const { side, cover } = patch
   if (col < 0 || row < 0 || col + 1 >= side || row + 1 >= side) return null
   const a = row * side + col
   const corners = [a, a + 1, a + side, a + side + 1]
   if (layer === 'canopy' && !corners.every((i) => cover[i] === COVER.canopy)) return null
-  const quad = corners.map((i) =>
-    layer === 'canopy' || cover[i] === COVER.building ? height[i]! : ground[i]!,
-  ) as Quad
+  const quad = corners.map((i) => heightOf(patch, layer, i)) as Quad
   return Number.isNaN(quad[0] + quad[1] + quad[2] + quad[3]) ? null : quad
 }
 
@@ -352,19 +357,21 @@ function onQuad([ha, hb, hc, hd]: Quad, du: number, dv: number, lower: boolean):
 
 
 export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): MeshData {
-  const { side, step, height, ground, cover } = patch
+  const { side, step, cover } = patch
   const half = ((side - 1) * step) / 2
   const positions = new Float32Array(side * side * 3)
   // Under the canopy the solid ground is brown, not green: the green has moved to its own sheet.
+  // Under a building drawn on its own it is brown too, for the same reason.
   const colors = colorsOf(
     layer === 'canopy'
       ? cover
-      : Uint8Array.from(cover, (k) => (k === COVER.canopy ? COVER.ground : k)),
+      : Uint8Array.from(cover, (k) =>
+          k === COVER.canopy || (layer === 'earth' && k === COVER.building) ? COVER.ground : k,
+        ),
   )
 
   /** A building is solid to its roof; everything else stands on the earth it is measured from. */
-  const at = (i: number) =>
-    layer === 'canopy' || cover[i] === COVER.building ? height[i]! : ground[i]!
+  const at = (i: number) => heightOf(patch, layer, i)
 
   for (let row = 0; row < side; row++) {
     for (let col = 0; col < side; col++) {
@@ -393,64 +400,8 @@ export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): Mes
       indices.push(a, c, b, b, c, d)
     }
   }
-  if (layer !== 'canopy') return closeCuts(patch, { positions, colors, indices: Uint32Array.from(indices) }, datum)
+  if (layer !== 'canopy') return { positions, colors, indices: Uint32Array.from(indices) }
   return skirt(patch, positions, colors, indices, drawn, datum)
-}
-
-/** The colour of a building's section where the edge of the model cuts through it. */
-export const CUT_RGB: [number, number, number] = [0.72, 0.34, 0.3]
-
-/**
- * Closes a building the edge of the model cuts through, with a wall down to the earth.
- *
- * The solid is a sheet, so a building standing across the patch's edge ends in a roof with nothing
- * under it, and a camera looking along the edge sees straight into it. The wall is its own colour
- * rather than the building's, because it is not a facade: it is where the model stops, and the
- * building goes on past it.
- */
-function closeCuts(patch: Patch, mesh: MeshData, datum: number): MeshData {
-  const { side, height, ground, cover } = patch
-  const p = mesh.positions
-  const added: number[] = []
-  const indices = Array.from(mesh.indices)
-  const top = (i: number) => (cover[i] === COVER.building ? height[i]! : ground[i]!)
-  const last = side - 1
-  // Each edge of the patch, as the index of the vertex at position k along it, and which way is out.
-  const edges: [(k: number) => number, [number, number]][] = [
-    [(k) => k, [0, -1]],
-    [(k) => last * side + k, [0, 1]],
-    [(k) => k * side, [-1, 0]],
-    [(k) => k * side + last, [1, 0]],
-  ]
-  for (const [index, [outX, outZ]] of edges) {
-    for (let k = 0; k < last; k++) {
-      const u = index(k)
-      const v = index(k + 1)
-      if (cover[u] !== COVER.building && cover[v] !== COVER.building) continue
-      if (Number.isNaN(top(u) + top(v) + ground[u]! + ground[v]!)) continue
-      const base = p.length / 3 + added.length / 3
-      for (const [i, y] of [[u, top(u)], [v, top(v)], [u, ground[u]!], [v, ground[v]!]] as const) {
-        added.push(p[i * 3]!, y - datum, p[i * 3 + 2]!)
-      }
-      // Wound so the face looks outwards: u to v runs along the edge, and the wall hangs below it.
-      const alongX = p[v * 3]! - p[u * 3]!
-      const alongZ = p[v * 3 + 2]! - p[u * 3 + 2]!
-      const outwards = alongX * outZ - alongZ * outX > 0
-      indices.push(
-        ...(outwards
-          ? [base, base + 2, base + 1, base + 1, base + 2, base + 3]
-          : [base, base + 1, base + 2, base + 1, base + 3, base + 2]),
-      )
-    }
-  }
-  if (!added.length) return mesh
-  const positions = new Float32Array(p.length + added.length)
-  positions.set(p)
-  positions.set(added, p.length)
-  const colors = new Float32Array(positions.length)
-  colors.set(mesh.colors)
-  for (let i = p.length; i < positions.length; i += 3) colors.set(CUT_RGB, i)
-  return { positions, colors, indices: Uint32Array.from(indices) }
 }
 
 /**
