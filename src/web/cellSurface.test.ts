@@ -6,25 +6,16 @@ import { polyline } from './segments.js'
 const block = (ci: number) => (ci >= 2 ? 60 : 50)
 
 describe('surfaceAt', () => {
-  it('stands on one side of a wall right up to it, never partway up', () => {
-    expect(surfaceAt(block, 1.99, 0.3)).toBe(50)
-    expect(surfaceAt(block, 2.01, 0.3)).toBe(60)
-  })
-
-  it('runs smoothly over ground that only slopes', () => {
-    const ramp = (ci: number) => ci * 0.5
-    // Corners average the cells meeting there, so the surface is the ramp shifted half a cell.
-    expect(surfaceAt(ramp, 3, 0.5)).toBeCloseTo(1.25)
-    expect(surfaceAt(ramp, 3.5, 0.5)).toBeCloseTo(1.5)
+  it('is each cell itself at its centre, and ramps between centres across a wall', () => {
+    expect(surfaceAt(block, 1.5, 0.5)).toBe(50)
+    expect(surfaceAt(block, 2, 0.5)).toBe(55)
+    expect(surfaceAt(block, 2.5, 0.5)).toBe(60)
   })
 })
 
 describe('drapeCells', () => {
-  it('steps straight up the wall, at the wall', () => {
+  it('bends only where the surface does, at cell centres', () => {
     const d = polyline(drapeCells(block, 0.5, 0.5, 3.5, 0.5), (t, y) => [0.5 + 3 * t, y, 0])
-    const at = (e: number) => [...d].filter((_, i) => i % 3 === 1 && Math.abs(d[i - 1]! - e) < 1e-9)
-    expect(at(2)).toEqual([50, 60])
-    expect(at(1.5)).toEqual([50])
-    expect(at(3)).toEqual([60])
+    expect([...d].filter((_, i) => i % 3 !== 2)).toEqual([0.5, 50, 1.5, 50, 2.5, 60, 3.5, 60])
   })
 })

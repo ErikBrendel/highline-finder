@@ -122,13 +122,13 @@ const coverAt = (ci: number, cj: number): CoverClass =>
       : COVER.ground
 
 /**
- * Where the line from p to q is inside the box of cells [ci0, ci1) x [cj0, cj1), as a range of the
- * way along it, or null when it never is.
+ * Where the line from p to q is inside the box [e0, e1] x [n0, n1], as a range of the way along it,
+ * or null when it never is.
  */
-function clip(p: Pos, q: Pos, ci0: number, cj0: number, ci1: number, cj1: number): [number, number] | null {
+function clip(p: Pos, q: Pos, e0: number, n0: number, e1: number, n1: number): [number, number] | null {
   let lo = 0
   let hi = 1
-  for (const [from, to, min, max] of [[p.e, q.e, ci0, ci1], [p.n, q.n, cj0, cj1]] as const) {
+  for (const [from, to, min, max] of [[p.e, q.e, e0, e1], [p.n, q.n, n0, n1]] as const) {
     if (from === to) {
       if (from < min || from > max) return null
       continue
@@ -426,10 +426,10 @@ export function Terrain3D({
     const pads: Pad[] = ends.map(({ ci, cj }) => ({
       mesh: padMesh(standingCell, coverAt, ci, cj, 2 * PAD_HALF, g.centre, g.datum),
       bounds: [
-        ci - g.centre.e,
-        ci + 2 * PAD_HALF - g.centre.e,
-        -(cj + 2 * PAD_HALF - g.centre.n),
-        -(cj - g.centre.n),
+        ci + 0.5 - g.centre.e,
+        ci + 2 * PAD_HALF - 0.5 - g.centre.e,
+        -(cj + 2 * PAD_HALF - 0.5 - g.centre.n),
+        -(cj + 0.5 - g.centre.n),
       ],
     }))
 
@@ -439,7 +439,7 @@ export function Terrain3D({
     // it -- the pads around the anchors, the coarse mesh between them -- and is lifted just clear.
     const [x0, z0, x1, z1] = [line[0]!, line[2]!, line[line.length - 3]!, line[line.length - 1]!]
     const inPads = ends
-      .map(({ ci, cj }) => clip(a, b, ci, cj, ci + 2 * PAD_HALF, cj + 2 * PAD_HALF))
+      .map(({ ci, cj }) => clip(a, b, ci + 0.5, cj + 0.5, ci + 2 * PAD_HALF - 0.5, cj + 2 * PAD_HALF - 0.5))
       .filter((r): r is [number, number] => r !== null)
     const solid = intervals(inPads.flat(), 0, 1).flatMap(([ta, tb]) => {
       const mid = (ta + tb) / 2

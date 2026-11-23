@@ -1,5 +1,5 @@
 import type { Pos } from '../shared/grid.js'
-import { cornersOf, type CellReader, type Corners } from './cellSurface.js'
+import type { CellReader } from './cellSurface.js'
 import { crossings, intervals, type Seg } from './segments.js'
 
 /**
@@ -448,14 +448,13 @@ function skirt(
  * The cell surface over a square of whole cells, as the ground is drawn around an anchor.
  *
  * The rest of the ground is a grid of one to two metres whose vertices fall wherever they fall, so
- * every wall in it is a ramp a vertex wide and up to half a step out of place. That is fine to look
- * at and wrong to stand on: an anchor a hand's width from a wall disappears into the ramp. Around
- * each anchor the ground is drawn from the very function its height comes from, cell by cell, with
- * the walls vertical and exactly on the cell boundaries -- see cellSurface.ts.
+ * a wall in it is a ramp a vertex wide and up to half a step out of place -- fine to look at, wrong
+ * to stand on. Around each anchor the vertices are the survey's own cell centres instead, and the
+ * triangles are split as cellSurface.ts splits them, so the ground drawn there is exactly the one
+ * the anchor's height comes from.
  *
- * `ci0`, `cj0` is the south-west cell, `cells` a side. Vertices are shared between cells that meet
- * at the same height, so continuous ground shades smoothly; walls get their own, so they shade flat.
- * A skirt hangs from the outer edge to close the seam with the coarse ground around it.
+ * `ci0`, `cj0` is the south-west cell and `cells` the number a side; the square drawn runs from
+ * centre to centre. A skirt hangs from its outer edge to close the seam with the coarse ground.
  */
 export function padMesh(
   at: CellReader,
@@ -466,69 +465,48 @@ export function padMesh(
   centre: Pos,
   datum: number,
 ): MeshData {
-  const corners: (Corners | null)[] = []
-  for (let j = 0; j < cells; j++) for (let i = 0; i < cells; i++) corners.push(cornersOf(at, ci0 + i, cj0 + j))
-  const cornerAt = (i: number, j: number) =>
-    i < 0 || j < 0 || i >= cells || j >= cells ? null : corners[j * cells + i]!
-
   const positions: number[] = []
   const cover: number[] = []
-  const indices: number[] = []
-  const ids = new Map<string, number>()
-  const vertex = (e: number, n: number, h: number, kind: CoverClass, wall: boolean) => {
-    const key = `${e},${n},${h.toFixed(3)},${kind},${wall}`
-    let id = ids.get(key)
-    if (id === undefined) {
-      id = positions.length / 3
-      ids.set(key, id)
-      positions.push(e - centre.e, h - datum, -(n - centre.n))
-      cover.push(kind)
-    }
-    return id
+  const vertex = (e: number, n: number, h: number, kind: CoverClass) => {
+    positions.push(e - centre.e, h - datum, -(n - centre.n))
+    cover.push(kind)
+    return positions.length / 3 - 1
   }
-  const quad = (p: number, q: number, r: number, s: number) => indices.push(p, q, s, q, r, s)
-
+  const heights: number[] = []
+  const grid: number[] = []
   for (let j = 0; j < cells; j++) {
     for (let i = 0; i < cells; i++) {
-      const c = cornerAt(i, j)
-      if (!c) continue
-      const [e, n] = [ci0 + i, cj0 + j]
-      const kind = coverAt(e, n)
-      const [sw, se, nw, ne] = [
-        vertex(e, n, c[0], kind, false),
-        vertex(e + 1, n, c[1], kind, false),
-        vertex(e, n + 1, c[2], kind, false),
-        vertex(e + 1, n + 1, c[3], kind, false),
-      ]
-      indices.push(sw, se, nw, se, ne, nw)
-
-      // Each wall once, from the cell west or south of it, and in the colour of the higher side.
-      const side = (
-        [ax, an, ah]: [number, number, number],
-        [bx, bn, bh]: [number, number, number],
-        other: Corners | null,
-        oa: number,
-        ob: number,
-        otherKind: CoverClass,
-      ) => {
-        const [lowA, lowB] = other ? [other[oa]!, other[ob]!] : [Math.min(ah, bh) - SKIRT_M, Math.min(ah, bh) - SKIRT_M]
-        if (Math.abs(lowA - ah) < 1e-3 && Math.abs(lowB - bh) < 1e-3) return
-        const k = other && Math.max(lowA, lowB) > Math.max(ah, bh) ? otherKind : kind
-        quad(
-          vertex(ax, an, ah, k, true),
-          vertex(bx, bn, bh, k, true),
-          vertex(bx, bn, lowB, k, true),
-          vertex(ax, an, lowA, k, true),
-        )
-      }
-      const east = cornerAt(i + 1, j)
-      const north = cornerAt(i, j + 1)
-      if (east || i === cells - 1) side([e + 1, n, c[1]], [e + 1, n + 1, c[3]], east, 0, 2, east ? coverAt(e + 1, n) : kind)
-      if (north || j === cells - 1) side([e, n + 1, c[2]], [e + 1, n + 1, c[3]], north, 0, 1, north ? coverAt(e, n + 1) : kind)
-      if (i === 0) side([e, n, c[0]], [e, n + 1, c[2]], null, 0, 0, kind)
-      if (j === 0) side([e, n, c[0]], [e + 1, n, c[1]], null, 0, 0, kind)
+      const h = at(ci0 + i, cj0 + j)
+      heights.push(h)
+      grid.push(vertex(ci0 + i + 0.5, cj0 + j + 0.5, Number.isNaN(h) ? datum : h, coverAt(ci0 + i, cj0 + j)))
     }
   }
+  const indices: number[] = []
+  const id = (i: number, j: number) => j * cells + i
+  for (let j = 0; j + 1 < cells; j++) {
+    for (let i = 0; i + 1 < cells; i++) {
+      const [sw, se, nw, ne] = [id(i, j), id(i + 1, j), id(i, j + 1), id(i + 1, j + 1)]
+      if (Number.isNaN(heights[sw]! + heights[se]! + heights[nw]! + heights[ne]!)) continue
+      indices.push(grid[sw]!, grid[se]!, grid[nw]!, grid[se]!, grid[ne]!, grid[nw]!)
+    }
+  }
+  // The outer ring, walked once round, each edge with a strip hanging below it.
+  const ring: number[] = []
+  for (let i = 0; i < cells; i++) ring.push(id(i, 0))
+  for (let j = 1; j < cells; j++) ring.push(id(cells - 1, j))
+  for (let i = cells - 2; i >= 0; i--) ring.push(id(i, cells - 1))
+  for (let j = cells - 2; j > 0; j--) ring.push(id(0, j))
+  ring.forEach((top, k) => {
+    const next = ring[(k + 1) % ring.length]!
+    if (Number.isNaN(heights[top]! + heights[next]!)) return
+    const drop = (v: number) => {
+      const [x, y, z] = [positions[grid[v]! * 3]!, positions[grid[v]! * 3 + 1]!, positions[grid[v]! * 3 + 2]!]
+      return vertex(x + centre.e, centre.n - z, y + datum - SKIRT_M, cover[grid[v]!] as CoverClass)
+    }
+    const [a, b] = [grid[top]!, grid[next]!]
+    const [c, d] = [drop(next), drop(top)]
+    indices.push(a, b, d, b, c, d)
+  })
   return {
     positions: Float32Array.from(positions),
     colors: colorsOf(Uint8Array.from(cover)),

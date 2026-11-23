@@ -40,7 +40,7 @@ export interface SceneInput {
   track: Float32Array
   overTrack: Float32Array
   anchors: [number, number, number][]
-  /** The ground around each anchor, drawn exactly. See `padMesh`. */
+  /** The ground around each anchor, drawn from the surface its height comes from. See `padMesh`. */
   pads: Pad[]
   /** Half the patch's width in metres, which sets how far back the camera stands. */
   radius: number

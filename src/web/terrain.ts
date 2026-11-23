@@ -6,7 +6,7 @@ import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
 import { NoData, noteAnswered, sourcesFor, type Source } from './sources.js'
 import { report } from './report.js'
-import { surfaceAt, WALL_M, type CellReader } from './cellSurface.js'
+import { surfaceAt, type CellReader } from './cellSurface.js'
 
 /**
  * Elevation on demand, for measuring user-placed lines.
@@ -418,11 +418,6 @@ function samplerFor(layer: Layer): Sampler {
       const v01 = cellOf(layer, x0, y0 - 1)
       const v11 = cellOf(layer, x0 + 1, y0 - 1)
       if (Number.isNaN(v00 + v10 + v01 + v11)) return cellOf(layer, e, n)
-      // A wall or a roof step rather than a slope: something stands on one side of it, never
-      // halfway up, which is where blending the two would put it.
-      if (Math.max(v00, v10, v01, v11) - Math.min(v00, v10, v01, v11) > WALL_M) {
-        return cellOf(layer, e, n)
-      }
       return v00 * (1 - tx) * (1 - ty) + v10 * tx * (1 - ty) + v01 * (1 - tx) * ty + v11 * tx * ty
     },
   }
