@@ -3,16 +3,18 @@ import type { Pos } from '../shared/grid.js'
 import { toWgs84 } from '../shared/geo.js'
 import { lineHeightAt } from '../shared/scoring.js'
 import {
-  bareGround, ensureTerrain, groundSampler, missingWindows, onBuilding, onWindowActivity, surfaceSampler,
+  bareGround, ensureTerrain, missingWindows, onBuilding, onWindowActivity, standingCell, surfaceSampler,
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
 import {
-  coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Patch, type Readers,
+  COVER, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, type CoverClass, standingHeight, type Patch, type Readers,
 } from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
-import type { Scene3D } from './scene3d.js'
+import type { Pad, Scene3D } from './scene3d.js'
+import { drapeCells } from './cellSurface.js'
+import { intervals, overlay, polyline } from './segments.js'
 import { IMAGERY_SHORT } from './surveys.js'
 
 /**
@@ -102,6 +104,41 @@ let preferred = 1
 
 /** Points along the drawn span. Enough that a 500 m curve reads as a curve. */
 const SPAN_POINTS = 96
+
+/**
+ * Half the side of the exact ground drawn around each anchor, in whole metres.
+ *
+ * Wide enough that the seam with the coarse ground is well away from where anyone is looking when
+ * an anchor is being placed, small enough to rebuild on every nudge.
+ */
+const PAD_HALF = 24
+
+/** The cover of one cell, for colouring the pads as the rest of the ground is coloured. */
+const coverAt = (ci: number, cj: number): CoverClass =>
+  onBuilding(ci + 0.5, cj + 0.5)
+    ? COVER.building
+    : water.covers(ci + 0.5, cj + 0.5)
+      ? COVER.water
+      : COVER.ground
+
+/**
+ * Where the line from p to q is inside the box of cells [ci0, ci1) x [cj0, cj1), as a range of the
+ * way along it, or null when it never is.
+ */
+function clip(p: Pos, q: Pos, ci0: number, cj0: number, ci1: number, cj1: number): [number, number] | null {
+  let lo = 0
+  let hi = 1
+  for (const [from, to, min, max] of [[p.e, q.e, ci0, ci1], [p.n, q.n, cj0, cj1]] as const) {
+    if (from === to) {
+      if (from < min || from > max) return null
+      continue
+    }
+    const [ta, tb] = [(min - from) / (to - from), (max - from) / (to - from)].sort((x, y) => x - y)
+    lo = Math.max(lo, ta!)
+    hi = Math.min(hi, tb!)
+  }
+  return lo < hi ? [lo, hi] : null
+}
 
 /** How far the shadows float over the surface they are laid on, in metres. */
 const SHADOW_LIFT = 0.4
@@ -385,40 +422,52 @@ export function Terrain3D({
       line[i * 3 + 1] = lineHeightAt(anchorA, anchorB, sag, t) - g.datum
       line[i * 3 + 2] = -(a.n + (b.n - a.n) * t - g.centre.n)
     }
+    const ends = [a, b].map((p) => ({ ci: Math.floor(p.e) - PAD_HALF, cj: Math.floor(p.n) - PAD_HALF }))
+    const pads: Pad[] = ends.map(({ ci, cj }) => ({
+      mesh: padMesh(standingCell, coverAt, ci, cj, 2 * PAD_HALF, g.centre, g.datum),
+      bounds: [
+        ci - g.centre.e,
+        ci + 2 * PAD_HALF - g.centre.e,
+        -(cj + 2 * PAD_HALF - g.centre.n),
+        -(cj - g.centre.n),
+      ],
+    }))
+
     // Two shadows, because the ground is drawn under the wood rather than replaced by it: one on
     // the solid ground and roofs, which is where the line runs, and one on the canopy sheet where
-    // there is one. Lifted just clear of each, so both read as lying on a surface rather than in it.
-    const onto = (layer: 'solid' | 'canopy') => {
-      const draped = patch.current
-        ? drape(patch.current, layer, line[0]!, line[2]!, line[line.length - 3]!, line[line.length - 1]!)
-        : new Float32Array(0)
-      for (let i = 1; i < draped.length; i += 3) draped[i] += SHADOW_LIFT - g.datum
-      return draped
-    }
-    // Ended at what each anchor stands on as measured, which the posts start from: next to a wall the
-    // drawn triangle is partway up it, and a post from there would stand for a rig nobody set.
-    const solid = onto('solid')
-    const footAt = (p: Pos, x: number, z: number, nextY: number | undefined) => {
-      const y = groundSampler.sample(p.e, p.n) + SHADOW_LIFT - g.datum
-      return Number.isNaN(y) || nextY === undefined || Math.abs(y - nextY) < 0.01 ? [] : [x, y, z]
-    }
-    const track = Float32Array.from([
-      ...footAt(a, line[0]!, line[2]!, solid[1]),
-      ...solid,
-      ...footAt(b, line[line.length - 3]!, line[line.length - 1]!, solid[solid.length - 2]),
-    ])
-    const overTrack = onto('canopy')
+    // there is one and on the ground where there is not. Each lies on exactly what is drawn under
+    // it -- the pads around the anchors, the coarse mesh between them -- and is lifted just clear.
+    const [x0, z0, x1, z1] = [line[0]!, line[2]!, line[line.length - 3]!, line[line.length - 1]!]
+    const inPads = ends
+      .map(({ ci, cj }) => clip(a, b, ci, cj, ci + 2 * PAD_HALF, cj + 2 * PAD_HALF))
+      .filter((r): r is [number, number] => r !== null)
+    const solid = intervals(inPads.flat(), 0, 1).flatMap(([ta, tb]) => {
+      const mid = (ta + tb) / 2
+      return inPads.some(([p, q]) => mid > p && mid < q)
+        ? drapeCells(standingCell, a.e, a.n, b.e, b.n, ta, tb)
+        : patch.current
+          ? drape(patch.current, 'solid', x0, z0, x1, z1, ta, tb)
+          : []
+    })
+    const sheet = patch.current ? drape(patch.current, 'canopy', x0, z0, x1, z1) : []
+    const point = (t: number, y: number): [number, number, number] => [
+      x0 + (x1 - x0) * t,
+      y + SHADOW_LIFT - g.datum,
+      z0 + (z1 - z0) * t,
+    ]
+    const track = polyline(solid, point)
+    const overTrack = polyline(overlay(solid, sheet), point)
     const anchors: [number, number, number][] = [
       [a.e - g.centre.e, anchorA - g.datum, -(a.n - g.centre.n)],
       [b.e - g.centre.e, anchorB - g.datum, -(b.n - g.centre.n)],
     ]
-    return { line, track, overTrack, anchors, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
+    return { line, track, overTrack, anchors, pads, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
   }
   const spanRef = useRef(spanOf)
   spanRef.current = spanOf
   const redrape = (g: Ground) => {
-    const { line, track, overTrack, anchors } = spanRef.current(g)
-    scene.current?.setLine(line, track, overTrack, anchors)
+    const { line, track, overTrack, anchors, pads } = spanRef.current(g)
+    scene.current?.setLine(line, track, overTrack, anchors, pads)
   }
 
   // Building the ground: the expensive half, and the one that must not run while an anchor is being
@@ -602,8 +651,8 @@ export function Terrain3D({
     .join('_')
   useEffect(() => {
     if (state !== 'ready' || !ground.current) return
-    const { line, track, overTrack, anchors } = spanRef.current(ground.current)
-    scene.current?.setLine(line, track, overTrack, anchors)
+    const { line, track, overTrack, anchors, pads } = spanRef.current(ground.current)
+    scene.current?.setLine(line, track, overTrack, anchors, pads)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineKey, state])
 

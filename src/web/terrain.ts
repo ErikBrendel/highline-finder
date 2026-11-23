@@ -6,6 +6,7 @@ import { tilesForBounds } from '../shared/geo.js'
 import { fetchCached } from './tileCache.js'
 import { NoData, noteAnswered, sourcesFor, type Source } from './sources.js'
 import { report } from './report.js'
+import { surfaceAt, WALL_M, type CellReader } from './cellSurface.js'
 
 /**
  * Elevation on demand, for measuring user-placed lines.
@@ -397,9 +398,6 @@ export function bareGround(e: number, n: number): number {
  * Samples across window boundaries by looking each contributing cell up independently, so a line
  * crossing from one fetched window into the next reads continuously instead of hitting an edge.
  */
-/** A rise between neighbouring 1 m cells steeper than 45 degrees, which no ground slopes at. */
-const WALL_M = 1
-
 function samplerFor(layer: Layer): Sampler {
   return {
     /** The composite cell itself -- roof where there is one, terrain otherwise. */
@@ -407,6 +405,8 @@ function samplerFor(layer: Layer): Sampler {
       return cellOf(layer, e, n)
     },
     sample(e: number, n: number): number {
+      // What things stand on is the cell surface the 3D view draws, so the two cannot disagree.
+      if (layer === 'ground') return surfaceAt(standingCell, e, n)
       const fx = e - 0.5
       const fy = n + 0.5
       const x0 = Math.floor(fx)
@@ -427,6 +427,9 @@ function samplerFor(layer: Layer): Sampler {
     },
   }
 }
+
+/** Standing height of the 1 m cell (ci, cj). */
+export const standingCell: CellReader = (ci, cj) => cellOf('ground', ci + 0.5, cj + 0.5)
 
 export const groundSampler = samplerFor('ground')
 export const surfaceSampler = samplerFor('surface')

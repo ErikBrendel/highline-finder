@@ -2,7 +2,7 @@ import {
   AmbientLight, BufferAttribute, Curve, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
   DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
-  Vector3, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture, Texture,
+  Vector3, Vector4, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture, Texture,
   ClampToEdgeWrapping, SRGBColorSpace,
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -40,6 +40,8 @@ export interface SceneInput {
   track: Float32Array
   overTrack: Float32Array
   anchors: [number, number, number][]
+  /** The ground around each anchor, drawn exactly. See `padMesh`. */
+  pads: Pad[]
   /** Half the patch's width in metres, which sets how far back the camera stands. */
   radius: number
   /** Height to look at, so the camera frames the line rather than the middle of the sky. */
@@ -77,6 +79,12 @@ export interface SceneInput {
  */
 const ORTHO_MIX = 0.45
 
+/** A square of exact ground and where it sits, as x from-to and z from-to in the scene. */
+export interface Pad {
+  mesh: MeshData
+  bounds: [number, number, number, number]
+}
+
 export interface Scene3D {
   dispose(): void
   /**
@@ -95,6 +103,7 @@ export interface Scene3D {
     track: Float32Array,
     overTrack: Float32Array,
     anchors: [number, number, number][],
+    pads: Pad[],
   ): void
   /**
    * Marks where along the span something is being pointed at, or clears it.
@@ -228,8 +237,14 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const orthoMap = { value: null as Texture | null }
   const orthoMix = { value: 0 }
   const orthoRadius = { value: input.radius }
-  const groundMat = new MeshLambertMaterial({ vertexColors: true })
-  groundMat.onBeforeCompile = (shader) => {
+  /** Where the coarse ground is cut away for a pad: x from-to, z from-to. Empty boxes cut nothing. */
+  const holes = { value: [new Vector4(1, 0, 1, 0), new Vector4(1, 0, 1, 0)] }
+  const groundMaterial = (cut: boolean) => {
+  const mat = new MeshLambertMaterial({ vertexColors: true, side: cut ? undefined : DoubleSide })
+  // Two programs from one source: three caches by the hook's text, which is the same for both.
+  mat.customProgramCacheKey = () => (cut ? 'ground' : 'pad')
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.holes = holes
     shader.uniforms.orthoMap = orthoMap
     shader.uniforms.orthoMix = orthoMix
     shader.uniforms.orthoRadius = orthoRadius
@@ -239,13 +254,15 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         `#include <common>
          uniform float orthoRadius;
          varying vec2 vOrthoUv;
-         varying float vOrthoUp;`,
+         varying float vOrthoUp;
+         varying vec2 vGroundXZ;`,
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
          vOrthoUv = (position.xz + orthoRadius) / (2.0 * orthoRadius);
-         vOrthoUp = abs(normalize(normal).y);`,
+         vOrthoUp = abs(normalize(normal).y);
+         vGroundXZ = position.xz;`,
       )
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -253,8 +270,18 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         `#include <common>
          uniform sampler2D orthoMap;
          uniform float orthoMix;
+         uniform vec4 holes[2];
          varying vec2 vOrthoUv;
-         varying float vOrthoUp;`,
+         varying float vOrthoUp;
+         varying vec2 vGroundXZ;`,
+      )
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+         ${cut ? `for (int i = 0; i < 2; i++) {
+           vec4 h = holes[i];
+           if (vGroundXZ.x > h.x && vGroundXZ.x < h.y && vGroundXZ.y > h.z && vGroundXZ.y < h.w) discard;
+         }` : ''}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -268,8 +295,32 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
          }`,
       )
   }
+  return mat
+  }
+  const groundMat = groundMaterial(true)
+  const padMat = groundMaterial(false)
+
   const ground = new Mesh(geometryOf(input.mesh), groundMat)
   scene.add(ground)
+
+  let pads: Mesh[] = []
+  const setPads = (next: Pad[]) => {
+    for (const pad of pads) {
+      scene.remove(pad)
+      pad.geometry.dispose()
+    }
+    pads = next.map((p) => {
+      const mesh = new Mesh(geometryOf(p.mesh), padMat)
+      mesh.scale.y = exaggeration
+      scene.add(mesh)
+      return mesh
+    })
+    holes.value.forEach((h, i) => {
+      const b = next[i]?.bounds
+      if (b) h.set(...b)
+      else h.set(1, 0, 1, 0)
+    })
+  }
 
   /**
    * The vegetation, over the ground rather than instead of it.
@@ -537,6 +588,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   /** Everything whose height is baked into its geometry rather than into a scale. */
   const rescale = (k: number) => {
     ground.scale.y = k
+    for (const pad of pads) pad.scale.y = k
     canopy.scale.y = k
     spanMesh.geometry.dispose()
     spanMesh.geometry = tubeAlong(points(line, k), tubeRadius, 6)
@@ -562,6 +614,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     drawStems(k)
     drawHover()
   }
+  setPads(input.pads)
   rescale(exaggeration)
 
   const camera = new PerspectiveCamera(50, 1, 1, input.radius * 8)
@@ -847,7 +900,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       hoverAt = t
       drawHover()
     },
-    setLine(nextLine, nextTrack, nextOver, nextAnchors) {
+    setLine(nextLine, nextTrack, nextOver, nextAnchors, nextPads) {
+      setPads(nextPads)
       line = nextLine
       track = nextTrack
       overTrack = nextOver
@@ -868,6 +922,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       controls.dispose()
       disposeProps(propsRoot)
+      setPads([])
       for (const g of [
         ground.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
         ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
@@ -881,7 +936,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       orthoMap.value?.dispose()
       for (const m of [
-        ground.material as MeshLambertMaterial, canopyMat, spanMat, trackMat, overMat,
+        groundMat, padMat, canopyMat, spanMat, trackMat, overMat,
         ballMat, focusMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {

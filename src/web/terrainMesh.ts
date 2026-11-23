@@ -1,4 +1,6 @@
 import type { Pos } from '../shared/grid.js'
+import { cornersOf, type CellReader, type Corners } from './cellSurface.js'
+import { crossings, intervals, type Seg } from './segments.js'
 
 /**
  * A square of ground, turned into something three.js can draw.
@@ -281,45 +283,27 @@ export function colorsOf(cover: Uint8Array): Float32Array {
 export type MeshLayer = 'solid' | 'canopy'
 
 /**
- * The straight line from (x0, z0) to (x1, z1) laid onto one drawn surface, three floats a point.
+ * The line from (x0, z0) to (x1, z1), between `from` and `to` of the way along, laid onto the
+ * coarse mesh as meshOf draws it.
  *
- * Exact against the mesh rather than resampled from the survey: a point wherever the line crosses
- * a grid line or a triangle's diagonal, and the triangle's own plane in between, so the shadow
- * lies on exactly what is drawn. Where neighbouring cells belong to different surfaces -- a wall,
- * the edge of the canopy sheet -- both heights are kept at the same spot, which makes a vertical
- * step instead of a ramp cut through the corner. Undrawn cells are left out.
+ * Exact: a piece wherever the line crosses a grid line or a triangle's diagonal, each on one
+ * triangle's plane. `'solid'` is the ground and the roofs; `'canopy'` is only the sheet over the
+ * trees, with nothing where there is no sheet. Undrawn cells are left out.
  */
 export function drape(
-  patch: Patch, layer: MeshLayer, x0: number, z0: number, x1: number, z1: number,
-): Float32Array {
+  patch: Patch, layer: MeshLayer, x0: number, z0: number, x1: number, z1: number, from = 0, to = 1,
+): Seg[] {
   const { side, step, height, ground, cover } = patch
   const half = ((side - 1) * step) / 2
   const u = (t: number) => (x0 + (x1 - x0) * t + half) / step
   const v = (t: number) => (z0 + (z1 - z0) * t + half) / step
+  const cuts: number[] = []
+  crossings(u(0), u(1), cuts)
+  crossings(v(0), v(1), cuts)
+  crossings(u(0) + v(0), u(1) + v(1), cuts)
 
-  const cuts = [0, 1]
-  const crossings = (from: number, to: number) => {
-    if (from === to) return
-    for (let k = Math.ceil(Math.min(from, to)); k <= Math.max(from, to); k++) {
-      cuts.push((k - from) / (to - from))
-    }
-  }
-  crossings(u(0), u(1))
-  crossings(v(0), v(1))
-  crossings(u(0) + v(0), u(1) + v(1))
-  cuts.sort((p, q) => p - q)
-
-  const out: number[] = []
-  const push = (x: number, y: number, z: number) => {
-    const n = out.length
-    if (n && Math.abs(out[n - 3]! - x) + Math.abs(out[n - 2]! - y) + Math.abs(out[n - 1]! - z) < 1e-6) {
-      return
-    }
-    out.push(x, y, z)
-  }
-  for (let k = 0; k + 1 < cuts.length; k++) {
-    const [ta, tb] = [cuts[k]!, cuts[k + 1]!]
-    if (tb - ta < 1e-9) continue
+  const out: Seg[] = []
+  for (const [ta, tb] of intervals(cuts, from, to)) {
     const mid = (ta + tb) / 2
     const col = Math.floor(u(mid))
     const row = Math.floor(v(mid))
@@ -327,24 +311,26 @@ export function drape(
     const a = row * side + col
     const quad = [a, a + 1, a + side, a + side + 1]
     // As meshOf draws it: the canopy sheet only over cells that are canopy at all four corners.
-    const sheet = layer === 'canopy' && quad.every((i) => cover[i] === COVER.canopy)
+    const sheet = quad.every((i) => cover[i] === COVER.canopy)
+    if (layer === 'canopy' && !sheet) continue
     const [ha, hb, hc, hd] = quad.map((i) =>
-      sheet || cover[i] === COVER.building ? height[i]! : ground[i]!,
+      layer === 'canopy' || cover[i] === COVER.building ? height[i]! : ground[i]!,
     ) as [number, number, number, number]
     if (Number.isNaN(ha + hb + hc + hd)) continue
     // Split along b-c, as meshOf's indices are.
     const lower = u(mid) - col + v(mid) - row <= 1
-    for (const t of [ta, tb]) {
+    const at = (t: number) => {
       const du = u(t) - col
       const dv = v(t) - row
-      const y = lower
+      return lower
         ? ha + (hb - ha) * du + (hc - ha) * dv
         : hd + (hc - hd) * (1 - du) + (hb - hd) * (1 - dv)
-      push(x0 + (x1 - x0) * t, y, z0 + (z1 - z0) * t)
     }
+    out.push({ ta, tb, ya: at(ta), yb: at(tb) })
   }
-  return Float32Array.from(out)
+  return out
 }
+
 
 export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): MeshData {
   const { side, step, height, ground, cover } = patch
@@ -457,3 +443,98 @@ function skirt(
   colors.set(footColors, sheetColors.length)
   return { positions, colors, indices: Uint32Array.from(indices) }
 }
+
+/**
+ * The cell surface over a square of whole cells, as the ground is drawn around an anchor.
+ *
+ * The rest of the ground is a grid of one to two metres whose vertices fall wherever they fall, so
+ * every wall in it is a ramp a vertex wide and up to half a step out of place. That is fine to look
+ * at and wrong to stand on: an anchor a hand's width from a wall disappears into the ramp. Around
+ * each anchor the ground is drawn from the very function its height comes from, cell by cell, with
+ * the walls vertical and exactly on the cell boundaries -- see cellSurface.ts.
+ *
+ * `ci0`, `cj0` is the south-west cell, `cells` a side. Vertices are shared between cells that meet
+ * at the same height, so continuous ground shades smoothly; walls get their own, so they shade flat.
+ * A skirt hangs from the outer edge to close the seam with the coarse ground around it.
+ */
+export function padMesh(
+  at: CellReader,
+  coverAt: (ci: number, cj: number) => CoverClass,
+  ci0: number,
+  cj0: number,
+  cells: number,
+  centre: Pos,
+  datum: number,
+): MeshData {
+  const corners: (Corners | null)[] = []
+  for (let j = 0; j < cells; j++) for (let i = 0; i < cells; i++) corners.push(cornersOf(at, ci0 + i, cj0 + j))
+  const cornerAt = (i: number, j: number) =>
+    i < 0 || j < 0 || i >= cells || j >= cells ? null : corners[j * cells + i]!
+
+  const positions: number[] = []
+  const cover: number[] = []
+  const indices: number[] = []
+  const ids = new Map<string, number>()
+  const vertex = (e: number, n: number, h: number, kind: CoverClass, wall: boolean) => {
+    const key = `${e},${n},${h.toFixed(3)},${kind},${wall}`
+    let id = ids.get(key)
+    if (id === undefined) {
+      id = positions.length / 3
+      ids.set(key, id)
+      positions.push(e - centre.e, h - datum, -(n - centre.n))
+      cover.push(kind)
+    }
+    return id
+  }
+  const quad = (p: number, q: number, r: number, s: number) => indices.push(p, q, s, q, r, s)
+
+  for (let j = 0; j < cells; j++) {
+    for (let i = 0; i < cells; i++) {
+      const c = cornerAt(i, j)
+      if (!c) continue
+      const [e, n] = [ci0 + i, cj0 + j]
+      const kind = coverAt(e, n)
+      const [sw, se, nw, ne] = [
+        vertex(e, n, c[0], kind, false),
+        vertex(e + 1, n, c[1], kind, false),
+        vertex(e, n + 1, c[2], kind, false),
+        vertex(e + 1, n + 1, c[3], kind, false),
+      ]
+      indices.push(sw, se, nw, se, ne, nw)
+
+      // Each wall once, from the cell west or south of it, and in the colour of the higher side.
+      const side = (
+        [ax, an, ah]: [number, number, number],
+        [bx, bn, bh]: [number, number, number],
+        other: Corners | null,
+        oa: number,
+        ob: number,
+        otherKind: CoverClass,
+      ) => {
+        const [lowA, lowB] = other ? [other[oa]!, other[ob]!] : [Math.min(ah, bh) - SKIRT_M, Math.min(ah, bh) - SKIRT_M]
+        if (Math.abs(lowA - ah) < 1e-3 && Math.abs(lowB - bh) < 1e-3) return
+        const k = other && Math.max(lowA, lowB) > Math.max(ah, bh) ? otherKind : kind
+        quad(
+          vertex(ax, an, ah, k, true),
+          vertex(bx, bn, bh, k, true),
+          vertex(bx, bn, lowB, k, true),
+          vertex(ax, an, lowA, k, true),
+        )
+      }
+      const east = cornerAt(i + 1, j)
+      const north = cornerAt(i, j + 1)
+      if (east || i === cells - 1) side([e + 1, n, c[1]], [e + 1, n + 1, c[3]], east, 0, 2, east ? coverAt(e + 1, n) : kind)
+      if (north || j === cells - 1) side([e, n + 1, c[2]], [e + 1, n + 1, c[3]], north, 0, 1, north ? coverAt(e, n + 1) : kind)
+      if (i === 0) side([e, n, c[0]], [e, n + 1, c[2]], null, 0, 0, kind)
+      if (j === 0) side([e, n, c[0]], [e + 1, n, c[1]], null, 0, 0, kind)
+    }
+  }
+  return {
+    positions: Float32Array.from(positions),
+    colors: colorsOf(Uint8Array.from(cover)),
+    indices: Uint32Array.from(indices),
+  }
+}
+
+/** How far the edge of a pad hangs down, to cover the seam with the coarse ground beside it. */
+const SKIRT_M = 4

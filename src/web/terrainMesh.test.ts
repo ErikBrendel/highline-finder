@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { overlay, polyline, type Seg } from './segments.js'
 import { COVER, COVER_RGB, colorsOf, coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
@@ -294,20 +295,24 @@ describe('drape', () => {
     surface: (e) => (e >= centre.e + 1 ? 60 : 50),
   }))
 
+  /** Heights at `x` along a drape of the x axis from -2 to 2, both of them at a step. */
+  const heightsAt = (segs: Seg[], x: number) => {
+    const d = polyline(segs, (t, y) => [t * 4 - 2, y, 0])
+    return [...d].filter((_, i) => i % 3 === 1 && Math.abs(d[i - 1]! - x) < 1e-9)
+  }
+
   it('lies on the triangles as drawn, the wall across its cell included', () => {
     const d = drape(patch, 'solid', -2, 0.5, 2, 0.5)
-    const at = (x: number) => [...d].filter((_, i) => i % 3 === 1 && Math.abs(d[i - 1]! - x) < 1e-9)
-    expect(at(-1)).toEqual([50])
-    expect(at(0.5)).toEqual([55])
-    expect(at(2)).toEqual([60])
+    expect(heightsAt(d, -1)).toEqual([50])
+    expect(heightsAt(d, 0.5)).toEqual([55])
+    expect(heightsAt(d, 2)).toEqual([60])
   })
 
-  it('lies on the canopy sheet only where the sheet is drawn', () => {
+  it('lies on the canopy sheet where it is drawn, and on the ground beyond it', () => {
     const wood = samplePatch(centre, 2, 5, flat({ surface: (e) => (e <= centre.e ? 70 : 50) }))
-    const d = drape(wood, 'canopy', -2, 0, 2, 0)
-    const at = (x: number) => [...d].filter((_, i) => i % 3 === 1 && Math.abs(d[i - 1]! - x) < 1e-9)
-    expect(at(-1)).toEqual([70])
-    expect(at(0)).toEqual([70, 50])
-    expect(at(2)).toEqual([50])
+    const d = overlay(drape(wood, 'solid', -2, 0, 2, 0), drape(wood, 'canopy', -2, 0, 2, 0))
+    expect(heightsAt(d, -1)).toEqual([70])
+    expect(heightsAt(d, 0)).toEqual([70, 50])
+    expect(heightsAt(d, 2)).toEqual([50])
   })
 })
