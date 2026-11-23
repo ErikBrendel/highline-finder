@@ -22,7 +22,7 @@ const TIERS: { id: Tier; label: string; hint: string }[] = [
   { id: 'searched', label: 'Searched', hint: 'lines already found, ready to browse' },
   { id: 'buildings', label: 'Full measurement', hint: 'ground, canopy, and roofs to anchor on' },
   { id: 'measured', label: 'Ground and canopy', hint: 'no building outlines, a roof reads as trees' },
-  { id: 'terrain', label: 'Terrain only', hint: 'plan by hand, nothing known about the trees' },
+  { id: 'terrain', label: 'Terrain only', hint: 'nothing known about trees or buildings' },
 ]
 
 /**
@@ -138,7 +138,11 @@ export function CoverageMap({ regions }: { regions: Region[] | null }) {
             {here.canopy ? 'measured' : 'not published where a browser can read it'}
           </Row>
           <Row on={here.buildings} label="Buildings">
-            {here.buildings ? 'outlines, roofs to anchor on' : 'not loaded, a roof reads as trees'}
+            {here.buildings
+              ? 'outlines, roofs to anchor on'
+              : here.canopy
+                ? 'no outlines, a roof reads as trees'
+                : 'not seen at all'}
           </Row>
           <Row on={here.shade === 'survey'} label="Hillshade">
             {here.shade === 'survey' ? "1 m, the state's own" : '5 m, basemap.de'}

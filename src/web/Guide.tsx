@@ -145,8 +145,8 @@ const PlannerGuide = () => (
       <li>Terrain and canopy, published free and open by the state surveys.</li>
       <li>
         Buildings in Brandenburg only, from its 3D city model: there a roof counts as ground you can
-        anchor on, at the height the survey measured it. Elsewhere a roof is just something tall,
-        and reads as trees.
+        anchor on, at the height the survey measured it. Elsewhere a roof reads as trees where the
+        canopy is measured, and is not seen at all where it is not.
       </li>
       <li>How much there is to measure against differs by state:</li>
     </ul>

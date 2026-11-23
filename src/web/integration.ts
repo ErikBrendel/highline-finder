@@ -30,7 +30,7 @@ export interface StateFacts {
   /**
    * Whether building outlines are known, so a roof counts as somewhere to stand. Only Brandenburg's
    * city model is loaded (see terrain.ts); elsewhere a roof is just something tall in the surface
-   * model, which reads as canopy.
+   * model, which reads as canopy -- or, with no surface model, is not seen at all.
    */
   buildings: boolean
   /** Relief: the state's own at a metre, or the federal one at five. */
