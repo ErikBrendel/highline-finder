@@ -472,7 +472,11 @@ export function Terrain3D({
     const readers = surfaceOf(false)
     const drawn = apart ? surfaceOf(true) : readers
     const pads: Pad[] = ends.map(({ ci, cj }, k) => ({
-      mesh: padMesh(drawn[k]!, padCover(apart), ci, cj, 2 * PAD_HALF, g.centre, g.datum),
+      mesh: padMesh(
+        drawn[k]!, padCover(apart), ci, cj, 2 * PAD_HALF, g.centre, g.datum,
+        (e, n) => (patch.current ? solidAt(patch.current, e - g.centre.e, -(n - g.centre.n), apart ? 'earth' : 'solid') : NaN),
+        PAD_OVERLAP,
+      ),
       // Cut a little inside the pad's edge: two surfaces meeting exactly on a line leave a crack of
       // unpainted pixels along it, where an overlap leaves none.
       bounds: [

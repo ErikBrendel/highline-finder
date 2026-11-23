@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { overlay, polyline, type Seg } from './segments.js'
-import { COVER, COVER_RGB, CUT_RGB, colorsOf, coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, CUT_RGB, colorsOf, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -342,5 +342,23 @@ describe('drape', () => {
     expect(heightsAt(d, -1)).toEqual([70])
     expect(heightsAt(d, 0)).toEqual([70, 50])
     expect(heightsAt(d, 2)).toEqual([50])
+  })
+})
+
+describe('padMesh', () => {
+  it('hangs a curtain from its edge to the coarse ground it is cut into, all the way round', () => {
+    const cells = 10
+    const inset = 0.25
+    const { positions: p, indices } = padMesh(() => 20, () => COVER.ground, 0, 0, cells, { e: 0, n: 0 }, 0, () => 12, inset)
+    let wall = 0
+    for (let t = 0; t < indices.length; t += 3) {
+      const [a, b, c] = [indices[t]! * 3, indices[t + 1]! * 3, indices[t + 2]! * 3]
+      const u = [p[b]! - p[a]!, p[b + 1]! - p[a + 1]!, p[b + 2]! - p[a + 2]!]
+      const v = [p[c]! - p[a]!, p[c + 1]! - p[a + 1]!, p[c + 2]! - p[a + 2]!]
+      const normal = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!]
+      if (Math.abs(normal[1]!) < 1e-6) wall += Math.hypot(...normal) / 2
+    }
+    // Both faces of a ribbon 8 m tall round the line the coarse ground is cut along.
+    expect(wall).toBeCloseTo(2 * 4 * (cells - 1 - 2 * inset) * 8, 3)
   })
 })

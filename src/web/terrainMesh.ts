@@ -1,5 +1,5 @@
 import type { Pos } from '../shared/grid.js'
-import type { CellReader } from './cellSurface.js'
+import { surfaceAt, type CellReader } from './cellSurface.js'
 import { crossings, intervals, type Seg } from './segments.js'
 
 /**
@@ -528,6 +528,9 @@ function skirt(
   return { positions, colors, indices: Uint32Array.from(indices) }
 }
 
+/** Metres between the posts of the curtain round a pad, finer than the coarse ground it meets. */
+const CURTAIN_STEP = 0.25
+
 /**
  * The cell surface over a square of whole cells, as the ground is drawn around an anchor.
  *
@@ -539,7 +542,9 @@ function skirt(
  *
  * `ci0`, `cj0` is the south-west cell and `cells` the number a side; the square drawn runs from
  * centre to centre. `at` is the caller's to give the outer ring the coarse ground's heights, so the
- * two meet without a step.
+ * two meet at the ring's vertices. Between them the coarse ground goes its own way, a metre and more
+ * on a cliff, so a curtain hangs from the pad to `coarseAt` along the line `inset` inside its edge
+ * where the coarse ground is cut away, closing the slit the two would leave there.
  */
 export function padMesh(
   at: CellReader,
@@ -549,6 +554,8 @@ export function padMesh(
   cells: number,
   centre: Pos,
   datum: number,
+  coarseAt: (e: number, n: number) => number,
+  inset: number,
 ): MeshData {
   const positions: number[] = []
   const cover: number[] = []
@@ -575,6 +582,28 @@ export function padMesh(
       indices.push(grid[sw]!, grid[se]!, grid[nw]!, grid[se]!, grid[ne]!, grid[nw]!)
     }
   }
+  const [lo, hi] = [0.5 + inset, cells - 0.5 - inset]
+  const corners = [[lo, lo], [hi, lo], [hi, hi], [lo, hi]] as const
+  const rim: [number, number][] = corners.flatMap(([u0, v0], k) => {
+    const [u1, v1] = corners[(k + 1) % 4]!
+    const steps = Math.ceil((hi - lo) / CURTAIN_STEP)
+    return Array.from({ length: steps }, (_, s): [number, number] => [
+      ci0 + u0 + ((u1 - u0) * s) / steps,
+      cj0 + v0 + ((v1 - v0) * s) / steps,
+    ])
+  })
+  const hung = rim.map(([e, n]) => {
+    const kind = coverAt(Math.floor(e), Math.floor(n))
+    return [surfaceAt(at, e, n), coarseAt(e, n)].map((h) => vertex(e, n, Number.isNaN(h) ? datum : h, kind))
+  })
+  rim.forEach(([e, n], k) => {
+    const next = (k + 1) % rim.length
+    const [e1, n1] = rim[next]!
+    if ([surfaceAt(at, e, n), coarseAt(e, n), surfaceAt(at, e1, n1), coarseAt(e1, n1)].some(Number.isNaN)) return
+    const [[a, b], [c, d]] = [hung[k]!, hung[next]!]
+    // Both windings: the slit is seen from outside the pad and from in it.
+    indices.push(a, b, c, c, b, d, a, c, b, c, d, b)
+  })
   return {
     positions: Float32Array.from(positions),
     colors: colorsOf(Uint8Array.from(cover)),
