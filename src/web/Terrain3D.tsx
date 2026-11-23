@@ -219,11 +219,16 @@ export function Terrain3D({
   sagRatio: number
   /** Where along the span the profile chart's pointer is, in metres, or null when it has left. */
   hoverAt?: number | null
-  /** Omit to make the view read-only; with it, a tapped anchor can be moved in steps. */
+  /** Omit to make the view read-only; with it, a tapped anchor can be stepped or dragged. */
   onMoveAnchor?: (which: 'a' | 'b', at: LatLon) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
   const scene = useRef<Scene3D | null>(null)
+  // Read by the scene when an anchor is dropped or carried, which outlives the render that built it.
+  const moveRef = useRef(onMoveAnchor)
+  moveRef.current = onMoveAnchor
+  const sagRef = useRef(sagRatio)
+  sagRef.current = sagRatio
   const ground = useRef<Ground | null>(null)
   /** The heights as read, kept so a lake arriving later repaints them without reading them again. */
   const patch = useRef<Patch | null>(null)
@@ -605,6 +610,9 @@ export function Terrain3D({
               setPicked((cur) => (cur === end ? null : end))
             }
           : undefined,
+        onAnchorMoved: (which, x, z) => moveRef.current?.(which === 0 ? 'a' : 'b', toWgs84(g.centre.e + x, g.centre.n - z)),
+        onElsewhereTapped: () => setPicked(null),
+        sagRatio: () => sagRef.current,
       })
       setState('ready')
 
@@ -827,7 +835,7 @@ export function Terrain3D({
           {coverPending && ' finding water and roads…'}
           {measured < 0.995 && ` ${Math.round((1 - measured) * 100)} % unsurveyed ·`}
           {onMoveAnchor
-            ? ' tap an anchor to move it in steps · drag to turn'
+            ? ' tap an anchor to pick it, then drag it or step it · drag elsewhere to turn'
             : ' drag to turn'}
         </div>
       )}

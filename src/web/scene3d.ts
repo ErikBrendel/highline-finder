@@ -49,6 +49,12 @@ export interface SceneInput {
   exaggeration: number
   /** Called when an anchor is tapped. Omit to make the anchors inert. */
   onAnchorTapped?: (which: 0 | 1) => void
+  /** Called when the focused anchor is dropped somewhere else, with where, from the patch centre. */
+  onAnchorMoved?: (which: 0 | 1, x: number, z: number) => void
+  /** Called when the view is tapped anywhere but on an anchor. */
+  onElsewhereTapped?: () => void
+  /** Sag as a fraction of span, as it is now, for drawing the line while an anchor is carried. */
+  sagRatio: () => number
   /**
    * Where the camera stood relative to what it was looking at, from a scene being replaced.
    *
@@ -156,6 +162,18 @@ const FOCUS_DISTANCE = 30
 
 /** How close the camera may come to a focused anchor, in metres. */
 const FOCUS_NEAREST = 2
+
+/** How near an anchor a press takes it, in screen pixels: a fingertip, not the few the ball covers. */
+const GRAB_PX = 28
+
+/** How far a press may wander and still be a tap rather than a drag, in screen pixels. */
+const TAP_SLOP_PX = 5
+
+/** How much larger an anchor is drawn under the mouse. */
+const HOVER_GROWTH = 1.6
+
+/** Points along a span being dragged. Fewer than the measured one; it is only a preview. */
+const DRAG_SEGMENTS = 48
 
 /**
  * The canvas shape the default camera height was chosen against.
@@ -516,21 +534,29 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const ballGeom = new SphereGeometry(1, 14, 10)
   const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
   const focusMat = new MeshBasicMaterial({ color: '#f43f5e' })
-  // A hit sphere several times the drawn one, invisible. The drawn anchor is a couple of metres
-  // across on a patch hundreds of metres wide, which is a few pixels -- fine to look at, impossible
-  // to grab, and hopeless with a finger.
-  const grabGeom = new SphereGeometry(1, 8, 6)
-  const grabMat = new MeshBasicMaterial({ visible: false })
+  const hoverMat = new MeshBasicMaterial({ color: '#fb923c' })
   const balls: Mesh[] = []
-  const grabs: Mesh[] = []
   for (const [x, , z] of anchors) {
     const ball = new Mesh(ballGeom, ballMat)
     ball.position.set(x, 0, z)
     scene.add(ball)
     balls.push(ball)
-    const grab = new Mesh(grabGeom, grabMat)
-    scene.add(grab)
-    grabs.push(grab)
+  }
+  /** Which anchor the camera is held on, and whether it is still on its way there or back. */
+  let focused: 0 | 1 | null = null
+  let travelling = false
+  /** The anchor under the mouse, drawn larger and in its own colour so it reads as something to take. */
+  let hovered: 0 | 1 | null = null
+  const styleBalls = () =>
+    balls.forEach((ball, i) => {
+      ball.material = i === hovered ? hoverMat : i === focused ? focusMat : ballMat
+      ball.scale.setScalar(tubeRadius * 3 * (i === hovered ? HOVER_GROWTH : 1))
+    })
+
+  // Clear of the ball rather than on it, so the letter never sits over the thing it names.
+  const placeLabel = (i: number) => {
+    const at = balls[i]!.position
+    labels[i]?.position.set(at.x, at.y + tubeRadius * 9, at.z)
   }
 
   /**
@@ -613,12 +639,9 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     }
     balls.forEach((ball, i) => {
       ball.position.set(anchors[i]![0], anchors[i]![1] * k, anchors[i]![2])
-      ball.scale.setScalar(tubeRadius * 3)
-      grabs[i]!.position.copy(ball.position)
-      grabs[i]!.scale.setScalar(tubeRadius * 11)
-      // Clear of the ball rather than on it, so the letter never sits over the thing it names.
-      labels[i]?.position.set(ball.position.x, ball.position.y + tubeRadius * 9, ball.position.z)
+      placeLabel(i)
     })
+    styleBalls()
     labels.forEach((l, i) => {
       l.visible = !!anchors[i]
     })
@@ -684,25 +707,66 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   controls.addEventListener('end', resumeLater)
 
   /**
-   * Tapping an anchor, which hands it to the step controls beside this view.
+   * Tapping an anchor hands it to the step controls beside this view; once it is picked, it can
+   * also be dragged onto the ground, and a tap anywhere else lets it go again.
    *
-   * Not dragging: over terrain hundreds of metres across a drag puts an anchor within a metre at
-   * best, and on a pitched roof the ray flips between roof and ground.
-   *
-   * Registered in the capture phase so a press on an anchor is decided before OrbitControls sees the
-   * event, and stopped there -- otherwise the same gesture would turn the camera as well.
+   * An anchor is taken within a finger's width of where it is drawn, not by its few pixels of
+   * sphere. Registered in the capture phase so a press on an anchor is decided before OrbitControls
+   * sees the event, and stopped there -- otherwise the same gesture would turn the camera as well.
    */
   const raycaster = new Raycaster()
   const pointer = new Vector2()
-  let pressed: 0 | 1 | null = null
+  /** The anchor pressed, and where the press began, in client pixels. */
+  let pressed: { which: 0 | 1; x: number; y: number } | null = null
+  /** A press on the view itself, which is a tap elsewhere if it is let go where it began. */
+  let pressedElsewhere: { x: number; y: number } | null = null
+  let dragging = false
 
-  const aim = (ev: PointerEvent) => {
+  const aimAt = (x: number, y: number) => {
     const r = canvas.getBoundingClientRect()
-    pointer.set(
-      ((ev.clientX - r.left) / r.width) * 2 - 1,
-      -((ev.clientY - r.top) / r.height) * 2 + 1,
-    )
+    pointer.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1)
     raycaster.setFromCamera(pointer, camera)
+  }
+
+  /** The anchor drawn within reach of a point on the screen, the nearer if both are. */
+  const anchorAt = (x: number, y: number): 0 | 1 | null => {
+    const r = canvas.getBoundingClientRect()
+    let best: 0 | 1 | null = null
+    let bestDistance = GRAB_PX
+    balls.forEach((ball, i) => {
+      if (!anchors[i]) return
+      const p = ball.position.clone().project(camera)
+      if (p.z > 1) return
+      const d = Math.hypot(r.left + ((p.x + 1) / 2) * r.width - x, r.top + ((1 - p.y) / 2) * r.height - y)
+      if (d <= bestDistance) {
+        best = i as 0 | 1
+        bestDistance = d
+      }
+    })
+    return best
+  }
+
+  /** The line as it would hang from the anchors where they are drawn, while one is carried. */
+  const preview = () => {
+    const [p, q] = [balls[0]!.position, balls[1]!.position]
+    const sag = input.sagRatio() * Math.hypot(q.x - p.x, q.z - p.z) * exaggeration
+    const pts = Array.from({ length: DRAG_SEGMENTS }, (_, i) => {
+      const t = i / (DRAG_SEGMENTS - 1)
+      return new Vector3(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t - 4 * sag * t * (1 - t), p.z + (q.z - p.z) * t)
+    })
+    spanMesh.geometry.dispose()
+    spanMesh.geometry = tubeAlong(pts, tubeRadius, 6)
+  }
+
+  /** Carries the pressed anchor to the ground under a point on the screen. */
+  const carry = (x: number, y: number) => {
+    if (!pressed) return
+    aimAt(x, y)
+    const hit = raycaster.intersectObjects([ground, buildings, ...pads], false)[0]
+    if (!hit) return
+    balls[pressed.which]!.position.copy(hit.point)
+    placeLabel(pressed.which)
+    preview()
   }
 
   /** Where a mouse is, so the frame loop can say whether it is over something it can pick up. */
@@ -710,10 +774,13 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
 
   const onDown = (ev: PointerEvent) => {
     if (!input.onAnchorTapped) return
-    aim(ev)
-    const hit = raycaster.intersectObjects(grabs, false)[0]
-    if (!hit) return
-    pressed = grabs.indexOf(hit.object as Mesh) as 0 | 1
+    const which = anchorAt(ev.clientX, ev.clientY)
+    if (which === null) {
+      pressedElsewhere = { x: ev.clientX, y: ev.clientY }
+      return
+    }
+    pressed = { which, x: ev.clientX, y: ev.clientY }
+    dragging = false
     controls.enabled = false
     pause()
     canvas.setPointerCapture(ev.pointerId)
@@ -722,21 +789,42 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   }
 
   const onMove = (ev: PointerEvent) => {
-    if (pressed !== null) return ev.stopPropagation()
-    // A cursor that changes over an anchor is the only thing that says it can be tapped. Mouse
-    // only: a finger has no hover, and there is nothing to show it.
+    // A larger ball in its own colour, and a cursor that changes, are what say an anchor can be
+    // taken. Mouse only: a finger has no hover, and there is nothing to show it.
     hover = ev.pointerType === 'mouse' && input.onAnchorTapped ? { x: ev.clientX, y: ev.clientY } : null
+    if (!pressed) return
+    ev.stopPropagation()
+    if (pressed.which !== focused || !input.onAnchorMoved) return
+    if (!dragging && Math.hypot(ev.clientX - pressed.x, ev.clientY - pressed.y) < TAP_SLOP_PX) return
+    dragging = true
+    hovered = pressed.which
+    styleBalls()
+    canvas.style.cursor = 'grabbing'
+    carry(ev.clientX, ev.clientY)
   }
 
   const onUp = (ev: PointerEvent) => {
-    if (pressed === null) return
+    const elsewhere = pressedElsewhere
+    pressedElsewhere = null
+    if (!pressed) {
+      const still = elsewhere && Math.hypot(ev.clientX - elsewhere.x, ev.clientY - elsewhere.y) < TAP_SLOP_PX
+      if (still && ev.type === 'pointerup' && focused !== null) input.onElsewhereTapped?.()
+      return
+    }
     ev.stopPropagation()
-    const which = pressed
+    const { which } = pressed
     pressed = null
     controls.enabled = true
     resumeLater()
     if (canvas.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId)
-    input.onAnchorTapped?.(which)
+    if (!dragging) return input.onAnchorTapped?.(which)
+    dragging = false
+    hovered = null
+    const at = balls[which]!.position.clone()
+    if (ev.type === 'pointerup') input.onAnchorMoved?.(which, at.x, at.z)
+    // Back where it was until the caller answers with the line as it now is, or for good if cancelled.
+    rescale(exaggeration)
+    if (ev.type === 'pointerup') balls[which]!.position.copy(at)
   }
 
   canvas.addEventListener('pointerdown', onDown, { capture: true })
@@ -773,10 +861,6 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       Math.max(focused === null ? 0.45 : 0.04, camera.position.distanceTo(controls.target) / startedAt),
     )
 
-  /** Which anchor the camera is held on, and whether it is still on its way there or back. */
-  let focused: 0 | 1 | null = null
-  let travelling = false
-
   /**
    * Eases the camera towards the focused anchor, or home to the whole line.
    *
@@ -785,7 +869,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
    * viewer's to zoom.
    */
   const steer = () => {
-    if (focused === null && !travelling) return
+    // Held still under a drag: following the ball would move the ground out from under the pointer.
+    if (dragging || (focused === null && !travelling)) return
     const goal =
       focused === null ? new Vector3(0, input.lookAt * exaggeration, 0) : balls[focused]!.position
     const offset = camera.position.clone().sub(controls.target)
@@ -827,14 +912,13 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     raf = requestAnimationFrame(frame)
     steer()
     followZoom()
-    if (hover && pressed === null) {
-      const r = canvas.getBoundingClientRect()
-      pointer.set(
-        ((hover.x - r.left) / r.width) * 2 - 1,
-        -((hover.y - r.top) / r.height) * 2 + 1,
-      )
-      raycaster.setFromCamera(pointer, camera)
-      canvas.style.cursor = raycaster.intersectObjects(grabs, false).length ? 'pointer' : ''
+    if (!pressed) {
+      const under = hover ? anchorAt(hover.x, hover.y) : null
+      if (under !== hovered) {
+        hovered = under
+        styleBalls()
+      }
+      canvas.style.cursor = under === null ? '' : under === focused && input.onAnchorMoved ? 'grab' : 'pointer'
     }
     controls.update()
     renderer.render(scene, camera)
@@ -845,9 +929,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       if (which === focused) return
       focused = which
       travelling = true
-      balls.forEach((ball, i) => {
-        ball.material = i === which ? focusMat : ballMat
-      })
+      styleBalls()
       if (which === null) return resumeLater()
       controls.minDistance = FOCUS_NEAREST
       pause()
@@ -940,7 +1022,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       setPads([])
       for (const g of [
         ground.geometry, buildings.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
-        ballGeom, grabGeom, hoverBall.geometry, hoverDrop.geometry,
+        ballGeom, hoverBall.geometry, hoverDrop.geometry,
         ...stems.map((m) => m.geometry),
       ]) {
         g.dispose()
@@ -952,7 +1034,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       orthoMap.value?.dispose()
       for (const m of [
         groundMat, padMat, buildingMat, canopyMat, spanMat, trackMat, overMat,
-        ballMat, focusMat, grabMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
+        ballMat, focusMat, hoverMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()
