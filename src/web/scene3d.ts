@@ -22,6 +22,12 @@ import { disposeProps, referenceProps } from './props3d.js'
  * a camera that was looking at it.
  */
 
+/** Another line of the same spot: its span, as `line` is, and its two anchors. */
+export interface Other {
+  line: Float32Array
+  anchors: [[number, number, number], [number, number, number]]
+}
+
 export interface SceneInput {
   mesh: MeshData
   /** The vegetation skin, drawn translucent over the solid ground. Null where none is known. */
@@ -40,6 +46,9 @@ export interface SceneInput {
   track: Float32Array
   overTrack: Float32Array
   anchors: [number, number, number][]
+  /** The spot's other lines, drawn paler; tapping one asks for it. */
+  others: Other[]
+  onOtherTapped?: (index: number) => void
   /** Half the patch's width in metres, which sets how far back the camera stands. */
   radius: number
   /** Height to look at, so the camera frames the line rather than the middle of the sky. */
@@ -105,6 +114,7 @@ export interface Scene3D {
     overTrack: Float32Array,
     anchors: [number, number, number][],
     mesh: MeshData,
+    others: Other[],
   ): void
   /**
    * Marks where along the span something is being pointed at, or clears it.
@@ -333,6 +343,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   let track = input.track
   let overTrack = input.overTrack
   let anchors = input.anchors
+  let others = input.others
 
   const points = (a: Float32Array, k: number) => {
     const out: Vector3[] = []
@@ -367,6 +378,26 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const spanMat = new MeshBasicMaterial({ color: '#f43f5e' })
   const spanMesh = new Mesh(tubeAlong(points(line, exaggeration), tubeRadius, 6), spanMat)
   scene.add(spanMesh)
+
+  const otherMat = new MeshBasicMaterial({ color: '#fda4af', transparent: true, opacity: 0.85 })
+  const otherRoot = new Group()
+  scene.add(otherRoot)
+  const drawOthers = (k: number) => {
+    for (const m of otherRoot.children as Mesh[]) if (m.geometry !== ballGeom) m.geometry.dispose()
+    otherRoot.clear()
+    others.forEach((o, i) => {
+      const span = new Mesh(tubeAlong(points(o.line, k), tubeRadius * 0.8, 6), otherMat)
+      span.userData.other = i
+      otherRoot.add(span)
+      for (const [x, y, z] of o.anchors) {
+        const ball = new Mesh(ballGeom, otherMat)
+        ball.position.set(x, y * k, z)
+        ball.scale.setScalar(tubeRadius * 2.2)
+        ball.userData.other = i
+        otherRoot.add(ball)
+      }
+    })
+  }
 
   // The span's shadow, as a tube like the span itself. A one-pixel line was technically present and
   // practically invisible, and this is the mark that says where on the hillside the line runs.
@@ -599,6 +630,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       l.visible = !!anchors[i]
     })
     drawStems(k)
+    drawOthers(k)
     drawHover()
   }
   rescale(exaggeration)
@@ -759,7 +791,11 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     pressedElsewhere = null
     if (!pressed) {
       const still = elsewhere && Math.hypot(ev.clientX - elsewhere.x, ev.clientY - elsewhere.y) < TAP_SLOP_PX
-      if (still && ev.type === 'pointerup' && focused !== null) input.onElsewhereTapped?.()
+      if (!still || ev.type !== 'pointerup') return
+      aimAt(ev.clientX, ev.clientY)
+      const other = raycaster.intersectObjects(otherRoot.children, false)[0]
+      if (other) return input.onOtherTapped?.(other.object.userData.other as number)
+      if (focused !== null) input.onElsewhereTapped?.()
       return
     }
     ev.stopPropagation()
@@ -950,7 +986,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       hoverAt = t
       drawHover()
     },
-    setLine(nextLine, nextTrack, nextOver, nextAnchors, nextMesh) {
+    setLine(nextLine, nextTrack, nextOver, nextAnchors, nextMesh, nextOthers) {
       const old = ground.geometry
       ground.geometry = geometryOf(nextMesh)
       old.dispose()
@@ -958,6 +994,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       track = nextTrack
       overTrack = nextOver
       anchors = nextAnchors
+      others = nextOthers
       rescale(exaggeration)
     },
     dispose() {
@@ -974,6 +1011,8 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       controls.dispose()
       disposeProps(propsRoot)
+      others = []
+      drawOthers(1)
       for (const g of [
         ground.geometry, buildings.geometry, canopy.geometry, spanMesh.geometry, trackMesh.geometry, overMesh.geometry,
         ballGeom, hoverBall.geometry, hoverDrop.geometry,
@@ -987,7 +1026,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       orthoMap.value?.dispose()
       for (const m of [
-        groundMat, buildingMat, canopyMat, spanMat, trackMat, overMat,
+        groundMat, buildingMat, canopyMat, spanMat, trackMat, overMat, otherMat,
         ...balls.map((b) => b.material), stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {

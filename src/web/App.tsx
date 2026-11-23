@@ -60,6 +60,9 @@ import { emitProbes } from './probeOverlay.js'
  */
 const SAG_MIN_PCT = 1
 
+/** How far from the middle of the open line another line of its spot may be and still share its 3D view. */
+const COMPANION_REACH = 500
+
 /** How long the button keeps offering a wider search after a run ends. */
 const OFFER_MS = 2000
 
@@ -816,6 +819,51 @@ export function App() {
       },
     )
   }, [params, customUtm, sagPct, terrainVersion, line.rig, scene])
+
+  /**
+   * The spot's other lines that share the 3D view with this one, each measured like it.
+   *
+   * Keyed on those lines alone, so dragging the active one does not measure them all again.
+   */
+  const companionKey = JSON.stringify(
+    spots.spot.lines.map((l, i) => (i === spots.working.line ? null : [l.a, l.b, l.rig, l.sag])),
+  )
+  const companionLines = useMemo(() => {
+    if (!customUtm) return []
+    const mid = { e: (customUtm.a.e + customUtm.b.e) / 2, n: (customUtm.a.n + customUtm.b.n) / 2 }
+    return spots.spot.lines.flatMap((l, index) => {
+      if (index === spots.working.line) return []
+      const [a, b] = [l.a, l.b].map((p) => {
+        const [e, n] = toUtm33(p.lat, p.lon)
+        return { e, n }
+      }) as [{ e: number; n: number }, { e: number; n: number }]
+      if ([a, b].some((p) => Math.hypot(p.e - mid.e, p.n - mid.n) > COMPANION_REACH)) return []
+      return [{ index, a, b, rig: l.rig, sag: l.sag }]
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companionKey, customUtm && Math.round(customUtm.a.e / 50), customUtm && Math.round(customUtm.a.n / 50)])
+  useEffect(() => {
+    if (!params) return
+    for (const c of companionLines) {
+      const span = Math.hypot(c.b.e - c.a.e, c.b.n - c.a.n)
+      ensureTerrain(c.a, c.b, measuredHalfWidth(span, params)).catch((e: unknown) =>
+        report('fetching elevation for the other lines of this spot', e),
+      )
+    }
+  }, [companionLines, params])
+  const companions = useMemo(() => {
+    if (!params || sagDefault === null) return []
+    void terrainVersion
+    return companionLines.flatMap((c) => {
+      const sag = Math.max(SAG_MIN_PCT, c.sag ?? sagDefault) / 100
+      const measured = planLine(c.a, c.b, groundSampler, surfaceSampler, sag, params, c.rig, { roofs, water }, {
+        tolerateGaps: true,
+      })
+      if (!measured) return []
+      const m = measured.candidate
+      return [{ index: c.index, a: c.a, b: c.b, anchorA: m.a.anchor, anchorB: m.b.anchor, sagRatio: m.length > 0 ? m.sag / m.length : 0 }]
+    })
+  }, [companionLines, params, sagDefault, terrainVersion])
 
   /**
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a
@@ -1692,6 +1740,11 @@ export function App() {
               guideOpen={guide.open}
               rig={line.rig}
               onRig={setRig}
+              companions={companions}
+              onCompanion={(i) => {
+                const c = companions[i]
+                if (c) spots.open(spots.working.spot, c.index)
+              }}
               keep={
                 spots.isDraft ? (
                   <button

@@ -47,6 +47,12 @@ describe('stale', () => {
     expect(stale(held, a, corner)).toBe(false)
   })
 
+  it('makes room for the other lines of the spot', () => {
+    const [a, b] = line(-100, 100)
+    expect(stale(held, a, b, [{ e: held.centre.e, n: held.centre.n + 100 }])).toBe(false)
+    expect(stale(held, a, b, [{ e: held.centre.e, n: held.centre.n + 160 }])).toBe(true)
+  })
+
   it('rebuilds when the line wants a square of a noticeably different size', () => {
     // A much longer line, still centred: it needs a bigger square whatever its ends are doing.
     expect(stale(held, ...line(-160, 160))).toBe(true)

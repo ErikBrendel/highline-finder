@@ -173,9 +173,27 @@ export interface Ground {
   datum: number
 }
 
-const midpointOf = (a: Pos, b: Pos): Pos => ({ e: (a.e + b.e) / 2, n: (a.n + b.n) / 2 })
-/** Ground for the span to sit in rather than fill: a line with nothing around it says little. */
-const wantedHalfSide = (length: number) => Math.max(140, length * 0.85)
+/** Another line of the same spot, measured: drawn beside the one being worked on. */
+export interface Companion {
+  a: Pos
+  b: Pos
+  anchorA: number
+  anchorB: number
+  sagRatio: number
+}
+
+/** The middle of everything to be shown, and how far it reaches from there along either axis. */
+function spread(points: Pos[]): { centre: Pos; reach: number } {
+  const es = points.map((p) => p.e)
+  const ns = points.map((p) => p.n)
+  const [e0, e1, n0, n1] = [Math.min(...es), Math.max(...es), Math.min(...ns), Math.max(...ns)]
+  return { centre: { e: (e0 + e1) / 2, n: (n0 + n1) / 2 }, reach: Math.max(e1 - e0, n1 - n0) / 2 }
+}
+/**
+ * Ground for the span to sit in rather than fill: a line with nothing around it says little. The
+ * spot's other lines are fitted in too, with room round their ends.
+ */
+const wantedHalfSide = (length: number, reach: number) => Math.max(140, length * 0.85, reach + 60)
 
 /** Share of the patch's half-width that must stay clear beyond each anchor. */
 const EDGE_ROOM = 0.25
@@ -193,12 +211,12 @@ const EDGE_ROOM = 0.25
  * that are asked. Measured per axis rather than as a distance, because the patch is a square: an
  * anchor is short of ground when it is close to a *side*, not when it is far from the centre.
  */
-export function stale(held: Ground | null, a: Pos, b: Pos): boolean {
+export function stale(held: Ground | null, a: Pos, b: Pos, others: Pos[] = []): boolean {
   if (!held) return true
-  const want = wantedHalfSide(Math.hypot(b.e - a.e, b.n - a.n))
+  const want = wantedHalfSide(Math.hypot(b.e - a.e, b.n - a.n), spread([a, b, ...others]).reach)
   if (want > held.halfSide * 1.3 || want < held.halfSide * 0.62) return true
   const room = held.halfSide * (1 - EDGE_ROOM)
-  return [a, b].some(
+  return [a, b, ...others].some(
     (p) => Math.max(Math.abs(p.e - held.centre.e), Math.abs(p.n - held.centre.n)) > room,
   )
 }
@@ -207,13 +225,15 @@ export function stale(held: Ground | null, a: Pos, b: Pos): boolean {
 const STEPS = [0.1, 0.5, 1, 5]
 
 export function Terrain3D({
-  a, b, anchorA, anchorB, sagRatio, hoverAt, onMoveAnchor,
+  a, b, anchorA, anchorB, sagRatio, others, hoverAt, onMoveAnchor, onOtherTapped,
 }: {
   a: Pos
   b: Pos
   anchorA: number
   anchorB: number
   sagRatio: number
+  others: Companion[]
+  onOtherTapped?: (index: number) => void
   /** Where along the span the profile chart's pointer is, in metres, or null when it has left. */
   hoverAt?: number | null
   /** Omit to make the view read-only; with it, a tapped anchor can be stepped or dragged. */
@@ -224,6 +244,8 @@ export function Terrain3D({
   // Read by the scene when an anchor is dropped or carried, which outlives the render that built it.
   const moveRef = useRef(onMoveAnchor)
   moveRef.current = onMoveAnchor
+  const otherTappedRef = useRef(onOtherTapped)
+  otherTappedRef.current = onOtherTapped
   const sagRef = useRef(sagRatio)
   sagRef.current = sagRatio
   const ground = useRef<Ground | null>(null)
@@ -382,17 +404,20 @@ export function Terrain3D({
    * with a square sized to its length always leaves each end well inside the new edge, so this
    * settles in one step rather than chasing itself.
    */
+  const otherEnds = others.flatMap((o) => [o.a, o.b])
+  const othersKey = otherEnds.map((p) => `${Math.round(p.e)},${Math.round(p.n)}`).join(';')
   useEffect(() => {
-    if (!stale(ground.current, a, b)) return
-    const mid = midpointOf(a, b)
+    if (!stale(ground.current, a, b, otherEnds)) return
+    const { centre, reach } = spread([a, b, ...otherEnds])
     ground.current = {
       // On a cell centre, so the square's vertices are the survey's own: see `latticeOf`.
-      centre: { e: Math.floor(mid.e) + 0.5, n: Math.floor(mid.n) + 0.5 },
-      halfSide: wantedHalfSide(Math.hypot(b.e - a.e, b.n - a.n)),
+      centre: { e: Math.floor(centre.e) + 0.5, n: Math.floor(centre.n) + 0.5 },
+      halfSide: wantedHalfSide(Math.hypot(b.e - a.e, b.n - a.n), reach),
       datum: 0,
     }
     setEpoch((n) => n + 1)
-  }, [a.e, a.n, b.e, b.n])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.e, a.n, b.e, b.n, othersKey])
 
   /** The span and its shadow, in the scene's coordinates. Cheap: a hundred samples. */
   /**
@@ -453,20 +478,29 @@ export function Terrain3D({
   }
 
   const spanOf = (g: Ground) => {
-    const length = Math.hypot(b.e - a.e, b.n - a.n)
-    const sag = sagRatio * length
-    const line = new Float32Array(SPAN_POINTS * 3)
-    for (let i = 0; i < SPAN_POINTS; i++) {
-      const t = i / (SPAN_POINTS - 1)
-      line[i * 3] = a.e + (b.e - a.e) * t - g.centre.e
-      line[i * 3 + 1] = lineHeightAt(anchorA, anchorB, sag, t) - g.datum
-      line[i * 3 + 2] = -(a.n + (b.n - a.n) * t - g.centre.n)
+    const hang = (p: Pos, q: Pos, hp: number, hq: number, ratio: number) => {
+      const sag = ratio * Math.hypot(q.e - p.e, q.n - p.n)
+      const out = new Float32Array(SPAN_POINTS * 3)
+      for (let i = 0; i < SPAN_POINTS; i++) {
+        const t = i / (SPAN_POINTS - 1)
+        out[i * 3] = p.e + (q.e - p.e) * t - g.centre.e
+        out[i * 3 + 1] = lineHeightAt(hp, hq, sag, t) - g.datum
+        out[i * 3 + 2] = -(p.n + (q.n - p.n) * t - g.centre.n)
+      }
+      return out
     }
+    const sag = sagRatio * Math.hypot(b.e - a.e, b.n - a.n)
+    const line = hang(a, b, anchorA, anchorB, sagRatio)
+    const at = (p: Pos, h: number): [number, number, number] => [p.e - g.centre.e, h - g.datum, -(p.n - g.centre.n)]
+    const drawnOthers = others.map((o) => ({
+      line: hang(o.a, o.b, o.anchorA, o.anchorB, o.sagRatio),
+      anchors: [at(o.a, o.anchorA), at(o.b, o.anchorB)] as [[number, number, number], [number, number, number]],
+    }))
     // Round each anchor the ground is drawn cell by cell, as its height is measured, and the track
     // lies on it there. Where the buildings are drawn apart, the earth under them is drawn instead,
     // as it is everywhere else.
     const read = patch.current
-    const squares = read ? fineSquaresAround(read, [a, b], PAD_HALF) : []
+    const squares = read ? fineSquaresAround(read, [a, b, ...otherEnds], PAD_HALF) : []
     const apart = roofs.current !== null
     const drawn: CellReader = apart
       ? (i, j) => (onBuilding(i + 0.5, j + 0.5) ? bareGround(i + 0.5, j + 0.5) : standingCell(i, j))
@@ -501,13 +535,13 @@ export function Terrain3D({
       [a.e - g.centre.e, anchorA - g.datum, -(a.n - g.centre.n)],
       [b.e - g.centre.e, anchorB - g.datum, -(b.n - g.centre.n)],
     ]
-    return { line, track, overTrack, anchors, mesh, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
+    return { line, track, overTrack, anchors, mesh, others: drawnOthers, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
   }
   const spanRef = useRef(spanOf)
   spanRef.current = spanOf
   const redrape = (g: Ground) => {
-    const { line, track, overTrack, anchors, mesh } = spanRef.current(g)
-    scene.current?.setLine(line, track, overTrack, anchors, mesh)
+    const { line, track, overTrack, anchors, mesh, others } = spanRef.current(g)
+    scene.current?.setLine(line, track, overTrack, anchors, mesh, others)
   }
 
   // Building the ground: the expensive half, and the one that must not run while an anchor is being
@@ -592,6 +626,7 @@ export function Terrain3D({
           : undefined,
         onAnchorMoved: (which, x, z) => moveRef.current?.(which === 0 ? 'a' : 'b', toWgs84(g.centre.e + x, g.centre.n - z)),
         onElsewhereTapped: () => setPicked(null),
+        onOtherTapped: (i) => otherTappedRef.current?.(i),
         sagRatio: () => sagRef.current,
       })
       setState('ready')
@@ -707,13 +742,15 @@ export function Terrain3D({
   }, [hoverAt, a.e, a.n, b.e, b.n, state])
 
   // Moving the span: the cheap half, and the one that runs on every step of an optimiser run.
-  const lineKey = [a.e, a.n, b.e, b.n, anchorA, anchorB, sagRatio]
+  const lineKey = [a, b, ...others.flatMap((o) => [o.a, o.b])]
+    .flatMap((p) => [p.e, p.n])
+    .concat([anchorA, anchorB, sagRatio], others.flatMap((o) => [o.anchorA, o.anchorB, o.sagRatio]))
     .map((v) => Math.round(v * 100))
     .join('_')
   useEffect(() => {
     if (state !== 'ready' || !ground.current) return
-    const { line, track, overTrack, anchors, mesh } = spanRef.current(ground.current)
-    scene.current?.setLine(line, track, overTrack, anchors, mesh)
+    const { line, track, overTrack, anchors, mesh, others } = spanRef.current(ground.current)
+    scene.current?.setLine(line, track, overTrack, anchors, mesh, others)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineKey, state])
 

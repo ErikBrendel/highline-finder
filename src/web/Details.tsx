@@ -15,7 +15,7 @@ import {
   PLANNED_REFINE_START,
 } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
-import { Terrain3D } from './Terrain3D.js'
+import { Terrain3D, type Companion } from './Terrain3D.js'
 import { ShareButton } from './ShareButton.js'
 import { useMedia } from './useMedia.js'
 
@@ -242,6 +242,9 @@ interface Props {
   onClose: () => void
   /** Saving the line, or where it is saved. */
   keep: ReactNode
+  /** The spot's other lines, for the 3D view, and asking for one of them. */
+  companions: Companion[]
+  onCompanion: (index: number) => void
 }
 
 /** The anchor class in terms of the two ends, rather than the one word the filter uses. */
@@ -266,7 +269,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
   canopy, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep,
+  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep, companions, onCompanion,
 }: Props) {
   /**
    * How much room the profile has, which is the only thing that decides how it is drawn.
@@ -659,6 +662,8 @@ export function Details({
             // The sag actually drawn, not the dataset's: the slider re-measures every line, and the
             // span in the picture has to be the span in the figures beside it.
             sagRatio={c.length > 0 ? c.sag / c.length : 0}
+            others={companions}
+            onOtherTapped={onCompanion}
             hoverAt={hoverAt}
             onMoveAnchor={onMoveAnchor}
           />
