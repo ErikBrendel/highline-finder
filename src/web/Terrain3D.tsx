@@ -3,12 +3,12 @@ import type { Pos } from '../shared/grid.js'
 import { toWgs84 } from '../shared/geo.js'
 import { lineHeightAt } from '../shared/scoring.js'
 import {
-  bareGround, ensureTerrain, missingWindows, onBuilding, onWindowActivity, surfaceSampler,
+  bareGround, ensureTerrain, groundSampler, missingWindows, onBuilding, onWindowActivity, surfaceSampler,
 } from './terrain.js'
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
 import {
-  coverOf, groundAround, meshOf, samplePatch, standingHeight, type Patch, type Readers,
+  coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Patch, type Readers,
 } from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
@@ -102,6 +102,9 @@ let preferred = 1
 
 /** Points along the drawn span. Enough that a 500 m curve reads as a curve. */
 const SPAN_POINTS = 96
+
+/** How far the shadows float over the surface they are laid on, in metres. */
+const SHADOW_LIFT = 0.4
 
 /** The square of ground currently on screen, which outlives the line that chose it. */
 export interface Ground {
@@ -376,34 +379,35 @@ export function Terrain3D({
     const length = Math.hypot(b.e - a.e, b.n - a.n)
     const sag = sagRatio * length
     const line = new Float32Array(SPAN_POINTS * 3)
-    const track = new Float32Array(SPAN_POINTS * 3)
-    const overTrack = new Float32Array(SPAN_POINTS * 3)
     for (let i = 0; i < SPAN_POINTS; i++) {
       const t = i / (SPAN_POINTS - 1)
-      const e = a.e + (b.e - a.e) * t
-      const n = a.n + (b.n - a.n) * t
-      const x = e - g.centre.e
-      const z = -(n - g.centre.n)
-      line[i * 3] = x
+      line[i * 3] = a.e + (b.e - a.e) * t - g.centre.e
       line[i * 3 + 1] = lineHeightAt(anchorA, anchorB, sag, t) - g.datum
-      line[i * 3 + 2] = z
-      // Two shadows, because the ground is drawn under the wood rather than replaced by it. One on
-      // the bare earth, which is where the line runs; one on whatever is standing there, which over
-      // a wood is the treetops. A metre clear of each, so both read as lying on a surface rather
-      // than in it.
-      const bare = bareGround(e, n)
-      const skin = surfaceSampler.nearest(e, n)
-      const over = Math.max(
-        Number.isNaN(bare) ? -Infinity : bare,
-        Number.isNaN(skin) ? -Infinity : skin,
-      )
-      track[i * 3] = x
-      track[i * 3 + 1] = (Number.isFinite(bare) ? bare : g.datum) - g.datum + 1
-      track[i * 3 + 2] = z
-      overTrack[i * 3] = x
-      overTrack[i * 3 + 1] = (Number.isFinite(over) ? over : g.datum) - g.datum + 1
-      overTrack[i * 3 + 2] = z
+      line[i * 3 + 2] = -(a.n + (b.n - a.n) * t - g.centre.n)
     }
+    // Two shadows, because the ground is drawn under the wood rather than replaced by it: one on
+    // the solid ground and roofs, which is where the line runs, and one on the canopy sheet where
+    // there is one. Lifted just clear of each, so both read as lying on a surface rather than in it.
+    const onto = (layer: 'solid' | 'canopy') => {
+      const draped = patch.current
+        ? drape(patch.current, layer, line[0]!, line[2]!, line[line.length - 3]!, line[line.length - 1]!)
+        : new Float32Array(0)
+      for (let i = 1; i < draped.length; i += 3) draped[i] += SHADOW_LIFT - g.datum
+      return draped
+    }
+    // Ended at what each anchor stands on as measured, which the posts start from: next to a wall the
+    // drawn triangle is partway up it, and a post from there would stand for a rig nobody set.
+    const solid = onto('solid')
+    const footAt = (p: Pos, x: number, z: number, nextY: number | undefined) => {
+      const y = groundSampler.sample(p.e, p.n) + SHADOW_LIFT - g.datum
+      return Number.isNaN(y) || nextY === undefined || Math.abs(y - nextY) < 0.01 ? [] : [x, y, z]
+    }
+    const track = Float32Array.from([
+      ...footAt(a, line[0]!, line[2]!, solid[1]),
+      ...solid,
+      ...footAt(b, line[line.length - 3]!, line[line.length - 1]!, solid[solid.length - 2]),
+    ])
+    const overTrack = onto('canopy')
     const anchors: [number, number, number][] = [
       [a.e - g.centre.e, anchorA - g.datum, -(a.n - g.centre.n)],
       [b.e - g.centre.e, anchorB - g.datum, -(b.n - g.centre.n)],
@@ -412,6 +416,10 @@ export function Terrain3D({
   }
   const spanRef = useRef(spanOf)
   spanRef.current = spanOf
+  const redrape = (g: Ground) => {
+    const { line, track, overTrack, anchors } = spanRef.current(g)
+    scene.current?.setLine(line, track, overTrack, anchors)
+  }
 
   // Building the ground: the expensive half, and the one that must not run while an anchor is being
   // nudged a few metres. Keyed on the epoch, which only `stale` above advances.
@@ -511,6 +519,7 @@ export function Terrain3D({
       patch.current = fine
       setMeasured(fine.measured)
       scene.current?.setMesh(meshOf(fine, g.datum), meshOf(fine, g.datum, 'canopy'))
+      redrape(g)
 
       /**
        * And now the rest of the square's land cover, which the picture does not wait for.
@@ -575,6 +584,7 @@ export function Terrain3D({
     )
     const datum = ground.current.datum
     scene.current.setMesh(meshOf(read, datum), meshOf(read, datum, 'canopy'))
+    redrape(ground.current)
   })
   useEffect(() => onCoverChange(() => repaint.current()), [])
 

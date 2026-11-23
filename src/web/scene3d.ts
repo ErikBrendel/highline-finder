@@ -1,5 +1,5 @@
 import {
-  AmbientLight, BufferAttribute, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
+  AmbientLight, BufferAttribute, Curve, BufferGeometry, CatmullRomCurve3, Color, DirectionalLight, Fog,
   DoubleSide, HemisphereLight, Line as ThreeLine, LineDashedMaterial, Mesh, MeshBasicMaterial,
   MeshLambertMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry, TubeGeometry, Vector2,
   Vector3, WebGLRenderer, Group, Sprite, SpriteMaterial, CanvasTexture, Texture,
@@ -31,9 +31,10 @@ export interface SceneInput {
   /**
    * The span dropped onto what it passes over, twice.
    *
-   * `track` follows the bare earth -- where the line actually runs, which is the mark that says
-   * which side of a gully it is on. `overTrack` follows whatever is standing there, so over a wood
-   * it sits on the treetops. Both are drawn: one shadow alone either disappears under the canopy or
+   * `track` lies on the solid ground as drawn, roofs included -- where the line actually runs, which
+   * is the mark that says which side of a gully it is on. `overTrack` lies on the canopy sheet where
+   * there is one, so over a wood it sits on the treetops. Unevenly spaced: a point wherever the
+   * drawn surface bends. Both are drawn: one shadow alone either disappears under the canopy or
    * floats above ground that is nowhere near it.
    */
   track: Float32Array
@@ -161,6 +162,24 @@ const EMPTY_MESH: MeshData = {
   positions: new Float32Array(0),
   colors: new Float32Array(0),
   indices: new Uint32Array(0),
+}
+
+/** A polyline as a three.js curve, parameterised by point index so a tube puts a ring on each. */
+class Polyline extends Curve<Vector3> {
+  constructor(private readonly pts: Vector3[]) {
+    super()
+  }
+  override getPoint(t: number, target = new Vector3()): Vector3 {
+    const f = Math.min(1, Math.max(0, t)) * (this.pts.length - 1)
+    const i = Math.min(this.pts.length - 2, Math.floor(f))
+    return target.lerpVectors(this.pts[i]!, this.pts[i + 1]!, f - i)
+  }
+  override getPointAt(u: number, target?: Vector3): Vector3 {
+    return this.getPoint(u, target)
+  }
+  override getTangentAt(u: number, target?: Vector3): Vector3 {
+    return this.getTangent(u, target)
+  }
 }
 
 export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene3D {
@@ -292,6 +311,11 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   }
   const tubeAlong = (pts: Vector3[], radius: number, sides: number) =>
     new TubeGeometry(new CatmullRomCurve3(pts), pts.length * 2, radius, sides, false)
+  /** Corner to corner with no smoothing, a ring at every point: a curve through a wall overshoots. */
+  const tubeOnto = (pts: Vector3[], radius: number, sides: number) =>
+    pts.length < 2
+      ? new BufferGeometry()
+      : new TubeGeometry(new Polyline(pts), pts.length - 1, radius, sides, false)
 
   // A tube rather than a line: a one-pixel line disappears against a lit hillside at any distance,
   // and the span is the thing the whole view exists to show.
@@ -317,13 +341,13 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   // The span's shadow, as a tube like the span itself. A one-pixel line was technically present and
   // practically invisible, and this is the mark that says where on the hillside the line runs.
   const trackMat = new MeshBasicMaterial({ color: '#7f1d2e' })
-  const trackMesh = new Mesh(tubeAlong(points(track, exaggeration), tubeRadius * 0.7, 5), trackMat)
+  const trackMesh = new Mesh(tubeOnto(points(track, exaggeration), tubeRadius * 0.7, 5), trackMat)
   scene.add(trackMesh)
 
   // The same mark where the line crosses a canopy, thinner and paler: it is the top of the wood
   // rather than the ground, and the ground is the one being read.
   const overMat = new MeshBasicMaterial({ color: '#f43f5e', transparent: true, opacity: 0.45 })
-  const overMesh = new Mesh(tubeAlong(points(overTrack, exaggeration), tubeRadius * 0.45, 5), overMat)
+  const overMesh = new Mesh(tubeOnto(points(overTrack, exaggeration), tubeRadius * 0.45, 5), overMat)
   scene.add(overMesh)
 
   /**
@@ -474,12 +498,33 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     return new Vector3(mix(0), mix(1) * k, mix(2))
   }
 
+  /** The point of `track` straight below a point over the span, found by where it lies along it. */
+  const under = (p: Vector3, k: number): Vector3 => {
+    const n = track.length / 3
+    if (n < 2) return new Vector3(p.x, 0, p.z)
+    const [x0, z0] = [line[0]!, line[2]!]
+    const [dx, dz] = [line[line.length - 3]! - x0, line[line.length - 1]! - z0]
+    const s = (x: number, z: number) => ((x - x0) * dx + (z - z0) * dz) / (dx * dx + dz * dz || 1)
+    const want = s(p.x, p.z)
+    let lo = 0
+    let hi = n - 1
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1
+      if (s(track[mid * 3]!, track[mid * 3 + 2]!) <= want) lo = mid
+      else hi = mid
+    }
+    const [sa, sb] = [s(track[lo * 3]!, track[lo * 3 + 2]!), s(track[hi * 3]!, track[hi * 3 + 2]!)]
+    const f = sb > sa ? Math.min(1, Math.max(0, (want - sa) / (sb - sa))) : 0
+    const y = track[lo * 3 + 1]! * (1 - f) + track[hi * 3 + 1]! * f
+    return new Vector3(p.x, y * k, p.z)
+  }
+
   let hoverAt: number | null = null
   const drawHover = () => {
     hoverBall.visible = hoverDrop.visible = hoverAt !== null
     if (hoverAt === null) return
     const top = along(line, hoverAt, exaggeration)
-    const foot = along(track, hoverAt, exaggeration)
+    const foot = under(top, exaggeration)
     hoverBall.position.copy(top)
     // Follows the zoom with the anchors, or it would out-grow them as the camera comes in.
     hoverBall.scale.setScalar(tubeRadius * 4)
@@ -496,9 +541,9 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     spanMesh.geometry.dispose()
     spanMesh.geometry = tubeAlong(points(line, k), tubeRadius, 6)
     trackMesh.geometry.dispose()
-    trackMesh.geometry = tubeAlong(points(track, k), tubeRadius * 0.7, 5)
+    trackMesh.geometry = tubeOnto(points(track, k), tubeRadius * 0.7, 5)
     overMesh.geometry.dispose()
-    overMesh.geometry = tubeAlong(points(overTrack, k), tubeRadius * 0.45, 5)
+    overMesh.geometry = tubeOnto(points(overTrack, k), tubeRadius * 0.45, 5)
     if (input.props) {
       propsRoot.position.set(input.props.x, input.props.y * k, input.props.z)
       propsRoot.scale.y = k

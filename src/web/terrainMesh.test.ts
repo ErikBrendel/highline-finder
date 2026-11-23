@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { COVER, COVER_RGB, colorsOf, coverOf, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, colorsOf, coverOf, drape, groundAround, meshOf, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -284,5 +284,30 @@ describe('standingHeight', () => {
       ground: () => 50, surface: () => 61, building: () => true,
     }))
     expect(standingHeight(town, 0, 0, 4)).toBeCloseTo(61, 5)
+  })
+})
+
+describe('drape', () => {
+  // 5 vertices a side, 1 m apart, x from -2 to 2; a 10 m building from x = 1 east.
+  const patch = samplePatch(centre, 2, 5, flat({
+    building: (e) => e >= centre.e + 1,
+    surface: (e) => (e >= centre.e + 1 ? 60 : 50),
+  }))
+
+  it('lies on the triangles as drawn, the wall across its cell included', () => {
+    const d = drape(patch, 'solid', -2, 0.5, 2, 0.5)
+    const at = (x: number) => [...d].filter((_, i) => i % 3 === 1 && Math.abs(d[i - 1]! - x) < 1e-9)
+    expect(at(-1)).toEqual([50])
+    expect(at(0.5)).toEqual([55])
+    expect(at(2)).toEqual([60])
+  })
+
+  it('lies on the canopy sheet only where the sheet is drawn', () => {
+    const wood = samplePatch(centre, 2, 5, flat({ surface: (e) => (e <= centre.e ? 70 : 50) }))
+    const d = drape(wood, 'canopy', -2, 0, 2, 0)
+    const at = (x: number) => [...d].filter((_, i) => i % 3 === 1 && Math.abs(d[i - 1]! - x) < 1e-9)
+    expect(at(-1)).toEqual([70])
+    expect(at(0)).toEqual([70, 50])
+    expect(at(2)).toEqual([50])
   })
 })

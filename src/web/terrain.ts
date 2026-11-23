@@ -397,6 +397,9 @@ export function bareGround(e: number, n: number): number {
  * Samples across window boundaries by looking each contributing cell up independently, so a line
  * crossing from one fetched window into the next reads continuously instead of hitting an edge.
  */
+/** A rise between neighbouring 1 m cells steeper than 45 degrees, which no ground slopes at. */
+const WALL_M = 1
+
 function samplerFor(layer: Layer): Sampler {
   return {
     /** The composite cell itself -- roof where there is one, terrain otherwise. */
@@ -415,6 +418,11 @@ function samplerFor(layer: Layer): Sampler {
       const v01 = cellOf(layer, x0, y0 - 1)
       const v11 = cellOf(layer, x0 + 1, y0 - 1)
       if (Number.isNaN(v00 + v10 + v01 + v11)) return cellOf(layer, e, n)
+      // A wall or a roof step rather than a slope: something stands on one side of it, never
+      // halfway up, which is where blending the two would put it.
+      if (Math.max(v00, v10, v01, v11) - Math.min(v00, v10, v01, v11) > WALL_M) {
+        return cellOf(layer, e, n)
+      }
       return v00 * (1 - tx) * (1 - ty) + v10 * tx * (1 - ty) + v01 * (1 - tx) * ty + v11 * tx * ty
     },
   }

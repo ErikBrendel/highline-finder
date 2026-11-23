@@ -280,6 +280,72 @@ export function colorsOf(cover: Uint8Array): Float32Array {
  */
 export type MeshLayer = 'solid' | 'canopy'
 
+/**
+ * The straight line from (x0, z0) to (x1, z1) laid onto one drawn surface, three floats a point.
+ *
+ * Exact against the mesh rather than resampled from the survey: a point wherever the line crosses
+ * a grid line or a triangle's diagonal, and the triangle's own plane in between, so the shadow
+ * lies on exactly what is drawn. Where neighbouring cells belong to different surfaces -- a wall,
+ * the edge of the canopy sheet -- both heights are kept at the same spot, which makes a vertical
+ * step instead of a ramp cut through the corner. Undrawn cells are left out.
+ */
+export function drape(
+  patch: Patch, layer: MeshLayer, x0: number, z0: number, x1: number, z1: number,
+): Float32Array {
+  const { side, step, height, ground, cover } = patch
+  const half = ((side - 1) * step) / 2
+  const u = (t: number) => (x0 + (x1 - x0) * t + half) / step
+  const v = (t: number) => (z0 + (z1 - z0) * t + half) / step
+
+  const cuts = [0, 1]
+  const crossings = (from: number, to: number) => {
+    if (from === to) return
+    for (let k = Math.ceil(Math.min(from, to)); k <= Math.max(from, to); k++) {
+      cuts.push((k - from) / (to - from))
+    }
+  }
+  crossings(u(0), u(1))
+  crossings(v(0), v(1))
+  crossings(u(0) + v(0), u(1) + v(1))
+  cuts.sort((p, q) => p - q)
+
+  const out: number[] = []
+  const push = (x: number, y: number, z: number) => {
+    const n = out.length
+    if (n && Math.abs(out[n - 3]! - x) + Math.abs(out[n - 2]! - y) + Math.abs(out[n - 1]! - z) < 1e-6) {
+      return
+    }
+    out.push(x, y, z)
+  }
+  for (let k = 0; k + 1 < cuts.length; k++) {
+    const [ta, tb] = [cuts[k]!, cuts[k + 1]!]
+    if (tb - ta < 1e-9) continue
+    const mid = (ta + tb) / 2
+    const col = Math.floor(u(mid))
+    const row = Math.floor(v(mid))
+    if (col < 0 || row < 0 || col + 1 >= side || row + 1 >= side) continue
+    const a = row * side + col
+    const quad = [a, a + 1, a + side, a + side + 1]
+    // As meshOf draws it: the canopy sheet only over cells that are canopy at all four corners.
+    const sheet = layer === 'canopy' && quad.every((i) => cover[i] === COVER.canopy)
+    const [ha, hb, hc, hd] = quad.map((i) =>
+      sheet || cover[i] === COVER.building ? height[i]! : ground[i]!,
+    ) as [number, number, number, number]
+    if (Number.isNaN(ha + hb + hc + hd)) continue
+    // Split along b-c, as meshOf's indices are.
+    const lower = u(mid) - col + v(mid) - row <= 1
+    for (const t of [ta, tb]) {
+      const du = u(t) - col
+      const dv = v(t) - row
+      const y = lower
+        ? ha + (hb - ha) * du + (hc - ha) * dv
+        : hd + (hc - hd) * (1 - du) + (hb - hd) * (1 - dv)
+      push(x0 + (x1 - x0) * t, y, z0 + (z1 - z0) * t)
+    }
+  }
+  return Float32Array.from(out)
+}
+
 export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): MeshData {
   const { side, step, height, ground, cover } = patch
   const half = ((side - 1) * step) / 2
