@@ -8,12 +8,12 @@ import {
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
 import {
-  COVER, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, solidAt, type CoverClass, type MeshData, standingHeight, type Patch, type Readers,
+  COVER, EMPTY_MESH, coverOf, drape, extentOf, fineSquaresAround, groundAround, latticeOf, meshOf, samplePatch, withFineGround, type CoverClass, type MeshData, standingHeight, type Patch, type Readers,
 } from './terrainMesh.js'
 import { buildingMesh, type BuildingCells } from './buildingMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
-import type { Pad, Scene3D } from './scene3d.js'
+import type { Scene3D } from './scene3d.js'
 import { drapeCells, type CellReader } from './cellSurface.js'
 import { intervals, overlay, polyline } from './segments.js'
 import { IMAGERY_SHORT } from './surveys.js'
@@ -41,11 +41,10 @@ import { IMAGERY_SHORT } from './surveys.js'
  * anything finer is interpolation dressed up as detail. Short lines get exactly that. Long ones hit
  * the cap instead -- a 500 m span wants a square 850 m across, and at a metre that is three quarters
  * of a million vertices to sample and light, which is a second of work and a mesh a phone would
- * rather not hold. 480 a side is a quarter of a million, and puts a 500 m line at about 1.8 m.
+ * rather not hold. 480 a side is a quarter of a million, and puts a 500 m line at 2 m: always a
+ * whole number of metres, so the vertices stay on the survey's cells (see `latticeOf`).
  */
-const STEP_M = 1
 const MAX_SIDE = 480
-const MIN_SIDE = 128
 
 /**
  * Vertices a side for the first pass, which exists to be quick rather than right.
@@ -114,14 +113,12 @@ const SPAN_POINTS = 96
  */
 const PAD_HALF = 24
 
-/** How far a pad reaches over the coarse ground around it, in metres. */
-const PAD_OVERLAP = 0.25
 
 /**
- * The cover of one cell, for colouring the pads as the rest of the ground is coloured: earth under
+ * The cover of one cell, for colouring the fine ground round the anchors as the rest of the ground is coloured: earth under
  * a building once the buildings are drawn on their own.
  */
-const padCover = (roofsApart: boolean) => (ci: number, cj: number): CoverClass =>
+const fineCover = (roofsApart: boolean) => (ci: number, cj: number): CoverClass =>
   !roofsApart && onBuilding(ci + 0.5, cj + 0.5)
     ? COVER.building
     : water.covers(ci + 0.5, cj + 0.5)
@@ -237,6 +234,8 @@ export function Terrain3D({
   /** Those solids for the fine pass, built on first use and kept until the ground is read again. */
   const fittedRoofs = useRef<MeshData | null>(null)
   const fineRead = useRef(false)
+  /** The ground as the grid carries it, before the cells round the anchors are put into it. */
+  const base = useRef<MeshData | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading')
   const [failed, setFailed] = useState<string | null>(null)
   const [measured, setMeasured] = useState(1)
@@ -385,8 +384,10 @@ export function Terrain3D({
    */
   useEffect(() => {
     if (!stale(ground.current, a, b)) return
+    const mid = midpointOf(a, b)
     ground.current = {
-      centre: midpointOf(a, b),
+      // On a cell centre, so the square's vertices are the survey's own: see `latticeOf`.
+      centre: { e: Math.floor(mid.e) + 0.5, n: Math.floor(mid.n) + 0.5 },
       halfSide: wantedHalfSide(Math.hypot(b.e - a.e, b.n - a.n)),
       datum: 0,
     }
@@ -461,52 +462,31 @@ export function Terrain3D({
       line[i * 3 + 1] = lineHeightAt(anchorA, anchorB, sag, t) - g.datum
       line[i * 3 + 2] = -(a.n + (b.n - a.n) * t - g.centre.n)
     }
-    const ends = [a, b].map((p) => ({ ci: Math.floor(p.e) - PAD_HALF, cj: Math.floor(p.n) - PAD_HALF }))
-    // The outer ring of each pad takes the coarse ground's height, so the two meet without a seam.
-    // Inside it the pad is the standing surface itself, which is what the anchor in the middle is on
-    // -- and the track lies on it. Where the buildings are drawn apart, the pad draws the earth
-    // under them instead, as the coarse ground does.
+    // Round each anchor the ground is drawn cell by cell, as its height is measured, and the track
+    // lies on it there. Where the buildings are drawn apart, the earth under them is drawn instead,
+    // as it is everywhere else.
+    const read = patch.current
+    const squares = read ? fineSquaresAround(read, [a, b], PAD_HALF) : []
     const apart = roofs.current !== null
-    const surfaceOf = (earth: boolean) => ends.map(({ ci, cj }): CellReader => (i, j) => {
-      const ring = i === ci || j === cj || i === ci + 2 * PAD_HALF - 1 || j === cj + 2 * PAD_HALF - 1
-      if (ring && patch.current) {
-        return solidAt(patch.current, i + 0.5 - g.centre.e, -(j + 0.5 - g.centre.n), earth ? 'earth' : 'solid')
-      }
-      return earth && onBuilding(i + 0.5, j + 0.5) ? bareGround(i + 0.5, j + 0.5) : standingCell(i, j)
-    })
-    const readers = surfaceOf(false)
-    const drawn = apart ? surfaceOf(true) : readers
-    const pads: Pad[] = ends.map(({ ci, cj }, k) => ({
-      mesh: padMesh(
-        drawn[k]!, padCover(apart), ci, cj, 2 * PAD_HALF, g.centre, g.datum,
-        (e, n) => (patch.current ? solidAt(patch.current, e - g.centre.e, -(n - g.centre.n), apart ? 'earth' : 'solid') : NaN),
-        PAD_OVERLAP,
-      ),
-      // Cut a little inside the pad's edge: two surfaces meeting exactly on a line leave a crack of
-      // unpainted pixels along it, where an overlap leaves none.
-      bounds: [
-        ci + 0.5 + PAD_OVERLAP - g.centre.e,
-        ci + 2 * PAD_HALF - 0.5 - PAD_OVERLAP - g.centre.e,
-        -(cj + 2 * PAD_HALF - 0.5 - PAD_OVERLAP - g.centre.n),
-        -(cj + 0.5 + PAD_OVERLAP - g.centre.n),
-      ],
-    }))
+    const drawn: CellReader = apart
+      ? (i, j) => (onBuilding(i + 0.5, j + 0.5) ? bareGround(i + 0.5, j + 0.5) : standingCell(i, j))
+      : standingCell
+    const mesh = read && base.current
+      ? withFineGround(read, base.current, squares, drawn, fineCover(apart), g.datum)
+      : EMPTY_MESH
 
     // Two shadows, because the ground is drawn under the wood rather than replaced by it: one on
     // the solid ground and roofs, which is where the line runs, and one on the canopy sheet where
     // there is one and on the ground where there is not. Each lies on exactly what is drawn under
-    // it -- the pads around the anchors, the coarse mesh between them -- and is lifted just clear.
+    // it -- the cells round the anchors, the coarse grid between them -- and is lifted just clear.
     const [x0, z0, x1, z1] = [line[0]!, line[2]!, line[line.length - 3]!, line[line.length - 1]!]
-    const inPads = ends.map(({ ci, cj }) =>
-      clip(a, b, ci + 0.5, cj + 0.5, ci + 2 * PAD_HALF - 0.5, cj + 2 * PAD_HALF - 0.5),
-    )
-    const solid = intervals(inPads.flatMap((r) => r ?? []), 0, 1).flatMap(([ta, tb]) => {
+    const inFine = read ? squares.map((q) => clip(a, b, ...extentOf(read, q))) : []
+    const solid = intervals(inFine.flatMap((r) => r ?? []), 0, 1).flatMap(([ta, tb]) => {
       const mid = (ta + tb) / 2
-      const pad = inPads.findIndex((r) => r !== null && mid > r[0] && mid < r[1])
-      return pad >= 0
-        ? drapeCells(readers[pad]!, a.e, a.n, b.e, b.n, ta, tb)
-        : patch.current
-          ? drape(patch.current, 'solid', x0, z0, x1, z1, ta, tb)
+      return inFine.some((r) => r !== null && mid > r[0] && mid < r[1])
+        ? drapeCells(standingCell, a.e, a.n, b.e, b.n, ta, tb)
+        : read
+          ? drape(read, 'solid', x0, z0, x1, z1, ta, tb)
           : []
     })
     const sheet = patch.current ? drape(patch.current, 'canopy', x0, z0, x1, z1) : []
@@ -521,13 +501,13 @@ export function Terrain3D({
       [a.e - g.centre.e, anchorA - g.datum, -(a.n - g.centre.n)],
       [b.e - g.centre.e, anchorB - g.datum, -(b.n - g.centre.n)],
     ]
-    return { line, track, overTrack, anchors, pads, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
+    return { line, track, overTrack, anchors, mesh, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
   }
   const spanRef = useRef(spanOf)
   spanRef.current = spanOf
   const redrape = (g: Ground) => {
-    const { line, track, overTrack, anchors, pads } = spanRef.current(g)
-    scene.current?.setLine(line, track, overTrack, anchors, pads)
+    const { line, track, overTrack, anchors, mesh } = spanRef.current(g)
+    scene.current?.setLine(line, track, overTrack, anchors, mesh)
   }
 
   // Building the ground: the expensive half, and the one that must not run while an anchor is being
@@ -576,7 +556,8 @@ export function Terrain3D({
         building: onBuilding,
         water: (e, n) => water.covers(e, n),
       }
-      const rough = samplePatch(g.centre, g.halfSide, ROUGH_SIDE, readers)
+      const roughly = latticeOf(g.halfSide, ROUGH_SIDE)
+      const rough = samplePatch(g.centre, roughly.halfSide, roughly.side, readers)
       setMeasured(rough.measured)
       patch.current = rough
       // The coarse pass sets the floor everything is measured from, and the fine one keeps it, so
@@ -585,8 +566,8 @@ export function Terrain3D({
       roofs.current = null
       fittedRoofs.current = null
       fineRead.current = false
-      const mesh = meshOf(rough, g.datum)
-      if (!mesh.indices.length) throw new Error('no elevation for the ground around this line')
+      base.current = meshOf(rough, g.datum)
+      if (!base.current.indices.length) throw new Error('no elevation for the ground around this line')
 
       const { createScene } = await import('./scene3d.js')
       if (dropped || !host.current) return
@@ -596,7 +577,6 @@ export function Terrain3D({
       const offset = scene.current?.viewOffset()
       scene.current?.dispose()
       scene.current = createScene(canvas, {
-        mesh,
         canopy: meshOf(rough, g.datum, 'canopy'),
         ...spanRef.current(g),
         radius: g.halfSide,
@@ -625,11 +605,8 @@ export function Terrain3D({
        */
       await new Promise((done) => setTimeout(done, 0))
       if (dropped) return
-      const side = Math.min(
-        MAX_SIDE,
-        Math.max(MIN_SIDE, Math.round((2 * g.halfSide) / STEP_M) + 1),
-      )
-      const fine = samplePatch(g.centre, g.halfSide, side, readers)
+      const finely = latticeOf(g.halfSide, MAX_SIDE)
+      const fine = samplePatch(g.centre, finely.halfSide, finely.side, readers)
       if (dropped) return
       patch.current = fine
       fineRead.current = true
@@ -715,9 +692,8 @@ export function Terrain3D({
     } else {
       roofs.current = null
     }
-    scene.current.setMesh(
-      meshOf(read, g.datum, roofs.current ? 'earth' : 'solid'), meshOf(read, g.datum, 'canopy'), roofs.current,
-    )
+    base.current = meshOf(read, g.datum, roofs.current ? 'earth' : 'solid')
+    scene.current.setMesh(meshOf(read, g.datum, 'canopy'), roofs.current)
     redrape(g)
   })
   useEffect(() => redraw.current(), [fitWalls])
@@ -736,8 +712,8 @@ export function Terrain3D({
     .join('_')
   useEffect(() => {
     if (state !== 'ready' || !ground.current) return
-    const { line, track, overTrack, anchors, pads } = spanRef.current(ground.current)
-    scene.current?.setLine(line, track, overTrack, anchors, pads)
+    const { line, track, overTrack, anchors, mesh } = spanRef.current(ground.current)
+    scene.current?.setLine(line, track, overTrack, anchors, mesh)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineKey, state])
 

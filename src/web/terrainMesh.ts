@@ -1,5 +1,5 @@
 import type { Pos } from '../shared/grid.js'
-import { surfaceAt, type CellReader } from './cellSurface.js'
+import type { CellReader } from './cellSurface.js'
 import { crossings, intervals, type Seg } from './segments.js'
 
 /**
@@ -321,17 +321,6 @@ export function drape(
   return out
 }
 
-/** The drawn solid ground at a point of the scene, NaN off the patch or where it is not drawn. */
-export function solidAt(patch: Patch, x: number, z: number, layer: MeshLayer = 'solid'): number {
-  const half = ((patch.side - 1) * patch.step) / 2
-  const u = (x + half) / patch.step
-  const v = (z + half) / patch.step
-  const col = Math.min(patch.side - 2, Math.floor(u))
-  const row = Math.min(patch.side - 2, Math.floor(v))
-  const quad = quadAt(patch, layer, col, row)
-  return quad ? onQuad(quad, u - col, v - row, u - col + v - row <= 1) : NaN
-}
-
 /**
  * The corner heights of one quad as meshOf draws it, or null where it draws none: off the patch,
  * unmeasured, or -- for the canopy -- not canopy at all four corners.
@@ -528,86 +517,202 @@ function skirt(
   return { positions, colors, indices: Uint32Array.from(indices) }
 }
 
-/** Metres between the posts of the curtain round a pad, finer than the coarse ground it meets. */
-const CURTAIN_STEP = 0.25
+/** Stands in for a surface that is not there, so a mesh always exists and is simply empty. */
+export const EMPTY_MESH: MeshData = {
+  positions: new Float32Array(0),
+  colors: new Float32Array(0),
+  indices: new Uint32Array(0),
+}
 
-/**
- * The cell surface over a square of whole cells, as the ground is drawn around an anchor.
- *
- * The rest of the ground is a grid of one to two metres whose vertices fall wherever they fall, so
- * a wall in it is a ramp a vertex wide and up to half a step out of place -- fine to look at, wrong
- * to stand on. Around each anchor the vertices are the survey's own cell centres instead, and the
- * triangles are split as cellSurface.ts splits them, so the ground drawn there is exactly the one
- * the anchor's height comes from.
- *
- * `ci0`, `cj0` is the south-west cell and `cells` the number a side; the square drawn runs from
- * centre to centre. `at` is the caller's to give the outer ring the coarse ground's heights, so the
- * two meet at the ring's vertices. Between them the coarse ground goes its own way, a metre and more
- * on a cliff, so a curtain hangs from the pad to `coarseAt` along the line `inset` inside its edge
- * where the coarse ground is cut away, closing the slit the two would leave there.
- */
-export function padMesh(
-  at: CellReader,
-  coverAt: (ci: number, cj: number) => CoverClass,
-  ci0: number,
-  cj0: number,
-  cells: number,
-  centre: Pos,
-  datum: number,
-  coarseAt: (e: number, n: number) => number,
-  inset: number,
-): MeshData {
-  const positions: number[] = []
-  const cover: number[] = []
-  const vertex = (e: number, n: number, h: number, kind: CoverClass) => {
-    positions.push(e - centre.e, h - datum, -(n - centre.n))
-    cover.push(kind)
-    return positions.length / 3 - 1
-  }
-  const heights: number[] = []
-  const grid: number[] = []
-  for (let j = 0; j < cells; j++) {
-    for (let i = 0; i < cells; i++) {
-      const h = at(ci0 + i, cj0 + j)
-      heights.push(h)
-      grid.push(vertex(ci0 + i + 0.5, cj0 + j + 0.5, Number.isNaN(h) ? datum : h, coverAt(ci0 + i, cj0 + j)))
-    }
-  }
-  const indices: number[] = []
-  const id = (i: number, j: number) => j * cells + i
-  for (let j = 0; j + 1 < cells; j++) {
-    for (let i = 0; i + 1 < cells; i++) {
-      const [sw, se, nw, ne] = [id(i, j), id(i + 1, j), id(i, j + 1), id(i + 1, j + 1)]
-      if (Number.isNaN(heights[sw]! + heights[se]! + heights[nw]! + heights[ne]!)) continue
-      indices.push(grid[sw]!, grid[se]!, grid[nw]!, grid[se]!, grid[ne]!, grid[nw]!)
-    }
-  }
-  const [lo, hi] = [0.5 + inset, cells - 0.5 - inset]
-  const corners = [[lo, lo], [hi, lo], [hi, hi], [lo, hi]] as const
-  const rim: [number, number][] = corners.flatMap(([u0, v0], k) => {
-    const [u1, v1] = corners[(k + 1) % 4]!
-    const steps = Math.ceil((hi - lo) / CURTAIN_STEP)
-    return Array.from({ length: steps }, (_, s): [number, number] => [
-      ci0 + u0 + ((u1 - u0) * s) / steps,
-      cj0 + v0 + ((v1 - v0) * s) / steps,
-    ])
-  })
-  const hung = rim.map(([e, n]) => {
-    const kind = coverAt(Math.floor(e), Math.floor(n))
-    return [surfaceAt(at, e, n), coarseAt(e, n)].map((h) => vertex(e, n, Number.isNaN(h) ? datum : h, kind))
-  })
-  rim.forEach(([e, n], k) => {
-    const next = (k + 1) % rim.length
-    const [e1, n1] = rim[next]!
-    if ([surfaceAt(at, e, n), coarseAt(e, n), surfaceAt(at, e1, n1), coarseAt(e1, n1)].some(Number.isNaN)) return
-    const [[a, b], [c, d]] = [hung[k]!, hung[next]!]
-    // Both windings: the slit is seen from outside the pad and from in it.
-    indices.push(a, b, c, c, b, d, a, c, b, c, d, b)
-  })
+/** A square of the patch's own lattice, in vertex columns and rows, drawn at the survey's 1 m. */
+export interface FineSquare {
+  c0: number
+  r0: number
+  c1: number
+  r1: number
+}
+
+/** The lattice square holding `reach` metres round a point, grown out to the coarse grid's lines. */
+export function fineSquareAround(patch: Patch, e: number, n: number, reach: number): FineSquare {
+  const { west, north } = originOf(patch)
+  const last = patch.side - 1
+  const clamp = (k: number) => Math.min(last, Math.max(0, k))
   return {
-    positions: Float32Array.from(positions),
-    colors: colorsOf(Uint8Array.from(cover)),
-    indices: Uint32Array.from(indices),
+    c0: clamp(Math.floor((e - reach - west) / patch.step)),
+    c1: clamp(Math.ceil((e + reach - west) / patch.step)),
+    r0: clamp(Math.floor((north - n - reach) / patch.step)),
+    r1: clamp(Math.ceil((north - n + reach) / patch.step)),
   }
 }
 
+/** The squares round each point, in the patch's lattice, merged where they meet. */
+export function fineSquaresAround(patch: Patch, points: Pos[], reach: number): FineSquare[] {
+  return merged(points.map((p) => fineSquareAround(patch, p.e, p.n, reach)))
+}
+
+/** A square's extent in metres: west, south, east and north. */
+export function extentOf(patch: Patch, { c0, r0, c1, r1 }: FineSquare): [number, number, number, number] {
+  const { west, north } = originOf(patch)
+  return [west + c0 * patch.step, north - r1 * patch.step, west + c1 * patch.step, north - r0 * patch.step]
+}
+
+/**
+ * The vertices a side and the half-width for a square read at whole metres a vertex, as few as fit
+ * in `most`: a whole number of metres apart, so every vertex is a cell centre when the square's
+ * centre is one -- which is what lets `withFineGround` drop the survey's own cells into it.
+ */
+export function latticeOf(halfSide: number, most: number): { side: number; halfSide: number } {
+  const step = Math.max(1, Math.ceil((2 * halfSide) / (most - 1)))
+  // An even number of steps, so the centre is a vertex and the square stays on cell centres.
+  const steps = 2 * Math.ceil(halfSide / step)
+  return { side: steps + 1, halfSide: (steps * step) / 2 }
+}
+
+/** Where vertex (0, 0) of a patch stands, in metres east and north. */
+const originOf = ({ centre, side, step }: Patch) => {
+  const half = ((side - 1) * step) / 2
+  return { west: centre.e - half, north: centre.n + half }
+}
+
+/**
+ * The ground as `meshOf` draws it, with the survey's own cells in place of the coarse grid inside
+ * each square: one mesh, so there is no seam to stitch.
+ *
+ * The patch's vertices have to stand on cell centres a whole number of metres apart, which is how
+ * `latticeOf` lays them out. A square's edge then runs along a coarse grid line, every coarse
+ * vertex on it is one of the square's own, and the coarse quads beside it are fanned onto the cells
+ * between -- so the two resolutions share every vertex where they meet. Inside, each cell is split
+ * as cellSurface.ts splits it, so the ground drawn round an anchor is the one its height comes from.
+ * `at` and `coverAt` read a cell; overlapping squares are drawn as the one square holding both.
+ */
+export function withFineGround(
+  patch: Patch,
+  mesh: MeshData,
+  wanted: FineSquare[],
+  at: CellReader,
+  coverAt: (ci: number, cj: number) => CoverClass,
+  datum: number,
+): MeshData {
+  const { side, step } = patch
+  const { west, north } = originOf(patch)
+  const half = ((side - 1) * step) / 2
+  const squares = merged(wanted)
+
+  const positions = Array.from(mesh.positions)
+  const colorsAdded: number[] = []
+  const missing = new Set<number>()
+  const fineIds = squares.map(({ c0, r0, c1, r1 }) => {
+    const w = (c1 - c0) * step + 1
+    const h = (r1 - r0) * step + 1
+    const ids = new Int32Array(w * h)
+    for (let v = 0; v < h; v++) {
+      for (let u = 0; u < w; u++) {
+        const e = west + c0 * step + u
+        const n = north - r0 * step - v
+        const [ci, cj] = [Math.floor(e), Math.floor(n)]
+        const height = at(ci, cj)
+        const id = positions.length / 3
+        if (Number.isNaN(height)) missing.add(id)
+        positions.push(c0 * step + u - half, Number.isNaN(height) ? 0 : height - datum, r0 * step + v - half)
+        colorsAdded.push(coverAt(ci, cj))
+        ids[v * w + u] = id
+      }
+    }
+    return { ids, w }
+  })
+
+  const squareOn = (c: number, r: number) =>
+    squares.findIndex((q) => c >= q.c0 && c <= q.c1 && r >= q.r0 && r <= q.r1)
+  /** The vertex drawn at a lattice point: a square's own where one holds it, else the coarse one. */
+  const idAt = (c: number, r: number) => {
+    const k = squareOn(c, r)
+    if (k < 0) return r * side + c
+    const q = squares[k]!
+    return fineIds[k]!.ids[(r - q.r0) * step * fineIds[k]!.w + (c - q.c0) * step]!
+  }
+
+  const indices: number[] = []
+  const triangle = (a: number, b: number, c: number) => {
+    if (missing.has(a) || missing.has(b) || missing.has(c)) return
+    const cross =
+      (positions[b * 3 + 2]! - positions[a * 3 + 2]!) * (positions[c * 3]! - positions[a * 3]!) -
+      (positions[b * 3]! - positions[a * 3]!) * (positions[c * 3 + 2]! - positions[a * 3 + 2]!)
+    // Facing up, as meshOf's own triangles do.
+    if (cross > 0) indices.push(a, b, c)
+    else if (cross < 0) indices.push(a, c, b)
+  }
+
+  const fanned = new Set<number>()
+  const quad = new Array<number>(3)
+  for (let t = 0; t < mesh.indices.length; t += 3) {
+    const tri = [mesh.indices[t]!, mesh.indices[t + 1]!, mesh.indices[t + 2]!]
+    if (tri.some((v) => v >= side * side)) {
+      indices.push(...tri)
+      continue
+    }
+    const col = Math.min(...tri.map((v) => v % side))
+    const row = Math.min(...tri.map((v) => Math.floor(v / side)))
+    if (squares.some((q) => col >= q.c0 && col < q.c1 && row >= q.r0 && row < q.r1)) continue
+    const corners: [number, number][] = [[col, row], [col + 1, row], [col + 1, row + 1], [col, row + 1]]
+    const onEdge = corners.map(([c, r]) => squareOn(c, r))
+    const touches = onEdge.some((k, i) => k >= 0 && k === onEdge[(i + 1) % 4])
+    if (!touches) {
+      quad.splice(0, 3, ...tri.map((v) => idAt(v % side, Math.floor(v / side))))
+      triangle(quad[0]!, quad[1]!, quad[2]!)
+      continue
+    }
+    if (fanned.has(row * side + col)) continue
+    fanned.add(row * side + col)
+    // Round the quad, with every cell centre along the side it shares with a square.
+    const ring: number[] = []
+    corners.forEach(([c, r], i) => {
+      ring.push(idAt(c, r))
+      const [nc, nr] = corners[(i + 1) % 4]!
+      if (onEdge[i]! < 0 || onEdge[i] !== onEdge[(i + 1) % 4]) return
+      const k = onEdge[i]!
+      const q = squares[k]!
+      const { ids, w } = fineIds[k]!
+      for (let m = 1; m < step; m++) {
+        const u = (c - q.c0) * step + ((nc - c) * m)
+        const v = (r - q.r0) * step + ((nr - r) * m)
+        ring.push(ids[v * w + u]!)
+      }
+    })
+    const from = onEdge.findIndex((k) => k < 0)
+    const o = ring.indexOf(idAt(...corners[from]!))
+    const around = [...ring.slice(o), ...ring.slice(0, o)]
+    for (let i = 1; i + 1 < around.length; i++) triangle(around[0]!, around[i]!, around[i + 1]!)
+  }
+
+  squares.forEach((_, k) => {
+    const { ids, w } = fineIds[k]!
+    const h = ids.length / w
+    for (let v = 0; v + 1 < h; v++) {
+      for (let u = 0; u + 1 < w; u++) {
+        const [nw, ne, sw, se] = [ids[v * w + u]!, ids[v * w + u + 1]!, ids[(v + 1) * w + u]!, ids[(v + 1) * w + u + 1]!]
+        triangle(sw, se, nw)
+        triangle(se, ne, nw)
+      }
+    }
+  })
+
+  const colors = new Float32Array(positions.length)
+  colors.set(mesh.colors)
+  colors.set(colorsOf(Uint8Array.from(colorsAdded)), mesh.colors.length)
+  return { positions: Float32Array.from(positions), colors, indices: Uint32Array.from(indices) }
+}
+
+/** Squares that overlap or touch, drawn as the one square holding them all. */
+function merged(squares: FineSquare[]): FineSquare[] {
+  const out = squares.map((q) => ({ ...q }))
+  for (let i = 0; i < out.length; i++) {
+    for (let j = i + 1; j < out.length; j++) {
+      const [p, q] = [out[i]!, out[j]!]
+      if (p.c0 > q.c1 || q.c0 > p.c1 || p.r0 > q.r1 || q.r0 > p.r1) continue
+      out[i] = { c0: Math.min(p.c0, q.c0), r0: Math.min(p.r0, q.r0), c1: Math.max(p.c1, q.c1), r1: Math.max(p.r1, q.r1) }
+      out.splice(j, 1)
+      return merged(out)
+    }
+  }
+  return out
+}

@@ -4,7 +4,7 @@
  *
  * Each cell's height sits at its centre, and between four centres the surface is two flat
  * triangles split along the south-east to north-west diagonal -- exactly what the 3D view draws
- * around an anchor (see `padMesh`). Continuous, so a wall is a ramp one cell wide: an anchor within
+ * around an anchor (see `withFineGround`). Continuous, so a wall is a ramp one cell wide: an anchor within
  * half a metre of one stands partway up it, in the figures and in the picture alike.
  *
  * Cells are whole metres: cell (ci, cj) covers e in [ci, ci + 1) and n in [cj, cj + 1).

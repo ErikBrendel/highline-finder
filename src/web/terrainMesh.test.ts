@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { overlay, polyline, type Seg } from './segments.js'
-import { COVER, COVER_RGB, CUT_RGB, colorsOf, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, standingHeight, type Readers } from './terrainMesh.js'
+import { COVER, COVER_RGB, CUT_RGB, colorsOf, coverOf, drape, extentOf, fineSquaresAround, groundAround, meshOf, samplePatch, withFineGround, standingHeight, type Readers } from './terrainMesh.js'
 
 const centre = { e: 400_000, n: 5_785_000 }
 
@@ -345,20 +345,41 @@ describe('drape', () => {
   })
 })
 
-describe('padMesh', () => {
-  it('hangs a curtain from its edge to the coarse ground it is cut into, all the way round', () => {
-    const cells = 10
-    const inset = 0.25
-    const { positions: p, indices } = padMesh(() => 20, () => COVER.ground, 0, 0, cells, { e: 0, n: 0 }, 0, () => 12, inset)
-    let wall = 0
+describe('withFineGround', () => {
+  it('puts the cells round a point into the ground as one closed sheet, every cell its own height', () => {
+    // On a cell centre, two metres a vertex, over ground that steps between neighbouring cells.
+    const at = { e: 400_000.5, n: 5_785_000.5 }
+    const patch = samplePatch(at, 20, 21, flat({ ground: (e, n) => 50 + (Math.floor(e * 7 + n * 3) % 5) }))
+    const cell = (ci: number, cj: number) => 60 + (ci % 3) + (cj % 2)
+    const squares = fineSquaresAround(patch, [{ e: at.e - 7, n: at.n + 3 }], 5)
+    const { positions: p, indices } = withFineGround(patch, meshOf(patch, 0, 'earth'), squares, cell, () => COVER.ground, 0)
+
+    const uses = new Map<string, number>()
+    let area = 0
     for (let t = 0; t < indices.length; t += 3) {
-      const [a, b, c] = [indices[t]! * 3, indices[t + 1]! * 3, indices[t + 2]! * 3]
-      const u = [p[b]! - p[a]!, p[b + 1]! - p[a + 1]!, p[b + 2]! - p[a + 2]!]
-      const v = [p[c]! - p[a]!, p[c + 1]! - p[a + 1]!, p[c + 2]! - p[a + 2]!]
-      const normal = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!]
-      if (Math.abs(normal[1]!) < 1e-6) wall += Math.hypot(...normal) / 2
+      const tri = [indices[t]!, indices[t + 1]!, indices[t + 2]!]
+      const [a, b, c] = tri.map((v) => [p[v * 3]!, p[v * 3 + 2]!])
+      area += ((b![1]! - a![1]!) * (c![0]! - a![0]!) - (b![0]! - a![0]!) * (c![1]! - a![1]!)) / 2
+      tri.forEach((v, i) => {
+        const key = [v, tri[(i + 1) % 3]!].sort((x, y) => x - y).join()
+        uses.set(key, (uses.get(key) ?? 0) + 1)
+      })
     }
-    // Both faces of a ribbon 8 m tall round the line the coarse ground is cut along.
-    expect(wall).toBeCloseTo(2 * 4 * (cells - 1 - 2 * inset) * 8, 3)
+    // Face up and cover the square once, with every edge inside it shared by exactly two triangles.
+    expect(area).toBeCloseTo(40 * 40, 6)
+    for (const [key, n] of uses) {
+      const [u, v] = key.split(',').map(Number)
+      const rim = [u!, v!].every((k) => Math.abs(p[k * 3]!) === 20) || [u!, v!].every((k) => Math.abs(p[k * 3 + 2]!) === 20)
+      expect(n).toBe(rim ? 1 : 2)
+    }
+    const [west, south, east, north] = extentOf(patch, squares[0]!)
+    let inside = 0
+    for (let k = 0; k < p.length / 3; k++) {
+      const [e, n] = [at.e + p[k * 3]!, at.n - p[k * 3 + 2]!]
+      if (e < west || e > east || n < south || n > north || !indices.includes(k)) continue
+      inside++
+      expect(p[k * 3 + 1]).toBe(cell(Math.floor(e), Math.floor(n)))
+    }
+    expect(inside).toBe((east - west + 1) * (north - south + 1))
   })
 })
