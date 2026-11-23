@@ -52,7 +52,7 @@ describe('integration', () => {
     const own = integration(null)
       .filter((f) => f.ground === 'survey')
       .map((f) => f.code)
-    expect(own.sort()).toEqual(['BB', 'BE', 'MV', 'NW', 'ST'])
+    expect(own.sort()).toEqual(['BB', 'BE', 'MV', 'NW', 'SN', 'ST'])
   })
 
   it('ranks searched above buildings above measured above bare', () => {

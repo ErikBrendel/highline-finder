@@ -1,0 +1,26 @@
+name: Deploy the proxy worker
+
+on:
+  push:
+    branches: [main]
+    paths: [proxy/**, src/shared/proxied.ts, .github/workflows/proxy.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proxy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # A repository secret, set in the GitHub UI: an API token from the "Edit Cloudflare Workers"
+      # template. The account id is not a secret and sits in wrangler.toml.
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: proxy

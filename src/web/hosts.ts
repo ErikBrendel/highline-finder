@@ -1,3 +1,5 @@
+import type { ProxiedHost } from '../shared/proxied.js'
+
 /**
  * The one survey that will not answer a development machine.
  *
@@ -22,3 +24,14 @@ export const VIA_DEV = '/via/st'
  */
 export const reachable = (url: string): string =>
   import.meta.env?.DEV && url.startsWith(FUSSY) ? VIA_DEV + url.slice(FUSSY.length) : url
+
+/**
+ * The hosts that send no CORS header at all, through the Cloudflare worker in proxy/.
+ *
+ * In development the dev server stands in for it on the same paths (see vite.config.ts), so a
+ * change to the routes can be tried before the worker is redeployed.
+ */
+const PROXY = 'https://highline-finder-proxy.erik-brendel.workers.dev'
+
+export const proxied = (host: ProxiedHost, path: string): string =>
+  import.meta.env?.DEV ? `/via/${host}${path}` : `${PROXY}/${host}${path}`

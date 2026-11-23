@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { PROXIED } from './src/shared/proxied.js'
 
 /**
  * Marks the dev server's tab with a "D", so a localhost tab is never mistaken for the deployed one.
@@ -28,6 +29,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/via\/st/, ''),
       },
+      // The hosts with no CORS header for anyone, which the deployed site reads through its proxy.
+      ...Object.fromEntries(
+        Object.entries(PROXIED).map(([host, { origin }]) => [
+          `/via/${host}/`,
+          { target: origin, changeOrigin: true, rewrite: (path: string) => path.slice(`/via/${host}`.length) },
+        ]),
+      ),
     },
   },
   root: 'src/web',

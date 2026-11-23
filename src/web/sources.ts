@@ -2,7 +2,8 @@ import { Grid } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
 import { latticeProjector, toUtm32, toWgs84, zoneOf } from '../shared/geo.js'
 import { fetchCached, readCached, writeCached } from './tileCache.js'
-import { reachable } from './hosts.js'
+import { proxied, reachable } from './hosts.js'
+import { unzipOne } from './unzip.js'
 import { nearState } from './coverage.js'
 
 /**
@@ -252,6 +253,98 @@ export const mecklenburgVorpommern = wcsSource({
   zone: 33,
 })
 
+/* ------------------------------------------------------------------------------ Saxony */
+
+const SN_SHARE = { dgm1: 'JCcXyifaNdLDnxZ', dom1: 'S6wwnFwX7882sZm' } as const
+const SN_TILE = 2000
+
+/**
+ * Saxony, which publishes both models as open data and will not let a browser read either.
+ *
+ * GeoSN hands out 2 km tiles as zips from its GeoCloud, which sends no CORS header and cannot be
+ * made to -- their words, with the suggestion to proxy it, which is what hosts.ts does.
+ *
+ * Already in zone 33, so a tile is copied rather than carried across. The surface model is 1 m
+ * LiDAR, where Brandenburg's is 0.2 m photogrammetry: it sees through small gaps in a crown that
+ * bDOM bridges, so canopy figures here run a little lower for the same wood.
+ */
+export const sachsen: Source = {
+  id: 'sn',
+  attribution: 'GeoSN, dl-de/by-2-0',
+  hasSurface: true,
+  covers(e, n) {
+    const { lat, lon } = toWgs84(e, n)
+    return nearState('Sachsen', lon, lat)
+  },
+  async load(e0, n0, size, into) {
+    let held = false
+    for (let e = Math.floor(e0 / SN_TILE) * SN_TILE; e < e0 + size; e += SN_TILE) {
+      for (let n = Math.floor(n0 / SN_TILE) * SN_TILE; n < n0 + size; n += SN_TILE) {
+        const [ground, surface] = await Promise.all([snTile('dgm1', e, n), snTile('dom1', e, n)])
+        if (!ground) continue
+        copyInto(ground, into.ground)
+        if (surface) copyInto(surface, into.surface)
+        held = true
+      }
+    }
+    if (!held) throw new NoData('no Saxon tile covers this window')
+  },
+}
+
+/**
+ * One of Saxony's tiles, decoded once for the sixty-four windows cut from it.
+ *
+ * The zip is kept in the browser's tile cache like any other download; the decoded grid only in
+ * memory, and only for the last few tiles, because each is sixteen megabytes of float32.
+ */
+const snTiles = new Map<string, Promise<Grid | null>>()
+const SN_KEEP = 8
+
+function snTile(product: keyof typeof SN_SHARE, e: number, n: number): Promise<Grid | null> {
+  const name = `${product}_33${e / 1000}_${n / 1000}_2_sn_tiff.zip`
+  let job = snTiles.get(name)
+  if (job) {
+    snTiles.delete(name)
+    snTiles.set(name, job)
+    return job
+  }
+  job = fetchCached(proxied('sn', `/public.php/dav/files/${SN_SHARE[product]}/${name}`)).then(
+    async (zip) => {
+      const tile = Grid.filled(SN_TILE, SN_TILE, e, n + SN_TILE, 1)
+      await blitGeoTiff(await unzipOne(zip, '.tif'), tile)
+      return tile
+    },
+    // Past the state line there is simply no tile by that name.
+    (err: unknown) => {
+      if (/\b404\b/.test(String(err))) return null
+      throw err
+    },
+  )
+  job.catch(() => snTiles.delete(name))
+  snTiles.set(name, job)
+  for (const old of snTiles.keys()) {
+    if (snTiles.size <= SN_KEEP) break
+    snTiles.delete(old)
+  }
+  return job
+}
+
+/** The cells of `from` that `into` also covers, where `from` holds a value. Same lattice. */
+function copyInto(from: Grid, into: Grid): void {
+  const col0 = Math.round((into.e0 - from.e0) / from.res)
+  const row0 = Math.round((from.n1 - into.n1) / from.res)
+  for (let row = 0; row < into.h; row++) {
+    const r = row0 + row
+    if (r < 0 || r >= from.h) continue
+    for (let col = 0; col < into.w; col++) {
+      const c = col0 + col
+      if (c < 0 || c >= from.w) continue
+      const v = from.data[r * from.w + c]!
+      if (!Number.isNaN(v)) into.data[row * into.w + col] = v
+    }
+  }
+}
+
 /* ------------------------------------------------------------------------------ the republisher */
 
 const HD_API = 'https://api.hoehendaten.de:14444/v1/rawtif'
@@ -276,15 +369,13 @@ const USABLE_TO = 19
 /**
  * Höhendaten für Deutschland, which republishes the state surveys' own 1 m tiles.
  *
- * Last in the list and used wherever nothing better answers, which is now most of the country: only
- * four surveys can be read from a browser at all. Saxony is the sharpest example -- GeoSN publishes
- * DGM1 and DOM1 as open data, but only through a WMS that draws pictures of them and a file share
- * with no CORS headers, so nothing a browser holds can read a height out of either. What comes back
+ * Last in the list and used wherever nothing better answers, which is still most of the country:
+ * only five surveys can be read from a browser at all, Saxony only through a proxy. What comes back
  * from here is the state's own GeoTIFF, unaltered, with that state's attribution attached -- so a
  * figure measured from it is as good as one measured from the source, and is credited to it.
  *
  * Terrain only, whatever the state publishes: the surface model is not republished. So a line
- * planned in the twelve states without their own service is measured against the ground exactly and
+ * planned in the eleven states without their own service is measured against the ground exactly and
  * knows nothing about what is standing on it, which is the difference the info map colours in.
  *
  * It is also a third party rather than a survey office, on a non-standard port and with a rate
@@ -410,7 +501,7 @@ function decodeBase64(text: string): ArrayBuffer {
  * The one that holds the ground returns a raster and the others decline, which costs a wasted
  * request at a border and nothing at all after {@link answeredHere} has watched one succeed.
  *
- * The four surveys are the ones a browser can read a height out of, and being asked first is not a
+ * The five surveys are the ones a browser can read a height out of, and being asked first is not a
  * preference for the local office: they are the only ones that hold a surface model, so wherever
  * one answers a line knows what is standing under it and everywhere else it does not.
  */
@@ -419,6 +510,7 @@ export const SOURCES: Source[] = [
   sachsenAnhalt,
   nordrheinWestfalen,
   mecklenburgVorpommern,
+  sachsen,
   hoehendaten,
 ]
 
