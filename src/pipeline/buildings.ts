@@ -133,8 +133,9 @@ export interface BuildingsApplied {
  * Raises a region's ground onto its roofs, in place.
  *
  * `max` rather than the roof outright, because a LoD1 roof is a single flattened height and the
- * terrain under a building on a slope can sit above it at one corner. Same rule as the browser's
- * `standingGround`, so a planned line and a found one measure the same thing.
+ * terrain under a building on a slope can sit above it at one corner. The browser's
+ * `standingGround` has since moved to the surface model's roof height, which the search does not
+ * have at this stage -- so a found urban line can measure slightly differently once opened.
  *
  * Only the tiles the terrain was actually loaded for, since a roof blitted over an unloaded tile
  * would be a building floating on nothing.

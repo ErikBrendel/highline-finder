@@ -80,27 +80,28 @@ describe('windowsFor', () => {
 })
 
 describe('standingGround', () => {
-  /** Four metres of flat terrain with a 9 m roof over the right half. */
-  const win = (() => {
-    const make = (fill: (col: number) => number) => {
-      const g = Grid.filled(4, 1, 1000, 5_000_001, 1)
-      for (let col = 0; col < 4; col++) g.data[col] = fill(col)
-      return g
-    }
-    return {
-      ground: make(() => 4),
-      roof: make((col) => (col >= 2 ? 9 : NaN)),
-    }
-  })()
+  /** Four metres of flat terrain, a building over the right half modelled at 9 m and measured at 7. */
+  const make = (fill: (col: number) => number) => {
+    const g = Grid.filled(4, 1, 1000, 5_000_001, 1)
+    for (let col = 0; col < 4; col++) g.data[col] = fill(col)
+    return g
+  }
+  const win = {
+    ground: make(() => 4),
+    surface: make((col) => (col >= 2 ? 7 : 4)),
+    roof: make((col) => (col >= 2 ? 9 : NaN)),
+  }
 
-  it('reads the roof where there is a building and the terrain where there is not', () => {
+  it('stands on the measured roof where there is a building and on the terrain where there is not', () => {
     expect(standingGround(win, 1000.5, 5_000_000.5)).toBe(4)
-    expect(standingGround(win, 1002.5, 5_000_000.5)).toBe(9)
+    expect(standingGround(win, 1002.5, 5_000_000.5)).toBe(7)
   })
 
-  it('keeps the terrain where a flattened roof sits below the slope under it', () => {
-    const steep = { ...win, ground: Grid.filled(4, 1, 1000, 5_000_001, 1) }
-    steep.ground.data.fill(11)
-    expect(standingGround(steep, 1002.5, 5_000_000.5)).toBe(11)
+  it('falls back to the modelled roof where no surface model has arrived', () => {
+    expect(standingGround({ ...win, surface: make(() => NaN) }, 1002.5, 5_000_000.5)).toBe(9)
+  })
+
+  it('never reads a roof below the terrain beside it', () => {
+    expect(standingGround({ ...win, ground: make(() => 11) }, 1002.5, 5_000_000.5)).toBe(11)
   })
 })

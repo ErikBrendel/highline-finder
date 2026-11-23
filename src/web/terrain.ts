@@ -346,20 +346,27 @@ function cellOf(layer: Layer, e: number, n: number): number {
 /**
  * The height something actually stands at: terrain, or the roof where there is a building.
  *
- * The max rather than the roof outright, because a LoD1 roof is a single flattened height and the
- * terrain under a building on a slope can sit above it at one corner. Exported for its test; used
- * through `cellOf`, which is what puts it under the bilinear sampler so a roof edge reads as a
- * one-metre ramp instead of a vertical step -- and that is what stops the anchor optimiser
- * chattering across it.
+ * The building model only says *where* a roof is. Its height is a single flattened figure per part,
+ * metres off the real roof wherever the roof is pitched or a small part is modelled tall, while the
+ * surface model measured the roof itself -- and is what the 3D view draws. Taking the height from
+ * there keeps the anchor, the chart and the picture on the same roof. The building model's own
+ * figure is the fallback only where no surface model has arrived.
+ *
+ * The max with the terrain, because the two surveys disagree by centimetres and a roof must never
+ * read below the ground beside it. Exported for its test; used through `cellOf`, which is what puts
+ * it under the bilinear sampler so a roof edge reads as a one-metre ramp instead of a vertical step
+ * -- and that is what stops the anchor optimiser chattering across it.
  */
 export function standingGround(
-  win: { ground: Grid; roof: Grid },
+  win: { ground: Grid; surface: Grid; roof: Grid },
   e: number,
   n: number,
 ): number {
-  const roof = win.roof.nearest(e, n)
   const ground = win.ground.nearest(e, n)
-  return Number.isNaN(roof) ? ground : Math.max(ground, roof)
+  const roof = win.roof.nearest(e, n)
+  if (Number.isNaN(roof)) return ground
+  const measured = win.surface.nearest(e, n)
+  return Math.max(ground, Number.isNaN(measured) ? roof : measured)
 }
 
 /** Whether a point stands on a building. False where the window has not arrived. */
