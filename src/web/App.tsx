@@ -28,7 +28,7 @@ import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import {
   DRAG_LOOKAHEAD, ensureTerrain, fetchingWindows, groundSampler, onBuilding, onWindowActivity,
-  roofs, surfaceKnown, surfaceSampler,
+  roofs, canopyAlong, surfaceSampler, type Canopy,
 } from './terrain.js'
 import { sourceFor } from './sources.js'
 import { coverAlong, coverFailed, ensureCover, onCoverChange, roadsFor, water } from './landcover.js'
@@ -67,15 +67,15 @@ import { toWgs84 } from '../shared/geo.js'
 type DebugLayer = 'none' | 'coarse' | 'terrain' | 'surface' | 'buildings' | 'roads' | 'regions'
 
 /**
- * Whether a surface model covers the corridor a line of this span is measured over.
+ * What is known about what stands along the corridor a line of this span is measured over.
  *
  * One expression, used both to tell the reader and to tell `planLine`, so the banner and the
  * figures cannot end up disagreeing about whether anything was known about what is standing here.
  * The corridor is the one the measurement actually reads -- see `measuredHalfWidth` -- rather than
  * the wider one the drag prefetches.
  */
-const canopyOver = (a: Pos, b: Pos, length: number, p: Params): boolean =>
-  surfaceKnown(a, b, measuredHalfWidth(length, p))
+const canopyOver = (a: Pos, b: Pos, length: number, p: Params): Canopy =>
+  canopyAlong(a, b, measuredHalfWidth(length, p))
 
 /** What each anchor class actually means for the trip, which the word alone does not say. */
 const KIND_HELP: Record<LineKind, string> = {
@@ -752,12 +752,13 @@ export function App() {
       // says so -- see PlannedLine.unmeasured.
       {
         tolerateGaps: true,
-        canopyKnown: canopyOver(
-          customUtm.a,
-          customUtm.b,
-          Math.hypot(customUtm.b.e - customUtm.a.e, customUtm.b.n - customUtm.a.n),
-          params,
-        ),
+        canopyKnown:
+          canopyOver(
+            customUtm.a,
+            customUtm.b,
+            Math.hypot(customUtm.b.e - customUtm.a.e, customUtm.b.n - customUtm.a.n),
+            params,
+          ) !== 'none',
       },
     )
   }, [params, customUtm, sagPct, terrainVersion, rig, scene])
@@ -1097,16 +1098,16 @@ export function App() {
   )
 
   /**
-   * Whether the canopy figures for this line describe what is standing on the ground, or bare earth.
+   * Whether the canopy figures for this line were measured, estimated, or describe bare earth.
    *
-   * Outside Brandenburg the terrain comes from a source with no surface model, and the app fills
-   * the surface in from the terrain so every figure stays finite. That makes the clearance exact
-   * and the canopy a fiction, which is fine as long as it is said out loud.
+   * Where no survey's surface model can be read the canopy map's estimate stands in, and where that
+   * fails too the surface is the terrain, so every figure stays finite. Either is fine as long as it
+   * is said out loud.
    */
-  const canopyKnown = useMemo(
-    () =>
+  const canopy = useMemo(
+    (): Canopy =>
       !shownEnds || !params
-        ? true
+        ? 'measured'
         : canopyOver(shownEnds.a, shownEnds.b, selected!.length, params),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shownEnds, params, terrainVersion],
@@ -1549,9 +1550,9 @@ export function App() {
                     <>Ground and canopy are both read here.</>
                   ) : (
                     <>
-                      <b>Terrain only here:</b> nothing is known about the trees, and no building
-                      stands anywhere outside Brandenburg &mdash; a roof would measure as the ground
-                      under it.
+                      <b>Canopy estimated here:</b> the trees come from a satellite canopy map that
+                      can be metres off, and there are no buildings in it &mdash; a roof would
+                      measure as the ground under it.
                     </>
                   )}
                 </>
@@ -1587,7 +1588,7 @@ export function App() {
               at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
               failed={terrainFailed}
               fetching={fetchingElevation}
-              canopyKnown={canopyKnown}
+              canopy={canopy}
               sag={sagPct !== null ? { pct: sagPct, floor: SAG_MIN_PCT } : null}
               onSag={setSagPct}
               full={full}

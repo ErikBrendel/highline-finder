@@ -7,6 +7,7 @@ import { fetchCached } from './tileCache.js'
 import { NoData, noteAnswered, sourcesFor, type Source } from './sources.js'
 import { report } from './report.js'
 import { surfaceAt, type CellReader } from './cellSurface.js'
+import { estimateCanopy } from './canopyMap.js'
 
 /**
  * Elevation on demand, for measuring user-placed lines.
@@ -71,12 +72,16 @@ interface Window {
    * building it belongs to.
    */
   roof: Grid
-  /**
-   * Whether the surface came from a survey or was copied from the terrain because the source for
-   * this ground has no surface model. False means the canopy figures describe bare earth.
-   */
-  hasSurface: boolean
+  /** Where the surface came from. See {@link Canopy}. */
+  canopy: Canopy
 }
+
+/**
+ * How much is known about what stands on the ground: a survey's surface model, the canopy map's
+ * estimate on top of the terrain, or nothing -- the surface copied from the terrain, so the canopy
+ * figures describe bare earth.
+ */
+export type Canopy = 'measured' | 'estimated' | 'none'
 
 const loaded = new Map<string, Window>()
 const inFlight = new Map<string, Promise<void>>()
@@ -185,10 +190,10 @@ async function loadRoofs(e0: number, n0: number, into: Grid): Promise<void> {
  * this ground is not its, which is the ordinary case a few hundred metres outside a state border.
  * Only running out of sources is a failure.
  *
- * A source without a surface model leaves the canopy unknown, and the window says so. Rather than
- * carry NaN through every canopy figure, the surface is set to the terrain: that reads as bare
- * ground, which is the assumption the numbers are then making, and `hasSurface` is what lets the
- * panel say the numbers are making it. The hard constraint -- clearance over terrain -- is measured
+ * A source without a surface model gets the canopy map's estimate on top of its terrain, and the
+ * window says so. Where even that fails, rather than carry NaN through every canopy figure, the
+ * surface is set to the terrain: that reads as bare ground, which is the assumption the numbers are
+ * then making, and `canopy` is what lets the panel say the numbers are making it. The hard constraint -- clearance over terrain -- is measured
  * against ground either way and is exact wherever a line can be drawn at all.
  */
 async function loadWindow(tx: number, ty: number): Promise<void> {
@@ -229,7 +234,18 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
     emit({ tx, ty, state: 'failed' })
     throw last
   }
-  if (!used.hasSurface) surface.data.set(ground.data)
+  let canopy: Canopy = 'measured'
+  if (!used.hasSurface) {
+    surface.data.set(ground.data)
+    canopy = await estimateCanopy(ground, surface).then(
+      () => 'estimated' as const,
+      (e: unknown) => {
+        report(`estimating the canopy in the window at ${e0},${n0}`, e)
+        surface.data.set(ground.data)
+        return 'none' as const
+      },
+    )
+  }
 
   // Separately, after, and caught: an outage on the city model must cost the buildings, never the
   // elevation. The roof grid starts all NaN, which is the same answer as open ground. Only asked of
@@ -239,19 +255,20 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
       report(`rasterising buildings into the window at ${e0},${n0}`, e),
     )
   }
-  loaded.set(keyOf(tx, ty), { ground, surface, roof, hasSurface: used.hasSurface })
+  loaded.set(keyOf(tx, ty), { ground, surface, roof, canopy })
   emit({ tx, ty, state: 'loaded' })
 }
 
 /**
- * Whether every window along a corridor knows what is standing on the ground.
+ * The least that is known about what stands along a corridor, over all its loaded windows.
  *
- * False where any of them came from a source with no surface model, which means the canopy figures
- * describe bare ground rather than what is there. Nothing else about the line is affected, and
- * saying so is the whole of the handling this needs.
+ * Nothing else about the line depends on it -- the clearance is measured against the terrain
+ * either way -- and saying which it is is the whole of the handling this needs.
  */
-export const surfaceKnown = (a: Pos, b: Pos, margin = WINDOW): boolean =>
-  windowsFor(a, b, margin).every(([tx, ty]) => loaded.get(keyOf(tx, ty))?.hasSurface !== false)
+export function canopyAlong(a: Pos, b: Pos, margin = WINDOW): Canopy {
+  const kinds = new Set(windowsFor(a, b, margin).map(([tx, ty]) => loaded.get(keyOf(tx, ty))?.canopy))
+  return kinds.has('none') ? 'none' : kinds.has('estimated') ? 'estimated' : 'measured'
+}
 
 /**
  * Windows covering the corridor between two points, fattened by `margin` metres.

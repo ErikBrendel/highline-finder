@@ -25,12 +25,15 @@ export interface StateFacts {
   name: string
   /** Heights: the state's own coverage service, or the republisher that carries everyone's. */
   ground: Provenance
-  /** Whether anything measures what is standing on the ground here. Only a surface model does. */
-  canopy: boolean
+  /**
+   * What is known about what stands on the ground: a survey's surface model, or the canopy map's
+   * estimate, which covers every state and has no buildings in it.
+   */
+  canopy: 'measured' | 'estimated'
   /**
    * Whether building outlines are known, so a roof counts as somewhere to stand. Only Brandenburg's
    * city model is loaded (see terrain.ts); elsewhere a roof is just something tall in the surface
-   * model, which reads as canopy -- or, with no surface model, is not seen at all.
+   * model, which reads as canopy -- or, where the canopy is estimated, is not seen at all.
    */
   buildings: boolean
   /** Relief: the state's own at a metre, or the federal one at five. */
@@ -47,12 +50,18 @@ export interface StateFacts {
  * Four bands rather than six columns, because a square two hundred pixels wide cannot say five
  * things at once and the hover says them all anyway. They are ordered by what changes the answer
  * most: whether a line was found for you, then whether roofs are known as roofs, then whether the
- * trees are measured, then nothing.
+ * trees are measured or only estimated.
  */
-export type Tier = 'terrain' | 'measured' | 'buildings' | 'searched'
+export type Tier = 'estimated' | 'measured' | 'buildings' | 'searched'
 
 export const tierOf = (f: StateFacts): Tier =>
-  f.lines ? 'searched' : f.buildings && f.canopy ? 'buildings' : f.canopy ? 'measured' : 'terrain'
+  f.lines
+    ? 'searched'
+    : f.canopy === 'estimated'
+      ? 'estimated'
+      : f.buildings
+        ? 'buildings'
+        : 'measured'
 
 /**
  * A point that is definitely inside a state, for asking the sources what they hold there.
@@ -195,7 +204,7 @@ export function integration(searched: Set<string> | null): StateFacts[] {
       code: s.code,
       name: s.name,
       ground: source && source !== hoehendaten ? 'survey' : 'shared',
-      canopy: source?.hasSurface ?? false,
+      canopy: source?.hasSurface ? 'measured' : 'estimated',
       buildings: s.name === 'Brandenburg',
       shade: SHADE_STATES.has(s.name) ? 'survey' : 'shared',
       ortho: ORTHO_STATES.has(s.name) ? 'survey' : 'shared',

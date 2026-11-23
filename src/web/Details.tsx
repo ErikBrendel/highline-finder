@@ -4,6 +4,7 @@ import type { PlannedLine, RigHeights } from '../shared/plan.js'
 import { DEV_MODE } from './devMode.js'
 import { TRUNK_FRACTION, rigMeans, rigRange, type Standing } from '../shared/anchoring.js'
 import type { Cover } from './landcover.js'
+import type { Canopy } from './terrain.js'
 import { CHART_NARROW, CHART_WIDE, ProfileChart, type Wings } from './ProfileChart.js'
 import { Slider, type SliderBand } from './Slider.js'
 import {
@@ -208,13 +209,11 @@ interface Props {
   /** Whether elevation is still arriving, which is what makes a gap in the chart temporary. */
   fetching: boolean
   /**
-   * Whether anything is known about what stands on the ground under this line.
-   *
-   * False outside Brandenburg, where the terrain comes from a source with no surface model. Every
-   * figure stays finite -- the surface is taken to be the ground -- so clearance over terrain is
-   * exact and the canopy ones describe a bare field. Which is only acceptable while it is said.
+   * Where the canopy figures come from. Outside the states whose surface model a browser can read
+   * they are the canopy map's estimate, and where even that failed the surface is taken to be the
+   * ground, so the canopy figures describe a bare field. Either is only acceptable while it is said.
    */
-  canopyKnown: boolean
+  canopy: Canopy
   /**
    * The sag every line is measured at, and the lowest it may go.
    *
@@ -264,7 +263,7 @@ const KEEP_VISIBLE = 40
 
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
-  canopyKnown, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
+  canopy, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
   rig, onRig, onFlip, onGuide, guideOpen, onClose,
 }: Props) {
   /**
@@ -689,7 +688,7 @@ export function Details({
                 cover={cover}
                 params={params}
                 fetching={fetching}
-                canopyKnown={canopyKnown}
+                canopyKnown={canopy !== 'none'}
                 box={chartBox}
                 onHover={setHoverAt}
               />
@@ -727,9 +726,12 @@ export function Details({
             </div>
           )}
           <div className="legend">
-            <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m, LGB)</span>
-            {canopyKnown && (
-              <span><i style={{ background: 'var(--canopy)' }} />canopy (bDOM, LGB)</span>
+            <span><i style={{ background: 'var(--ground)' }} />terrain (DGM 1 m)</span>
+            {canopy !== 'none' && (
+              <span>
+                <i style={{ background: 'var(--canopy)' }} />
+                {canopy === 'measured' ? 'canopy (surface model)' : 'canopy (estimated, Meta/WRI)'}
+              </span>
             )}
             <span><i style={{ background: 'var(--building)' }} />building, counted as ground (LoD1 footprint, bDOM roof; Brandenburg only)</span>
             <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
@@ -783,12 +785,23 @@ export function Details({
 
         {/* Same shape as the road banner and the same reason: a figure nobody measured must not read
             as a figure that came out well. */}
-        {!canopyKnown && (
+        {canopy === 'estimated' && (
+          <div className="violations" data-tone="wait">
+            <b>Canopy estimated, not measured</b>
+            <div>
+              No surface model for this ground can be read, so the trees come from Meta and
+              WRI&rsquo;s satellite canopy map: <strong>clearance and exposure are exact, the canopy
+              figures can be metres off</strong>. Buildings are not in it &mdash; an anchor on a roof
+              here is measured at the height of the ground beneath it.
+            </div>
+          </div>
+        )}
+        {canopy === 'none' && (
           <div className="violations" data-tone="wait">
             <b>No surface model for this ground</b>
             <div>
-              Only Brandenburg publishes one. Everywhere else the terrain is real and the canopy is
-              not: this line is measured as though the ground were bare, so{' '}
+              Neither a survey&rsquo;s surface model nor the canopy map could be read here. The
+              terrain is real and the canopy is not: this line is measured as though the ground were bare, so{' '}
               <strong>clearance and exposure are exact and the canopy figures are empty</strong>.
               Nor is there a building model &mdash; an anchor on a roof here is measured at the height
               of the ground beneath it. Trees, walls and anything else standing are yours to check.

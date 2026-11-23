@@ -142,11 +142,15 @@ const PlannerGuide = () => (
 
     <h2><span className="ico">🛰️</span>The data</h2>
     <ul>
-      <li>Terrain and canopy, published free and open by the state surveys.</li>
+      <li>
+        Terrain and canopy, published free and open by the state surveys. Where a state&rsquo;s
+        canopy cannot be read, it is estimated from Meta and WRI&rsquo;s satellite canopy map,
+        which can be metres off.
+      </li>
       <li>
         Buildings in Brandenburg only, from its 3D city model: there a roof counts as ground you can
         anchor on, at the height the survey measured it. Elsewhere a roof reads as trees where the
-        canopy is measured, and is not seen at all where it is not.
+        canopy is measured, and is not seen at all where it is estimated.
       </li>
       <li>How much there is to measure against differs by state:</li>
     </ul>
@@ -166,8 +170,9 @@ const MapGuide = ({ regions }: { regions: Region[] | null }) => (
     <h2><span className="ico">🛰️</span>The data</h2>
     <ul>
       <li>
-        Terrain and canopy, published free and open by the state surveys. Buildings in Brandenburg
-        only, from its 3D city model.
+        Terrain and canopy, published free and open by the state surveys, or estimated from Meta and
+        WRI&rsquo;s satellite canopy map where a state&rsquo;s cannot be read. Buildings in
+        Brandenburg only, from its 3D city model.
       </li>
       <li>
         Anywhere in Germany you can place two anchors by hand and have the span measured against

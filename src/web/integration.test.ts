@@ -29,9 +29,9 @@ describe('integration', () => {
   })
 
   it('reads canopy off the source that actually answers there', () => {
-    // The four surveys with a surface model, and one of the twelve without.
-    for (const code of ['BB', 'BE', 'ST', 'NW', 'MV']) expect(byCode(code).canopy).toBe(true)
-    expect(byCode('BY').canopy).toBe(false)
+    // The five surveys with a surface model, and one of the eleven without.
+    for (const code of ['BB', 'BE', 'ST', 'NW', 'MV', 'SN']) expect(byCode(code).canopy).toBe('measured')
+    expect(byCode('BY').canopy).toBe('estimated')
     expect(byCode('BY').ground).toBe('shared')
   })
 
@@ -44,7 +44,7 @@ describe('integration', () => {
    * Whether the point each state is judged by is really inside it.
    *
    * Not directly visible, so it is checked through what depends on it: a centroid that lands in the
-   * Baltic or in a neighbour would be asked of the wrong survey, and exactly the four states with
+   * Baltic or in a neighbour would be asked of the wrong survey, and exactly the states with
    * their own service must come back as 'survey'. Schleswig-Holstein is the shape that makes this
    * worth testing -- it wraps around the Kiel fjord and its average position is at sea.
    */
@@ -55,14 +55,14 @@ describe('integration', () => {
     expect(own.sort()).toEqual(['BB', 'BE', 'MV', 'NW', 'SN', 'ST'])
   })
 
-  it('ranks searched above buildings above measured above bare', () => {
+  it('ranks searched above buildings above measured above estimated', () => {
     // Without the dataset Brandenburg is only as good as its survey makes it; lines are what
     // lift it, and they are the one fact here that does not come from a service.
     expect(tierOf(byCode('BB'))).toBe('buildings')
     const searched = integration(new Set(['Brandenburg']))
     expect(tierOf(searched.find((f) => f.code === 'BB')!)).toBe('searched')
     expect(tierOf(byCode('NW'))).toBe('measured')
-    expect(tierOf(byCode('BY'))).toBe('terrain')
+    expect(tierOf(byCode('BY'))).toBe('estimated')
   })
 })
 

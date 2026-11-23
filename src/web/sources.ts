@@ -1,9 +1,9 @@
+import { unzipSync } from 'fflate'
 import { Grid } from '../shared/grid.js'
 import { blitGeoTiff } from '../shared/geotiff.js'
 import { latticeProjector, toUtm32, toWgs84, zoneOf } from '../shared/geo.js'
 import { fetchCached, readCached, writeCached } from './tileCache.js'
 import { proxied, reachable } from './hosts.js'
-import { unzipOne } from './unzip.js'
 import { nearState } from './coverage.js'
 
 /**
@@ -311,7 +311,10 @@ function snTile(product: keyof typeof SN_SHARE, e: number, n: number): Promise<G
   job = fetchCached(proxied('sn', `/public.php/dav/files/${SN_SHARE[product]}/${name}`)).then(
     async (zip) => {
       const tile = Grid.filled(SN_TILE, SN_TILE, e, n + SN_TILE, 1)
-      await blitGeoTiff(await unzipOne(zip, '.tif'), tile)
+      const files = unzipSync(new Uint8Array(zip), { filter: (f) => f.name.endsWith('.tif') })
+      const tif = Object.values(files)[0]
+      if (!tif) throw new NoData(`no GeoTIFF in ${name}`)
+      await blitGeoTiff(tif.slice().buffer, tile)
       return tile
     },
     // Past the state line there is simply no tile by that name.

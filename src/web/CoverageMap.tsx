@@ -22,7 +22,7 @@ const TIERS: { id: Tier; label: string; hint: string }[] = [
   { id: 'searched', label: 'Searched', hint: 'lines already found, ready to browse' },
   { id: 'buildings', label: 'Full measurement', hint: 'ground, canopy, and roofs to anchor on' },
   { id: 'measured', label: 'Ground and canopy', hint: 'no building outlines, a roof reads as trees' },
-  { id: 'terrain', label: 'Terrain only', hint: 'nothing known about trees or buildings' },
+  { id: 'estimated', label: 'Canopy estimated', hint: 'trees from satellite imagery, no buildings' },
 ]
 
 /**
@@ -134,13 +134,13 @@ export function CoverageMap({ regions }: { regions: Region[] | null }) {
           <Row on={here.ground === 'survey'} label="Ground height">
             {here.ground === 'survey' ? "the state's own survey" : 'via hoehendaten.de'}
           </Row>
-          <Row on={here.canopy} label="Canopy height">
-            {here.canopy ? 'measured' : 'not published where a browser can read it'}
+          <Row on={here.canopy === 'measured'} label="Canopy height">
+            {here.canopy === 'measured' ? 'measured' : 'estimated from satellite imagery'}
           </Row>
           <Row on={here.buildings} label="Buildings">
             {here.buildings
               ? 'outlines, roofs to anchor on'
-              : here.canopy
+              : here.canopy === 'measured'
                 ? 'no outlines, a roof reads as trees'
                 : 'not seen at all'}
           </Row>

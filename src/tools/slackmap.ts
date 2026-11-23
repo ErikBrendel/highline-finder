@@ -14,7 +14,7 @@ import {
   type Plan,
 } from '../web/optimize.js'
 import { sourceFor } from '../web/sources.js'
-import { ensureTerrain, groundSampler, roofs, surfaceKnown, surfaceSampler } from '../web/terrain.js'
+import { ensureTerrain, groundSampler, roofs, canopyAlong, surfaceSampler, type Canopy } from '../web/terrain.js'
 import { useCacheStore } from '../web/tileCache.js'
 import type { Pos } from '../shared/grid.js'
 import type { Candidate, LineKind, Params } from '../shared/types.js'
@@ -209,7 +209,7 @@ interface Row {
   relief: number
   /** Furthest either anchor travelled from its pin. */
   moved: number
-  canopyKnown: boolean
+  canopy: Canopy
   theirLength?: number
   theirHeight?: number
   pinned: Measured
@@ -321,7 +321,7 @@ function report(rows: Row[]): void {
   )
   for (const [r, n] of [...byRule].sort((x, y) => y[1] - x[1])) console.log(`  ${pad(n, 4)}  ${r}`)
 
-  const blind = rows.filter((r) => !r.canopyKnown).length
+  const blind = rows.filter((r) => r.canopy !== 'measured').length
   if (blind) console.log(`\n  ${blind} of ${rows.length} sit where no survey publishes a canopy.`)
 }
 
@@ -435,7 +435,7 @@ async function main() {
         Math.hypot(best.a.e - pins.a.e, best.a.n - pins.a.n),
         Math.hypot(best.b.e - pins.b.e, best.b.n - pins.b.n),
       ),
-      canopyKnown: surfaceKnown(best.a, best.b),
+      canopy: canopyAlong(best.a, best.b),
       theirLength: info.length,
       theirHeight: info.height,
       pinned,

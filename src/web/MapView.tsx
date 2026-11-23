@@ -22,6 +22,7 @@ import {
   SHADE_SURVEYS,
 } from './surveys.js'
 import { integration } from './integration.js'
+import { CANOPY_MAP_ATTRIBUTION } from './canopyMap.js'
 import { PLANNED_ID } from '../shared/plan.js'
 import type { CustomPoints, LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
@@ -54,7 +55,7 @@ const BASEMAP_ATTR = creditsFor([SENTINEL, ...ORTHO_SURVEYS, FEDERAL_SHADE, ...S
  * whatever the basemap is, and they are VG250 -- the survey's own boundary dataset. See
  * `npm run boundaries`.
  */
-const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR, BKG_ATTR]
+const DATA_ATTRIBUTION = [LGB_ATTR, OSM_ATTR, BKG_ATTR, CANOPY_MAP_ATTRIBUTION]
 /**
  * The relief, with the flat-ground grey underneath it.
  *
