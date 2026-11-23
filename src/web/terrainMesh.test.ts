@@ -345,6 +345,27 @@ describe('drape', () => {
   })
 })
 
+/** Face up, covering the square once, with every edge inside it shared by exactly two triangles. */
+const expectOneSheet = (p: Float32Array, indices: Uint32Array, half: number) => {
+  const uses = new Map<string, number>()
+  let area = 0
+  for (let t = 0; t < indices.length; t += 3) {
+    const tri = [indices[t]!, indices[t + 1]!, indices[t + 2]!]
+    const [a, b, c] = tri.map((v) => [p[v * 3]!, p[v * 3 + 2]!])
+    area += ((b![1]! - a![1]!) * (c![0]! - a![0]!) - (b![0]! - a![0]!) * (c![1]! - a![1]!)) / 2
+    tri.forEach((v, i) => {
+      const key = [v, tri[(i + 1) % 3]!].sort((x, y) => x - y).join()
+      uses.set(key, (uses.get(key) ?? 0) + 1)
+    })
+  }
+  expect(area).toBeCloseTo(4 * half * half, 6)
+  for (const [key, n] of uses) {
+    const [u, v] = key.split(',').map(Number)
+    const rim = [u!, v!].every((k) => Math.abs(p[k * 3]!) === half) || [u!, v!].every((k) => Math.abs(p[k * 3 + 2]!) === half)
+    expect(n).toBe(rim ? 1 : 2)
+  }
+}
+
 describe('withFineGround', () => {
   it('puts the cells round a point into the ground as one closed sheet, every cell its own height', () => {
     // On a cell centre, two metres a vertex, over ground that steps between neighbouring cells.
@@ -354,24 +375,7 @@ describe('withFineGround', () => {
     const squares = fineSquaresAround(patch, [{ e: at.e - 7, n: at.n + 3 }], 5)
     const { positions: p, indices } = withFineGround(patch, meshOf(patch, 0, 'earth'), squares, cell, () => COVER.ground, 0)
 
-    const uses = new Map<string, number>()
-    let area = 0
-    for (let t = 0; t < indices.length; t += 3) {
-      const tri = [indices[t]!, indices[t + 1]!, indices[t + 2]!]
-      const [a, b, c] = tri.map((v) => [p[v * 3]!, p[v * 3 + 2]!])
-      area += ((b![1]! - a![1]!) * (c![0]! - a![0]!) - (b![0]! - a![0]!) * (c![1]! - a![1]!)) / 2
-      tri.forEach((v, i) => {
-        const key = [v, tri[(i + 1) % 3]!].sort((x, y) => x - y).join()
-        uses.set(key, (uses.get(key) ?? 0) + 1)
-      })
-    }
-    // Face up and cover the square once, with every edge inside it shared by exactly two triangles.
-    expect(area).toBeCloseTo(40 * 40, 6)
-    for (const [key, n] of uses) {
-      const [u, v] = key.split(',').map(Number)
-      const rim = [u!, v!].every((k) => Math.abs(p[k * 3]!) === 20) || [u!, v!].every((k) => Math.abs(p[k * 3 + 2]!) === 20)
-      expect(n).toBe(rim ? 1 : 2)
-    }
+    expectOneSheet(p, indices, 20)
     const [west, south, east, north] = extentOf(patch, squares[0]!)
     let inside = 0
     for (let k = 0; k < p.length / 3; k++) {
@@ -381,5 +385,13 @@ describe('withFineGround', () => {
       expect(p[k * 3 + 1]).toBe(cell(Math.floor(e), Math.floor(n)))
     }
     expect(inside).toBe((east - west + 1) * (north - south + 1))
+  })
+
+  it('closes the coarse cell left between two squares one cell apart', () => {
+    const at = { e: 400_000.5, n: 5_785_000.5 }
+    const patch = samplePatch(at, 20, 21, flat())
+    const squares = [{ c0: 4, r0: 4, c1: 6, r1: 6 }, { c0: 7, r0: 4, c1: 9, r1: 6 }]
+    const { positions, indices } = withFineGround(patch, meshOf(patch, 0, 'earth'), squares, () => 60, () => COVER.ground, 0)
+    expectOneSheet(positions, indices, 20)
   })
 })

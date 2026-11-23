@@ -632,11 +632,12 @@ export function withFineGround(
   }
 
   const indices: number[] = []
+  const turn = (a: number, b: number, c: number) =>
+    (positions[b * 3 + 2]! - positions[a * 3 + 2]!) * (positions[c * 3]! - positions[a * 3]!) -
+    (positions[b * 3]! - positions[a * 3]!) * (positions[c * 3 + 2]! - positions[a * 3 + 2]!)
   const triangle = (a: number, b: number, c: number) => {
     if (missing.has(a) || missing.has(b) || missing.has(c)) return
-    const cross =
-      (positions[b * 3 + 2]! - positions[a * 3 + 2]!) * (positions[c * 3]! - positions[a * 3]!) -
-      (positions[b * 3]! - positions[a * 3]!) * (positions[c * 3 + 2]! - positions[a * 3 + 2]!)
+    const cross = turn(a, b, c)
     // Facing up, as meshOf's own triangles do.
     if (cross > 0) indices.push(a, b, c)
     else if (cross < 0) indices.push(a, c, b)
@@ -678,10 +679,16 @@ export function withFineGround(
         ring.push(ids[v * w + u]!)
       }
     })
-    const from = onEdge.findIndex((k) => k < 0)
-    const o = ring.indexOf(idAt(...corners[from]!))
-    const around = [...ring.slice(o), ...ring.slice(0, o)]
-    for (let i = 1; i + 1 < around.length; i++) triangle(around[0]!, around[i]!, around[i + 1]!)
+    // Clip corners off one by one, first those beside a cell centre mid-side: that centre becomes a
+    // corner itself, so the ring never ends up flat and every centre stays a vertex.
+    while (ring.length > 3) {
+      const at = (i: number) => ring[(i + ring.length) % ring.length]!
+      const corner = (i: number) => turn(at(i - 1), at(i), at(i + 1)) !== 0
+      const i = Math.max(0, ring.findIndex((_, i) => corner(i) && (!corner(i - 1) || !corner(i + 1))))
+      triangle(at(i - 1), at(i), at(i + 1))
+      ring.splice(i, 1)
+    }
+    triangle(ring[0]!, ring[1]!, ring[2]!)
   }
 
   squares.forEach((_, k) => {
