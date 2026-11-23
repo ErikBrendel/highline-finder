@@ -11,9 +11,9 @@ const square = (roofAt: (c: number, j: number) => number): BuildingCells => {
 }
 
 /** A 24 by 12 m block turned 30 degrees, as the grid sees it: a staircase on every side. */
-const turned = (top: (c: number, j: number) => number) =>
+const turned = (top: (c: number, j: number) => number, mid = SIDE / 2) =>
   square((c, j) => {
-    const [x, y] = [c + 0.5 - SIDE / 2, j + 0.5 - SIDE / 2]
+    const [x, y] = [c + 0.5 - mid, j + 0.5 - SIDE / 2]
     const [u, v] = [x * Math.cos(Math.PI / 6) + y * Math.sin(Math.PI / 6), -x * Math.sin(Math.PI / 6) + y * Math.cos(Math.PI / 6)]
     return Math.abs(u) < 12 && Math.abs(v) < 6 ? top(c, j) : NaN
   })
@@ -87,5 +87,12 @@ describe('buildingMesh', () => {
     for (const f of facades) {
       expect(f.normal[0]! * (f.mid[0]! - middle[0]!) + f.normal[2]! * (f.mid[1]! - middle[1]!)).toBeGreaterThan(0)
     }
+  })
+
+  it('colours the whole cut of a turned building, its fitted corners on the edge', () => {
+    const walls = faces(buildingMesh(turned(() => 60, 0.5), centre, 0)).filter((f) => Math.abs(f.normal[1]!) < 1e-6)
+    const onCut = walls.filter((f) => f.mid[0]! < -SIDE / 2 + 1e-4)
+    expect(onCut.length).toBeGreaterThan(0)
+    expect(walls.filter((f) => f.cut)).toEqual(onCut)
   })
 })

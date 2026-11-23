@@ -171,13 +171,15 @@ function corners(loop: Pt[]): number[] {
 interface Line {
   at: Pt
   dir: Pt
+  /** Set where the line is the edge of the square, which it then lies on exactly. */
+  edge?: { axis: 0 | 1; value: number }
 }
 
 /** The line through some points, by least squares -- exact on the edge of the square. */
 function fit(points: Pt[], w: number, h: number): Line {
   for (const [axis, value] of [[0, 0], [0, w], [1, 0], [1, h]] as const) {
     if (points.every((p) => p[axis] === value)) {
-      return { at: points[0]!, dir: axis === 0 ? [0, 1] : [1, 0] }
+      return { at: points[0]!, dir: axis === 0 ? [0, 1] : [1, 0], edge: { axis, value } }
     }
   }
   const mx = points.reduce((s, p) => s + p[0], 0) / points.length
@@ -230,10 +232,15 @@ function fitLoop(traced: Pt[], w: number, h: number): { fitted: Pt[]; plain: Pt[
     const q = lines[s]!
     const cross = p.dir[0] * q.dir[1] - p.dir[1] * q.dir[0]
     const corner = loop[index]!
-    if (Math.abs(cross) < MIN_CORNER) return corner
-    const t = ((q.at[0] - p.at[0]) * q.dir[1] - (q.at[1] - p.at[1]) * q.dir[0]) / cross
-    const meet: Pt = [p.at[0] + t * p.dir[0], p.at[1] + t * p.dir[1]]
-    return Math.hypot(meet[0] - corner[0], meet[1] - corner[1]) > 2 * FIT_TOLERANCE ? corner : meet
+    let at: Pt = corner
+    if (Math.abs(cross) >= MIN_CORNER) {
+      const t = ((q.at[0] - p.at[0]) * q.dir[1] - (q.at[1] - p.at[1]) * q.dir[0]) / cross
+      const meet: Pt = [p.at[0] + t * p.dir[0], p.at[1] + t * p.dir[1]]
+      if (Math.hypot(meet[0] - corner[0], meet[1] - corner[1]) <= 2 * FIT_TOLERANCE) at = meet
+    }
+    // A wall along the square's edge is the cut, and is told apart from a facade by lying on it.
+    for (const { edge } of [p, q]) if (edge) at = edge.axis === 0 ? [edge.value, at[1]] : [at[0], edge.value]
+    return at
   })
   return { fitted, plain }
 }
