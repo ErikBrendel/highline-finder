@@ -435,14 +435,6 @@ export function App() {
    * and the next click is careful again.
    */
   const [reach, setReach] = useState(1)
-  /**
-   * The one anchor a run is allowed to move, or null for the ordinary two-ended run.
-   *
-   * Set only by a drop in the 3D view. Putting an anchor somewhere by looking at the ground is a
-   * decision; walking the *other* end away from wherever it was, as a two-ended run would, throws
-   * away a decision nobody revisited.
-   */
-  const [optimizeOnly, setOptimizeOnly] = useState<'a' | 'b' | null>(null)
   const [offer, setOffer] = useState<number | null>(null)
   // Bumped when a terrain fetch actually delivers something new, which is what re-measurement
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
@@ -1001,8 +993,7 @@ export function App() {
             rig,
             scene,
             reach,
-            only: optimizeOnly ?? undefined,
-          onProbe: (e, n) => probes.push(e, n),
+            onProbe: (e, n) => probes.push(e, n),
             // One honeycomb, around wherever the walk has got to, before every scan it makes.
             // Nothing is fetched for ground the line never reaches, and a step that stays inside
             // the window it started in -- almost all of them -- asks for nothing.
@@ -1590,8 +1581,6 @@ export function App() {
                 if (optimizing) return endRun()
                 setReach(offer ?? 1)
                 setOffer(null)
-                // The button is the two-ended run, whatever the last 3D drop asked for.
-                setOptimizeOnly(null)
                 setOptimizing(true)
               }}
               planned={planned}
@@ -1603,10 +1592,6 @@ export function App() {
               onSag={setSagPct}
               full={full}
               onFull={setFull}
-              /* A drop in the scene is a move and nothing more. It used to settle the anchor
-                 afterwards, which took the position away from the hand that had just chosen it --
-                 the optimise button is still there for anyone who wants that. */
-              onMoveAnchor={moveAnchor}
               onFlip={flipAnchors}
               onGuide={guide.show}
               guideOpen={guide.open}

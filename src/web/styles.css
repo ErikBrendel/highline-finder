@@ -909,43 +909,6 @@ header[data-measuring] .spacer { flex: none; }
    self-evident and a reader who has not spotted them gets nothing from them. */
 .scenelegend .ref { color: var(--muted); }
 
-/* Placing one anchor in steps. Top left, clear of the credit and the spin button. */
-.nudge {
-  position: absolute;
-  top: 34px;
-  left: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  background: var(--overlay);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 2px 10px var(--shadow);
-  font-size: 11px;
-}
-.nudge .which {
-  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
-  background: var(--line); color: #fff; font-weight: 700;
-}
-.nudge .pad {
-  display: grid;
-  grid-template-areas: '. up .' 'left . right' '. down .';
-  grid-template-columns: repeat(3, 34px);
-  grid-template-rows: repeat(3, 34px);
-  gap: 2px;
-}
-.nudge button {
-  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
-  border-radius: 5px; cursor: pointer; font-size: 11px; padding: 0;
-}
-.nudge button:hover { border-color: var(--accent); }
-.nudge .steps { display: flex; gap: 2px; }
-.nudge .steps button { padding: 3px 5px; color: var(--muted); }
-.nudge .steps button[data-active=true] { color: var(--accent); border-color: var(--accent); }
-.nudge .done { padding: 3px 10px; color: var(--muted); }
-
 .scenelegend {
   position: absolute;
   left: 10px;
