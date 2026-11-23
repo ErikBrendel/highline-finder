@@ -142,7 +142,12 @@ const PlannerGuide = () => (
 
     <h2><span className="ico">🛰️</span>The data</h2>
     <ul>
-      <li>Terrain, canopy and buildings, published free and open by the state surveys.</li>
+      <li>Terrain and canopy, published free and open by the state surveys.</li>
+      <li>
+        Buildings in Brandenburg only, from its 3D city model: there a roof counts as ground you can
+        anchor on, at the height the survey measured it. Elsewhere a roof is just something tall,
+        and reads as trees.
+      </li>
       <li>How much there is to measure against differs by state:</li>
     </ul>
     <CoverageMap regions={null} />
@@ -160,7 +165,10 @@ const MapGuide = ({ regions }: { regions: Region[] | null }) => (
 
     <h2><span className="ico">🛰️</span>The data</h2>
     <ul>
-      <li>Terrain, canopy and buildings, published free and open by the state surveys.</li>
+      <li>
+        Terrain and canopy, published free and open by the state surveys. Buildings in Brandenburg
+        only, from its 3D city model.
+      </li>
       <li>
         Anywhere in Germany you can place two anchors by hand and have the span measured against
         the real ground. What differs is how much there is to measure it against:

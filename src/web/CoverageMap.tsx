@@ -136,6 +136,9 @@ export function CoverageMap({ regions }: { regions: Region[] | null }) {
           <Row on={here.canopy} label="Canopy height">
             {here.canopy ? 'measured' : 'not published where a browser can read it'}
           </Row>
+          <Row on={here.buildings} label="Buildings">
+            {here.buildings ? 'outlines, roofs to anchor on' : 'not loaded, a roof reads as trees'}
+          </Row>
           <Row on={here.shade === 'survey'} label="Hillshade">
             {here.shade === 'survey' ? "1 m, the state's own" : '5 m, basemap.de'}
           </Row>
