@@ -701,7 +701,18 @@ export function Terrain3D({
       )}
       {state === 'ready' && picked && onMoveAnchor && (
         <div className="nudge" role="group" aria-label={`Move anchor ${picked.toUpperCase()}`}>
-          <span className="which">{picked.toUpperCase()}</span>
+          <div className="which">
+            {(['a', 'b'] as const).map((end) => (
+              <button
+                key={end}
+                data-active={end === picked}
+                onClick={() => setPicked(end)}
+                aria-label={`Move anchor ${end.toUpperCase()}`}
+              >
+                {end.toUpperCase()}
+              </button>
+            ))}
+          </div>
           <div className="pad">
             <button onClick={() => nudge(0, 1)} aria-label="Away from you" style={{ gridArea: 'up' }}>&#9650;</button>
             <button onClick={() => nudge(-1, 0)} aria-label="Left" style={{ gridArea: 'left' }}>&#9664;</button>

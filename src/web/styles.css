@@ -926,10 +926,13 @@ header[data-measuring] .spacer { flex: none; }
   box-shadow: 0 2px 10px var(--shadow);
   font-size: 11px;
 }
-.nudge .which {
-  width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%;
-  background: var(--line); color: #fff; font-weight: 700;
+/* Which anchor the steps move, and the way to the other one without going back out to find it. */
+.nudge .which { display: flex; gap: 6px; }
+.nudge .which button {
+  width: 26px; height: 26px; border-radius: 50%; font-weight: 700; font-size: 12px;
+  color: var(--line); border-color: var(--line); background: var(--panel);
 }
+.nudge .which button[data-active=true] { background: var(--line); color: #fff; }
 .nudge .pad {
   display: grid;
   grid-template-areas: '. up .' 'left . right' '. down .';
