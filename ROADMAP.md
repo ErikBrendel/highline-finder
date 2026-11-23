@@ -684,8 +684,8 @@ the other, and fitted, its shadows land right while its highlights come out at h
 Matching it properly wants a contrast per half -- a change to how every layer is described, for one
 of them. And Saxony's own DGM1/DOM1 file share still has no CORS header, which is the one thing that
 would let the sharpest available data in the best highline ground in the east be read directly
-rather than through the republisher. A request is with GeoSN; if it is granted, Saxony joins the
-four.
+rather than through the republisher. GeoSN refused for good in November 2026 (no header change, no
+WCS planned); Saxony now comes through the proxy below.
 
 ## Hosting and data delivery
 
@@ -738,7 +738,7 @@ Sequence matters: ship Germany-wide blocks and verify the coverage *first*, dele
 
 A server-side fetch has no CORS, which is the entire Saxony problem: GeoSN's WMS renders pictures
 rather than serving values and geocloud sends no ACAO header, so nothing a browser holds can read a
-height there. A proxy makes both moot without waiting on the mail to `servicedesk@geosn.sachsen.de`,
+height there. A proxy makes both moot -- GeoSN declined to add the header and suggested exactly this --
 and promotes the Sachsen-Anhalt Vite dev proxy from a development crutch to a production path.
 
 Two limits shape it. The free plan allows 10 ms of CPU per invocation and 100,000 requests a day;
