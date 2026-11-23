@@ -393,8 +393,64 @@ export function meshOf(patch: Patch, datum = 0, layer: MeshLayer = 'solid'): Mes
       indices.push(a, c, b, b, c, d)
     }
   }
-  if (layer !== 'canopy') return { positions, colors, indices: Uint32Array.from(indices) }
+  if (layer !== 'canopy') return closeCuts(patch, { positions, colors, indices: Uint32Array.from(indices) }, datum)
   return skirt(patch, positions, colors, indices, drawn, datum)
+}
+
+/** The colour of a building's section where the edge of the model cuts through it. */
+export const CUT_RGB: [number, number, number] = [0.72, 0.34, 0.3]
+
+/**
+ * Closes a building the edge of the model cuts through, with a wall down to the earth.
+ *
+ * The solid is a sheet, so a building standing across the patch's edge ends in a roof with nothing
+ * under it, and a camera looking along the edge sees straight into it. The wall is its own colour
+ * rather than the building's, because it is not a facade: it is where the model stops, and the
+ * building goes on past it.
+ */
+function closeCuts(patch: Patch, mesh: MeshData, datum: number): MeshData {
+  const { side, height, ground, cover } = patch
+  const p = mesh.positions
+  const added: number[] = []
+  const indices = Array.from(mesh.indices)
+  const top = (i: number) => (cover[i] === COVER.building ? height[i]! : ground[i]!)
+  const last = side - 1
+  // Each edge of the patch, as the index of the vertex at position k along it, and which way is out.
+  const edges: [(k: number) => number, [number, number]][] = [
+    [(k) => k, [0, -1]],
+    [(k) => last * side + k, [0, 1]],
+    [(k) => k * side, [-1, 0]],
+    [(k) => k * side + last, [1, 0]],
+  ]
+  for (const [index, [outX, outZ]] of edges) {
+    for (let k = 0; k < last; k++) {
+      const u = index(k)
+      const v = index(k + 1)
+      if (cover[u] !== COVER.building && cover[v] !== COVER.building) continue
+      if (Number.isNaN(top(u) + top(v) + ground[u]! + ground[v]!)) continue
+      const base = p.length / 3 + added.length / 3
+      for (const [i, y] of [[u, top(u)], [v, top(v)], [u, ground[u]!], [v, ground[v]!]] as const) {
+        added.push(p[i * 3]!, y - datum, p[i * 3 + 2]!)
+      }
+      // Wound so the face looks outwards: u to v runs along the edge, and the wall hangs below it.
+      const alongX = p[v * 3]! - p[u * 3]!
+      const alongZ = p[v * 3 + 2]! - p[u * 3 + 2]!
+      const outwards = alongX * outZ - alongZ * outX > 0
+      indices.push(
+        ...(outwards
+          ? [base, base + 2, base + 1, base + 1, base + 2, base + 3]
+          : [base, base + 1, base + 2, base + 1, base + 3, base + 2]),
+      )
+    }
+  }
+  if (!added.length) return mesh
+  const positions = new Float32Array(p.length + added.length)
+  positions.set(p)
+  positions.set(added, p.length)
+  const colors = new Float32Array(positions.length)
+  colors.set(mesh.colors)
+  for (let i = p.length; i < positions.length; i += 3) colors.set(CUT_RGB, i)
+  return { positions, colors, indices: Uint32Array.from(indices) }
 }
 
 /**

@@ -89,3 +89,42 @@ export function rasteriseFaces(faces: LevelFace[], into: Grid): number {
   return cells
 }
 
+
+/** How close in height a neighbour of a roof has to read to be more of the same building. */
+const EAVES_TOLERANCE = 1.5
+/** How far past its footprint a building may be grown, in cells. */
+const EAVES_REACH = 2
+
+/**
+ * Grows each roof into the cells beside it where the surface model reads the same height.
+ *
+ * A footprint is the wall line from the cadastre; the surface model sees the eaves, a metre or so
+ * further out, and a cell straddling a wall reads the roof. Left alone, that fringe stands two
+ * metres and more above the terrain and off any footprint -- so it reads as a row of trees hugging
+ * every building, and in the 3D view as a green wall down each face. Measured over a Leipzig tile,
+ * cells beside a footprint at the roof's height ran five times as common as the trees found three to
+ * five cells out. Two cells and a metre and a half take that fringe and leave a tree that grows
+ * against a wall at another height alone.
+ */
+export function growRoofs(roof: Grid, surface: Grid): number {
+  const { w, h } = roof
+  let grown = 0
+  for (let pass = 0; pass < EAVES_REACH; pass++) {
+    const before = roof.data.slice()
+    for (let row = 0; row < h; row++) {
+      for (let col = 0; col < w; col++) {
+        const i = row * w + col
+        const top = surface.data[i]!
+        if (!Number.isNaN(before[i]!) || Number.isNaN(top)) continue
+        for (const j of [i - w, i + w, col > 0 ? i - 1 : -1, col + 1 < w ? i + 1 : -1]) {
+          if (j < 0 || j >= w * h || Number.isNaN(before[j]!)) continue
+          if (Math.abs(surface.data[j]! - top) > EAVES_TOLERANCE) continue
+          roof.data[i] = before[j]!
+          grown++
+          break
+        }
+      }
+    }
+  }
+  return grown
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { levelFaces, rasteriseFaces } from './lod1.js'
+import { growRoofs, levelFaces, rasteriseFaces } from './lod1.js'
 import { Grid } from './grid.js'
 
 /** A ring as CityGML writes it: x y z triples, closed, on one line. */
@@ -63,5 +63,17 @@ describe('rasteriseFaces', () => {
     const g = grid()
     // 0.2 m across, between two scanline centres in both axes.
     expect(rasteriseFaces(levelFaces(square(2.9, 2.9, 0.2, 9)), g)).toBe(0)
+  })
+})
+
+describe('growRoofs', () => {
+  it('takes the eaves the surface model sees past the footprint, and not the tree beside them', () => {
+    // One row: footprint at 2-3, eaves at 1 and 4, a tree at another height at 5, more eaves at 0.
+    const roof = Grid.filled(7, 1, 0, 1, 1)
+    roof.data.set([NaN, NaN, 20, 20, NaN, NaN, NaN])
+    const surface = Grid.filled(7, 1, 0, 1, 1)
+    surface.data.set([121, 121.5, 122, 122, 121, 117, 121])
+    expect(growRoofs(roof, surface)).toBe(3)
+    expect([...roof.data]).toEqual([20, 20, 20, 20, 20, NaN, NaN])
   })
 })

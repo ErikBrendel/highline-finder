@@ -1,6 +1,6 @@
 import { unzipSync } from 'fflate'
 import { Grid, type Pos, type Sampler } from '../shared/grid.js'
-import { levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
+import { growRoofs, levelFaces, rasteriseFaces, type LevelFace } from '../shared/lod1.js'
 import type { Roofs } from '../shared/anchoring.js'
 import { fetchCached } from './tileCache.js'
 import { NoData, noteAnswered, sourcesFor, type CityModel, type Source } from './sources.js'
@@ -248,7 +248,7 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   // elevation. The roof grid starts all NaN, which is the same answer as open ground. Only asked of
   // a source with a city model -- of any other it would be a 404 per tile.
   if (used.cityModel) {
-    await loadRoofs(used.cityModel, e0, n0, roof).catch((e: unknown) =>
+    await loadRoofs(used.cityModel, e0, n0, roof).then(() => growRoofs(roof, surface)).catch((e: unknown) =>
       report(`rasterising buildings into the window at ${e0},${n0}`, e),
     )
   }
