@@ -1533,3 +1533,37 @@ header .spotsbtn:hover, header .spotsbtn[data-active] { border-color: var(--acce
   max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .details .keep[data-saved] { color: var(--accent); background: transparent; border-color: var(--border); }
+
+/* Edit mode: the line may be changed, and every change is kept. Hazard stripes round the card and
+   the anchor handles, so it is never in doubt which state a drag would land in. */
+:root { --hazard: repeating-linear-gradient(-45deg, #facc15 0 8px, #111827 8px 16px); }
+.details[data-editing]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  padding: 5px;
+  border-radius: inherit;
+  background: var(--hazard);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  pointer-events: none;
+}
+.details .keep[data-edit] { color: #111827; background: #facc15; border-color: #ca8a04; }
+.custom-marker[data-editing='true'] {
+  border: 3px solid transparent;
+  background: linear-gradient(#22c55e, #22c55e) padding-box, var(--hazard) border-box;
+}
+.custom-marker[data-editing='false'] {
+  width: 20px;
+  height: 20px;
+  background: #e2e8f0;
+  color: #334155;
+  cursor: default;
+  box-shadow: none;
+}
+.planbtn[data-editing] { background: #facc15; color: #111827; border-color: #ca8a04; }
+fieldset.rig { border: 0; padding: 0; margin-inline: 0; min-width: 0; }
+fieldset.rig:disabled { opacity: 0.5; }
+.spotlist .draft { color: #c2410c; font-weight: 600; text-transform: uppercase; font-size: 10px; }

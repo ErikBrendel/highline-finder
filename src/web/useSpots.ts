@@ -2,27 +2,29 @@ import { useRef, useState } from 'react'
 import type { RigHeights } from '../shared/plan.js'
 import type { LineSpec } from './planPoints.js'
 import {
-  defaultLineName, emptySpot, findLine, loadLibrary, merged, newId, sameAnchors, sameLines, storeLibrary,
+  defaultLineName, findLine, loadLibrary, merged, newId, sameAnchors, sameLines, storeLibrary,
   type Library, type Spot, type SpotLine,
 } from './spots.js'
 
-/** The spot being worked in, and which of its lines; `lines.length` is a line not placed yet. */
-export interface Working {
-  spot: string
-  line: number
-}
-
-/** Edits closer together than this are one step of undo, so a drag is undone whole. */
-const COALESCE_MS = 800
-
-interface History {
-  past: Spot[]
-  future: Spot[]
-  at: number
-}
-
-const sameRig = (p: RigHeights | null, q: RigHeights | null) =>
-  p === q || (!!p && !!q && p.a === q.a && p.b === q.b)
+/**
+ * What the planner has open, and whether it may change it.
+ *
+ * Looking and editing are kept apart. A found line, a linked one, a saved one and the lines of a
+ * shared spot are only looked at: their anchors and rig heights stay put, and the sag is a what-if
+ * that is never stored. Only the draft line and a saved line opened for editing are written to.
+ *
+ * In a spot, `line` null is the spot with no line open, and `lines.length` a new one being placed.
+ *
+ * Editing a saved line holds it: until it is done, nothing else can be opened, so a change can never
+ * land on a line other than the one the person set out to change. The draft line is editable without
+ * holding anything, because it is never lost by looking elsewhere -- it stays stored and drawn.
+ */
+export type Open =
+  | { kind: 'none' }
+  | { kind: 'draft' }
+  | { kind: 'found'; name: string | null }
+  | { kind: 'spot'; spot: string; line: number | null; editing: boolean }
+  | { kind: 'shared'; line: number | null }
 
 /** What the link the page was opened with brings: a line, maybe named, and maybe a whole spot. */
 export interface Arrival {
@@ -31,59 +33,61 @@ export interface Arrival {
   spot: Spot | null
 }
 
-/**
- * Where the page starts: on the saved line or spot the link names, or in the draft.
- *
- * A line or spot in the link that is nowhere held replaces the draft, and the draft it replaced is
- * the first step of undo.
- */
-export function startingPoint(lib: Library, { line: { a, b, rig, sag }, name, spot: shared }: Arrival): {
-  lib: Library
-  working: Working
-  replaced: Spot | null
+/** Edits closer together than this are one step of undo, so a drag is undone whole. */
+const COALESCE_MS = 800
+
+const DRAFT = 'draft'
+
+type Snapshot = Spot | SpotLine | null
+
+interface History {
+  past: Snapshot[]
+  future: Snapshot[]
+  at: number
+}
+
+const sameRig = (p: RigHeights | null, q: RigHeights | null) =>
+  p === q || (!!p && !!q && p.a === q.a && p.b === q.b)
+
+/** Where the page starts: on what the link names, or back on the draft line. */
+export function startingPoint(lib: Library, { line: { a, b }, name, spot: shared }: Arrival): {
+  open: Open
+  shared: Spot | null
 } {
   const indexIn = (s: Spot) => (a && b ? Math.max(0, s.lines.findIndex((l) => sameAnchors(l, a, b))) : 0)
-  const intoDraft = (draft: Spot) => ({
-    lib: { ...lib, draft },
-    working: { spot: draft.id, line: indexIn(draft) },
-    replaced: lib.draft.lines.length ? lib.draft : null,
-  })
   if (shared) {
-    const held = [...lib.spots, lib.draft].find((s) => sameLines(s, shared))
-    if (held) return { lib, working: { spot: held.id, line: indexIn(held) }, replaced: null }
-    return intoDraft({ ...shared, id: lib.draft.id })
+    const held = lib.spots.find((s) => sameLines(s, shared))
+    if (held) return { open: { kind: 'spot', spot: held.id, line: indexIn(held), editing: false }, shared: null }
+    return { open: { kind: 'shared', line: indexIn(shared) }, shared }
   }
   if (a && b) {
     const saved = findLine(lib.spots, a, b)
-    if (saved) return { lib, working: { spot: saved.spot.id, line: saved.index }, replaced: null }
-    const inDraft = lib.draft.lines.findIndex((l) => sameAnchors(l, a, b))
-    if (inDraft >= 0) return { lib, working: { spot: lib.draft.id, line: inDraft }, replaced: null }
-    const line = { id: newId(), name: name ?? defaultLineName(a, b), a, b, rig, sag }
-    return intoDraft({ ...emptySpot(), id: lib.draft.id, lines: [line] })
+    if (saved) return { open: { kind: 'spot', spot: saved.spot.id, line: saved.index, editing: false }, shared: null }
+    if (lib.draft && sameAnchors(lib.draft, a, b)) return { open: { kind: 'draft' }, shared: null }
+    return { open: { kind: 'found', name }, shared: null }
   }
-  return { lib, working: { spot: lib.draft.id, line: Math.max(0, lib.draft.lines.length - 1) }, replaced: null }
+  return { open: lib.draft ? { kind: 'draft' } : { kind: 'none' }, shared: null }
 }
 
 /**
- * The spots, the one being worked in, and undo per spot.
+ * The kept lines, what is open, and undo per spot and for the draft line.
  *
- * `load` puts a line into the planner: the hook owns which line is active, the App owns the planner's
+ * `load` puts a line into the planner: the hook owns which line is open, the App owns the planner's
  * state, and every switch of line goes through here so the two cannot disagree. Everything the
- * planner then does to the line comes back through `sync`.
+ * planner then does to an editable line comes back through `sync`.
  */
-export function useSpots(url: Arrival, load: (line: SpotLine | null) => void) {
+export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void) {
   const [start] = useState(() => {
-    const at = startingPoint(loadLibrary(), url)
-    if (at.replaced) storeLibrary(at.lib)
-    return at
+    const lib = loadLibrary()
+    return { lib, ...startingPoint(lib, arrival) }
   })
   const [lib, setLib] = useState(start.lib)
-  const [working, setWorking] = useState(start.working)
+  const [open, setOpen] = useState<Open>(start.open)
+  const [shared, setShared] = useState(start.shared)
   const libRef = useRef(lib)
-  const workingRef = useRef(working)
-  const histories = useRef(new Map<string, History>(
-    start.replaced ? [[start.lib.draft.id, { past: [start.replaced], future: [], at: 0 }]] : [],
-  ))
+  const openRef = useRef(open)
+  const sharedRef = useRef(shared)
+  const histories = useRef(new Map<string, History>())
   const [, setVersion] = useState(0)
 
   const commit = (next: Library) => {
@@ -91,150 +95,241 @@ export function useSpots(url: Arrival, load: (line: SpotLine | null) => void) {
     setLib(next)
     storeLibrary(next)
   }
-  const work = (next: Working) => {
-    workingRef.current = next
-    setWorking(next)
+  const show = (next: Open) => {
+    openRef.current = next
+    setOpen(next)
   }
-  const spotOf = (id: string, from = libRef.current) =>
-    id === from.draft.id ? from.draft : from.spots.find((s) => s.id === id)
-  const replace = (from: Library, spot: Spot): Library =>
-    spot.id === from.draft.id
-      ? { ...from, draft: spot }
-      : { ...from, spots: from.spots.map((s) => (s.id === spot.id ? spot : s)) }
+  const share = (next: Spot | null) => {
+    sharedRef.current = next
+    setShared(next)
+  }
+  const spotOf = (id: string, from = libRef.current) => from.spots.find((s) => s.id === id)
+  const read = (key: string): Snapshot => (key === DRAFT ? libRef.current.draft : spotOf(key) ?? null)
+  const write = (from: Library, key: string, value: Snapshot): Library =>
+    key === DRAFT
+      ? { ...from, draft: value as SpotLine | null }
+      : { ...from, spots: from.spots.map((s) => (s.id === key ? (value as Spot) : s)) }
 
-  const historyOf = (id: string) => {
-    let h = histories.current.get(id)
-    if (!h) histories.current.set(id, (h = { past: [], future: [], at: 0 }))
+  const historyOf = (key: string) => {
+    let h = histories.current.get(key)
+    if (!h) histories.current.set(key, (h = { past: [], future: [], at: 0 }))
     return h
   }
 
-  /** Changes one spot, as a step of its undo unless it follows the last change closely. */
-  const change = (id: string, edit: (s: Spot) => Spot, coalesce = false) => {
-    const before = spotOf(id)
-    if (!before) return
-    const h = historyOf(id)
+  /** Changes the draft line or one spot, as a step of its undo unless it follows the last change closely. */
+  const change = (key: string, next: Snapshot, coalesce = false) => {
+    const h = historyOf(key)
     const now = Date.now()
-    if (!coalesce || now - h.at > COALESCE_MS) h.past.push(before)
+    if (!coalesce || now - h.at > COALESCE_MS) h.past.push(read(key))
     h.at = coalesce ? now : 0
     h.future = []
-    commit(replace(libRef.current, { ...edit(before), edited: now }))
+    commit(write(libRef.current, key, next && 'lines' in next ? { ...next, edited: now } : next))
     setVersion((v) => v + 1)
   }
-
-  const open = (spot: string, line: number) => {
-    work({ spot, line })
-    load(spotOf(spot)?.lines[line] ?? null)
+  const changeSpot = (id: string, edit: (s: Spot) => Spot, coalesce = false) => {
+    const s = spotOf(id)
+    if (s) change(id, edit(s), coalesce)
   }
 
-  /** What the planner did to the active line, written into its spot. */
-  const sync = ({ a, b, rig, sag }: LineSpec) => {
-    if (!a || !b) return
-    const { spot: id, line: index } = workingRef.current
-    const spot = spotOf(id)
-    if (!spot) return
-    const held = spot.lines[index]
-    if (held && sameAnchors(held, a, b) && sameRig(held.rig, rig) && held.sag === sag) return
-    change(id, (s) => {
-      const lines = [...s.lines]
-      const name = !held || held.name === defaultLineName(held.a, held.b) ? defaultLineName(a, b) : held.name
-      lines[index] = { id: held?.id ?? newId(), name, a, b, rig, sag }
-      return { ...s, lines }
-    }, true)
+  /** The stored line `o` points at, if it points at one. */
+  const lineOf = (o: Open): SpotLine | null => {
+    if (o.kind === 'draft') return libRef.current.draft
+    if (o.kind === 'spot') return o.line === null ? null : spotOf(o.spot)?.lines[o.line] ?? null
+    if (o.kind === 'shared') return o.line === null ? null : sharedRef.current?.lines[o.line] ?? null
+    return null
   }
+  const go = (next: Open) => {
+    show(next)
+    load(lineOf(next))
+  }
+
+  const undoKey = (o: Open) => (o.kind === 'draft' ? DRAFT : o.kind === 'spot' ? o.spot : null)
 
   const step = (back: boolean) => {
-    const { spot: id, line } = workingRef.current
-    const h = historyOf(id)
-    const current = spotOf(id)
+    const o = openRef.current
+    const key = undoKey(o)
+    if (!key) return
+    const h = historyOf(key)
     const to = (back ? h.past : h.future).pop()
-    if (!to || !current) return
-    ;(back ? h.future : h.past).push(current)
+    if (to === undefined) return
+    ;(back ? h.future : h.past).push(read(key))
     h.at = 0
-    commit(replace(libRef.current, to))
-    const index = Math.min(line, Math.max(0, to.lines.length - 1))
-    work({ spot: id, line: index })
-    load(to.lines[index] ?? null)
+    commit(write(libRef.current, key, to))
+    if (o.kind === 'spot' && o.line !== null) {
+      const gone = o.line >= (to as Spot).lines.length
+      go(gone ? { ...o, line: null, editing: false } : o)
+    } else go(to ? o : { kind: 'none' })
     setVersion((v) => v + 1)
   }
 
-  const isDraft = working.spot === lib.draft.id
-  const spot = spotOf(working.spot, lib) ?? lib.draft
-  const h = histories.current.get(working.spot)
+  /** What the planner did to the open line, written where it lives if it may be changed. */
+  const sync = ({ a, b, rig, sag }: LineSpec) => {
+    if (!a || !b) return
+    const o = openRef.current
+    const held = lineOf(o)
+    if (held && sameAnchors(held, a, b) && sameRig(held.rig, rig) && held.sag === sag) return
+    const name = !held || held.name === defaultLineName(held.a, held.b) ? defaultLineName(a, b) : held.name
+    const line: SpotLine = { id: held?.id ?? newId(), name, a, b, rig, sag }
+    if (o.kind === 'draft') change(DRAFT, line, true)
+    if (o.kind === 'spot' && o.editing && o.line !== null) {
+      const at = o.line
+      changeSpot(o.spot, (s) => {
+        const lines = [...s.lines]
+        lines[at] = line
+        return { ...s, lines }
+      }, true)
+    }
+  }
+
+  function removeSpot(id: string) {
+    commit({ ...libRef.current, spots: libRef.current.spots.filter((s) => s.id !== id) })
+    histories.current.delete(id)
+    const o = openRef.current
+    if (o.kind === 'spot' && o.spot === id) go({ kind: 'none' })
+  }
+
+  const held = () => {
+    const o = openRef.current
+    return o.kind === 'spot' && o.editing
+  }
+
+  const key = undoKey(open)
+  const h = key ? histories.current.get(key) : undefined
+  const spot = open.kind === 'spot' ? spotOf(open.spot, lib) ?? null : open.kind === 'shared' ? shared : null
+  const active =
+    open.kind === 'draft' ? lib.draft
+    : open.kind === 'spot' || open.kind === 'shared' ? (open.line === null ? null : spot?.lines[open.line] ?? null)
+    : null
 
   return {
     lib,
-    working,
+    open,
+    shared,
+    /** The saved or shared spot that is open, if one is. */
     spot,
-    isDraft,
+    /** The stored line that is open, if it is a stored one. */
+    active,
+    /** Whether the open line's anchors and rig may be changed, and its changes are kept. */
+    editable: open.kind === 'draft' || (open.kind === 'spot' && open.editing),
+    /** A saved line is being edited, and nothing else may be opened until that is done. */
+    holding: open.kind === 'spot' && open.editing,
     canUndo: !!h?.past.length,
     canRedo: !!h?.future.length,
-    open,
     sync,
     undo: () => step(true),
     redo: () => step(false),
-    /** Back to the draft, as it was left. */
-    toDraft: () => {
-      if (workingRef.current.spot === libRef.current.draft.id) return
-      const draft = libRef.current.draft
-      open(draft.id, Math.max(0, draft.lines.length - 1))
+    openDraft: () => {
+      if (libRef.current.draft && !held()) go({ kind: 'draft' })
     },
-    /** A new line in the spot being worked in, to be placed. */
-    addLine: () => {
-      const { spot: id } = workingRef.current
-      work({ spot: id, line: spotOf(id)?.lines.length ?? 0 })
-      load(null)
+    /** A found or linked line is being looked at; the planner already holds it. */
+    viewFound: (name: string | null = null) => show({ kind: 'found', name }),
+    openLine: (id: string, line: number) => {
+      if (!held()) go({ kind: 'spot', spot: id, line, editing: false })
     },
-    /** No line active, the spot still open. */
-    deselect: () => {
-      const { spot: id } = workingRef.current
-      work({ spot: id, line: spotOf(id)?.lines.length ?? 0 })
+    openSpot: (id: string) => {
+      const o = openRef.current
+      if (held() || (o.kind === 'spot' && o.spot === id)) return
+      go({ kind: 'spot', spot: id, line: spotOf(id)?.lines.length ? 0 : null, editing: false })
     },
-    renameLine: (id: string, index: number, name: string) =>
-      change(id, (s) => ({ ...s, lines: s.lines.map((l, i) => (i === index ? { ...l, name } : l)) }), true),
-    renameSpot: (id: string, name: string) => change(id, (s) => ({ ...s, name }), true),
+    openShared: (line: number) => {
+      if (!held()) go({ kind: 'shared', line })
+    },
+    /**
+     * Starts changing what is open. A found line becomes the draft line, replacing it; a saved one
+     * is changed where it is. `current` is the planner's line, so a what-if sag is kept.
+     */
+    edit: (current: LineSpec) => {
+      const o = openRef.current
+      if (o.kind === 'found' && current.a && current.b) {
+        const { a, b, rig, sag } = current
+        change(DRAFT, { id: newId(), name: o.name ?? defaultLineName(a, b), a, b, rig, sag })
+        show({ kind: 'draft' })
+        return
+      }
+      if (o.kind !== 'spot') return
+      show({ ...o, editing: true })
+      sync(current)
+    },
+    done: () => {
+      const o = openRef.current
+      if (o.kind === 'spot') show({ ...o, editing: false })
+    },
+    /** The first point of a new line is down: as a new line of the open spot, or as the new draft line. */
+    beginNewLine: () => {
+      const o = openRef.current
+      if (o.kind === 'spot') return show({ ...o, line: spotOf(o.spot)?.lines.length ?? 0, editing: true })
+      if (libRef.current.draft) change(DRAFT, null)
+      show({ kind: 'draft' })
+    },
+    /** Closes the open line, deleting nothing: a kept line stays where it is, drawn on the map. */
+    close: () => {
+      const o = openRef.current
+      if (held()) return
+      go(o.kind === 'spot' || o.kind === 'shared' ? { ...o, line: null } : { kind: 'none' })
+    },
+    /** Empties the draft line. Undoable. */
+    discardDraft: () => {
+      if (!libRef.current.draft) return
+      change(DRAFT, null)
+      if (openRef.current.kind === 'draft') go({ kind: 'none' })
+    },
+    /** Out of the open spot or draft, with nothing open. */
+    leaveSpot: () => {
+      if (!held()) go({ kind: 'none' })
+    },
+    renameActive: (name: string) => {
+      const o = openRef.current
+      if (o.kind === 'found') return show({ ...o, name })
+      if (o.kind === 'draft' && libRef.current.draft) return change(DRAFT, { ...libRef.current.draft, name }, true)
+      if (o.kind === 'spot' && o.line !== null) {
+        const at = o.line
+        changeSpot(o.spot, (s) => ({ ...s, lines: s.lines.map((l, i) => (i === at ? { ...l, name } : l)) }), true)
+      }
+    },
+    renameSpot: (id: string, name: string) => changeSpot(id, (s) => ({ ...s, name }), true),
     removeLine: (id: string, index: number) => {
       const s = spotOf(id)
       if (!s) return
-      if (s.lines.length === 1 && id !== libRef.current.draft.id) return removeSpot(id)
-      change(id, (sp) => ({ ...sp, lines: sp.lines.filter((_, i) => i !== index) }))
-      const w = workingRef.current
-      if (w.spot !== id) return
-      const line = Math.max(0, Math.min(w.line > index ? w.line - 1 : w.line, s.lines.length - 2))
-      open(id, line)
+      if (s.lines.length === 1) return removeSpot(id)
+      changeSpot(id, (sp) => ({ ...sp, lines: sp.lines.filter((_, i) => i !== index) }))
+      const o = openRef.current
+      if (o.kind !== 'spot' || o.spot !== id || o.line === null) return
+      go({ ...o, line: o.line === index ? null : o.line > index ? o.line - 1 : o.line })
     },
     removeSpot,
-    /** Empties the draft. Undoable. */
-    discardDraft: () => {
-      const id = libRef.current.draft.id
-      change(id, (s) => ({ ...s, name: '', lines: [] }))
-      if (workingRef.current.spot === id) open(id, 0)
-    },
     /**
-     * Keeps the draft: as a spot of its own, or added to `into`. The draft is emptied and the
-     * saved spot is the one being worked in from then on.
+     * Keeps the open draft or found line: as a spot of its own, or added to `into`. A saved draft
+     * line leaves the draft. The saved line is open afterwards, to look at.
      */
-    save: ({ into, lineName, spotName }: { into: string | null; lineName?: string; spotName?: string }) => {
-      const from = libRef.current
-      const draft = from.draft
-      if (!draft.lines.length) return
-      const lines = draft.lines.map((l, i) =>
-        lineName !== undefined && i === Math.min(workingRef.current.line, draft.lines.length - 1)
-          ? { ...l, name: lineName }
-          : l,
-      )
-      const target = into ? from.spots.find((s) => s.id === into) : undefined
-      const offset = target?.lines.length ?? 0
-      const saved: Spot = target
-        ? { ...target, name: spotName ?? target.name, lines: [...target.lines, ...lines], edited: Date.now() }
-        : { id: newId(), name: spotName ?? '', lines, edited: Date.now() }
-      if (target) historyOf(target.id).past.push(target)
-      historyOf(draft.id).past.push(draft)
-      commit({
-        spots: target ? from.spots.map((s) => (s.id === target.id ? saved : s)) : [...from.spots, saved],
-        draft: { ...draft, name: '', lines: [], edited: Date.now() },
-      })
-      work({ spot: saved.id, line: offset + Math.min(workingRef.current.line, lines.length - 1) })
-      setVersion((v) => v + 1)
+    save: ({ into, lineName, spotName }: { into: string | null; lineName: string; spotName?: string }, current: LineSpec) => {
+      const o = openRef.current
+      const { a, b, rig, sag } = current
+      if ((o.kind !== 'draft' && o.kind !== 'found') || !a || !b) return
+      const line: SpotLine = { id: newId(), name: lineName, a, b, rig, sag }
+      if (o.kind === 'draft') change(DRAFT, null)
+      const target = into ? spotOf(into) : undefined
+      if (target) {
+        changeSpot(target.id, (s) => ({ ...s, name: spotName ?? s.name, lines: [...s.lines, line] }))
+        show({ kind: 'spot', spot: target.id, line: target.lines.length, editing: false })
+        return
+      }
+      const saved: Spot = { id: newId(), name: spotName ?? '', lines: [line], edited: Date.now() }
+      commit({ ...libRef.current, spots: [...libRef.current.spots, saved] })
+      show({ kind: 'spot', spot: saved.id, line: 0, editing: false })
+    },
+    /** Keeps the shared spot as one of the saved ones. */
+    saveShared: () => {
+      const s = sharedRef.current
+      const o = openRef.current
+      if (!s) return
+      const saved = { ...s, id: newId(), edited: Date.now() }
+      commit({ ...libRef.current, spots: [...libRef.current.spots, saved] })
+      share(null)
+      show({ kind: 'spot', spot: saved.id, line: o.kind === 'shared' ? o.line : null, editing: false })
+    },
+    dismissShared: () => {
+      share(null)
+      if (openRef.current.kind === 'shared') go({ kind: 'none' })
     },
     /** Adds what is new among `spots`; see `merged`. Returns how many came in. */
     importSpots: (spots: Spot[]) => {
@@ -242,14 +337,6 @@ export function useSpots(url: Arrival, load: (line: SpotLine | null) => void) {
       commit({ ...libRef.current, spots: next })
       return added
     },
-  }
-
-  function removeSpot(id: string) {
-    commit({ ...libRef.current, spots: libRef.current.spots.filter((s) => s.id !== id) })
-    histories.current.delete(id)
-    if (workingRef.current.spot !== id) return
-    const draft = libRef.current.draft
-    open(draft.id, Math.max(0, draft.lines.length - 1))
   }
 }
 

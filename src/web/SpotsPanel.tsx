@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { spanGeometry, type LatLon } from './planPoints.js'
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { spanGeometry, type LatLon, type LineSpec } from './planPoints.js'
 import {
-  exportText, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type Spot,
+  defaultLineName, exportText, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type Spot,
 } from './spots.js'
 import { ShareButton } from './ShareButton.js'
 import type { Spots } from './useSpots.js'
@@ -74,12 +74,11 @@ function Confirm({ label, sure, onConfirm }: { label: string; sure: string; onCo
   )
 }
 
-function SaveSheet({ spots, onDone }: { spots: Spots; onDone: () => void }) {
-  const { draft } = spots.lib
-  const single = draft.lines.length === 1
-  const active = draft.lines[Math.min(spots.working.line, draft.lines.length - 1)]
-  const nearby = nearbySpots(spots.lib.spots, draft.lines.flatMap((l) => [l.a, l.b]))
-  const [name, setName] = useState(single ? (active?.name ?? '') : draft.name)
+/** Keeps the open draft or found line, on its own or in a spot nearby. */
+function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a: LatLon; b: LatLon }; onDone: () => void }) {
+  const nearby = nearbySpots(spots.lib.spots, [line.a, line.b])
+  const named = spots.open.kind === 'found' ? spots.open.name : spots.lib.draft?.name
+  const [name, setName] = useState(named ?? defaultLineName(line.a, line.b))
   const [into, setInto] = useState<string | null>(nearby.length === 1 ? nearby[0]!.spot.id : null)
   const target = nearby.find((n) => n.spot.id === into)?.spot
   const needsSpotName = !!target && target.lines.length === 1 && !titleOf(target.name)
@@ -89,18 +88,14 @@ function SaveSheet({ spots, onDone }: { spots: Spots; onDone: () => void }) {
   }, [needsSpotName, target])
 
   const save = () => {
-    spots.save({
-      into,
-      lineName: single ? name : undefined,
-      spotName: !into && !single ? name : needsSpotName ? spotName : undefined,
-    })
+    spots.save({ into, lineName: name, spotName: needsSpotName ? spotName : undefined }, line)
     onDone()
   }
 
   return (
     <div className="savesheet">
       <label>
-        {single ? 'Name' : `Name for these ${draft.lines.length} lines`}
+        Name
         <Grow value={name} onChange={setName} placeholder="Name, and notes under it" onEnter={save} autoFocus />
       </label>
       {nearby.length > 0 && (
@@ -131,8 +126,12 @@ function SaveSheet({ spots, onDone }: { spots: Spots; onDone: () => void }) {
   )
 }
 
-export function SpotsPanel({ spots, centre, saving, onSaving, onLit, onFocus, onAddLine, onClose }: {
+const linkTo = (s: Spot) => `${location.origin}${location.pathname}#${spotHash(s)}`
+
+export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFocus, onAddLine, onClose }: {
   spots: Spots
+  /** The planner's line, which is what gets saved. */
+  line: LineSpec
   /** Where the map is looking, to sort the list by. */
   centre: LatLon | null
   saving: boolean
@@ -142,26 +141,19 @@ export function SpotsPanel({ spots, centre, saving, onSaving, onLit, onFocus, on
   onAddLine: () => void
   onClose: () => void
 }) {
-  const [inSpot, setInSpot] = useState(saving || spots.working.spot !== spots.lib.draft.id || spots.spot.lines.length > 1)
+  const [browsing, setBrowsing] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (saving) setInSpot(true)
-  }, [saving])
+  const { lib, spot, open, holding } = spots
+  const spotKey = spot?.id ?? null
+  useEffect(() => setBrowsing(false), [spotKey])
   useEffect(() => () => onLit(null), [onLit])
 
-  const { lib, spot, isDraft, working } = spots
   const sorted = centre
     ? lib.spots
         .map((s) => ({ s, metres: spanGeometry(centre, centreOf(s)).length }))
         .sort((p, q) => p.metres - q.metres)
     : lib.spots.map((s) => ({ s, metres: null })).sort((p, q) => q.s.edited - p.s.edited)
-
-  const openSpot = (s: Spot) => {
-    spots.open(s.id, s.id === working.spot ? working.line : 0)
-    setInSpot(true)
-    if (s.lines.length) onFocus(s)
-  }
 
   const download = () => {
     const url = URL.createObjectURL(new Blob([exportText(lib.spots)], { type: 'application/json' }))
@@ -180,144 +172,143 @@ export function SpotsPanel({ spots, centre, saving, onSaving, onLit, onFocus, on
     }
   }
 
-  const list = (
-    <>
-      <div className="spotshead">
-        <strong>My lines</strong>
-        <button className="close" onClick={onClose} aria-label="Close">&times;</button>
-      </div>
-      <ul className="spotlist">
-        {lib.draft.lines.length > 0 && (
-          <li>
-            <button
-              data-active={isDraft || undefined}
-              onClick={() => openSpot(lib.draft)}
-              onMouseEnter={() => onLit({ spot: lib.draft.id, line: null })}
-              onMouseLeave={() => onLit(null)}
-            >
-              <span className="title">{spotTitle(lib.draft)}</span>
-              <span className="sub">
-                <span className="unsaved">not saved</span>
-                {lib.draft.lines.length > 1 && ` · ${lib.draft.lines.length} lines`}
-              </span>
-            </button>
-          </li>
-        )}
-        {sorted.map(({ s, metres }) => (
-          <li key={s.id}>
-            <button
-              data-active={s.id === working.spot || undefined}
-              onClick={() => openSpot(s)}
-              onMouseEnter={() => onLit({ spot: s.id, line: null })}
-              onMouseLeave={() => onLit(null)}
-            >
-              <span className="title">{spotTitle(s)}</span>
-              <span className="sub">
-                {s.lines.length > 1 ? `${s.lines.length} lines` : `${Math.round(spanGeometry(s.lines[0]!.a, s.lines[0]!.b).length)} m`}
-                {metres !== null && ` · ${km(metres)} away`}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-      {!lib.spots.length && !lib.draft.lines.length && (
-        <p className="note">Nothing kept yet. Pick or place a line, then save it from its panel.</p>
-      )}
-      <div className="spotsfoot">
-        <button onClick={download} disabled={!lib.spots.length} title="Download every saved spot as a file">Export</button>
-        <button onClick={() => file.current?.click()} title="Add the spots from an exported file; nothing here is overwritten">Import</button>
-        <input
-          ref={file}
-          type="file"
-          accept="application/json,.json"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            e.target.value = ''
-            if (f) void upload(f)
-          }}
-        />
-        {note && <span className="sub">{note}</span>}
-      </div>
-    </>
+  const head = (title: string, back?: () => void, tag?: string) => (
+    <div className="spotshead">
+      {back && <button className="back" onClick={back} disabled={holding} aria-label="All spots">&larr;</button>}
+      <strong>{title}</strong>
+      {tag && <span className="unsaved">{tag}</span>}
+      <button className="close" onClick={onClose} aria-label="Close">&times;</button>
+    </div>
   )
 
-  if (!inSpot) return <aside className="spots">{list}</aside>
+  if (saving && line.a && line.b && (open.kind === 'draft' || open.kind === 'found')) {
+    return (
+      <aside className="spots">
+        {head('Save line')}
+        <SaveSheet spots={spots} line={{ ...line, a: line.a, b: line.b }} onDone={() => onSaving(false)} />
+      </aside>
+    )
+  }
 
-  const active = spot.lines[working.line]
+  if (!spot || browsing) {
+    const row = (key: string, title: string, sub: ReactNode, active: boolean, onOpen: () => void, lit: Lit) => (
+      <li key={key}>
+        <button
+          data-active={active || undefined}
+          onClick={active ? spots.leaveSpot : onOpen}
+          title={active ? 'Click again to close' : undefined}
+          onMouseEnter={() => onLit(lit)}
+          onMouseLeave={() => onLit(null)}
+        >
+          <span className="title">{title}</span>
+          <span className="sub">{sub}</span>
+        </button>
+      </li>
+    )
+    return (
+      <aside className="spots">
+        {head('My lines')}
+        <ul className="spotlist">
+          {spots.shared && row('shared', spotTitle(spots.shared), <><span className="unsaved">shared</span> · {spots.shared.lines.length} lines</>,
+            open.kind === 'shared', () => { spots.openShared(0); setBrowsing(false); onFocus(spots.shared!) }, { spot: 'shared', line: null })}
+          {lib.draft && row('draft', titleOf(lib.draft.name) || 'Untitled', <span className="draft">draft</span>,
+            open.kind === 'draft', spots.openDraft, { spot: 'draft', line: null })}
+          {sorted.map(({ s, metres }) => row(
+            s.id,
+            spotTitle(s),
+            <>
+              {s.lines.length > 1 ? `${s.lines.length} lines` : `${Math.round(spanGeometry(s.lines[0]!.a, s.lines[0]!.b).length)} m`}
+              {metres !== null && ` · ${km(metres)} away`}
+            </>,
+            s.id === spot?.id,
+            () => { spots.openSpot(s.id); setBrowsing(false); onFocus(s) },
+            { spot: s.id, line: null },
+          ))}
+        </ul>
+        {!lib.spots.length && !lib.draft && (
+          <p className="note">Nothing kept yet. Pick or plan a line, then save it from its panel.</p>
+        )}
+        <div className="spotsfoot">
+          <button onClick={download} disabled={!lib.spots.length} title="Download every saved spot as a file">Export</button>
+          <button onClick={() => file.current?.click()} title="Add the spots from an exported file; nothing here is overwritten">Import</button>
+          <input
+            ref={file}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (f) void upload(f)
+            }}
+          />
+          {note && <span className="sub">{note}</span>}
+        </div>
+      </aside>
+    )
+  }
+
+  const isShared = open.kind === 'shared'
+  const at = open.kind === 'spot' || open.kind === 'shared' ? open.line : null
+  const active = spots.active
   return (
     <aside className="spots">
-      <div className="spotshead">
-        <button className="back" onClick={() => { onSaving(false); setInSpot(false) }} aria-label="All spots">&larr;</button>
-        <strong>{spotTitle(spot)}</strong>
-        {isDraft && <span className="unsaved">not saved</span>}
-        <button className="close" onClick={onClose} aria-label="Close">&times;</button>
-      </div>
-      {saving && isDraft && spot.lines.length > 0 ? (
-        <SaveSheet spots={spots} onDone={() => onSaving(false)} />
+      {head(spotTitle(spot), () => setBrowsing(true), isShared ? 'shared, not saved' : undefined)}
+      {!isShared && spot.lines.length > 1 && (
+        <label className="spotname">
+          Spot
+          <Grow value={spot.name} onChange={(v) => spots.renameSpot(spot.id, v)} placeholder="Name of this spot" />
+        </label>
+      )}
+      <ul className="spotlist lines">
+        {spot.lines.map((l, i) => (
+          <li key={l.id}>
+            <button
+              data-active={i === at || undefined}
+              disabled={holding && i !== at}
+              onClick={() => (i === at ? spots.close() : isShared ? spots.openShared(i) : spots.openLine(spot.id, i))}
+              title={i === at ? 'Click again to close this line' : undefined}
+              onMouseEnter={() => onLit({ spot: isShared ? 'shared' : spot.id, line: i })}
+              onMouseLeave={() => onLit(null)}
+            >
+              <span className="title">{titleOf(l.name) || 'Untitled'}</span>
+              <span className="sub">{Math.round(spanGeometry(l.a, l.b).length)} m</span>
+            </button>
+            {!isShared && !holding && <Confirm label="&times;" sure="delete" onConfirm={() => spots.removeLine(spot.id, i)} />}
+          </li>
+        ))}
+        {at !== null && at >= spot.lines.length && (
+          <li><span className="placing">new line &mdash; place A and B on the map</span></li>
+        )}
+      </ul>
+      {active && !isShared && (
+        <label className="linename">
+          Line
+          <Grow value={active.name} onChange={spots.renameActive} placeholder="Name, and notes under it" />
+        </label>
+      )}
+      {isShared ? (
+        <div className="row">
+          <button className="primary" onClick={spots.saveShared}>Save spot</button>
+          <button onClick={spots.dismissShared}>Dismiss</button>
+        </div>
       ) : (
         <>
-          {!isDraft && spot.lines.length > 1 && (
-            <label className="spotname">
-              Spot
-              <Grow value={spot.name} onChange={(v) => spots.renameSpot(spot.id, v)} placeholder="Name of this spot" />
-            </label>
-          )}
-          <ul className="spotlist lines">
-            {spot.lines.map((l, i) => (
-              <li key={l.id}>
-                <button
-                  data-active={i === working.line || undefined}
-                  onClick={() => spots.open(spot.id, i)}
-                  onMouseEnter={() => onLit({ spot: spot.id, line: i })}
-                  onMouseLeave={() => onLit(null)}
-                >
-                  <span className="title">{titleOf(l.name) || 'Untitled'}</span>
-                  <span className="sub">{Math.round(spanGeometry(l.a, l.b).length)} m</span>
-                </button>
-                <Confirm label="&times;" sure="delete" onConfirm={() => spots.removeLine(spot.id, i)} />
-              </li>
-            ))}
-            {working.line >= spot.lines.length && (
-              <li><span className="placing">new line &mdash; place A and B on the map</span></li>
-            )}
-          </ul>
-          {active && (
-            <label className="linename">
-              Line
-              <Grow value={active.name} onChange={(v) => spots.renameLine(spot.id, working.line, v)} placeholder="Name, and notes under it" />
-            </label>
-          )}
           <div className="row">
-            <button onClick={onAddLine} title="Place another line in this spot">+ line</button>
+            <button onClick={onAddLine} disabled={holding} title="Place another line in this spot">+ line</button>
             <button onClick={spots.undo} disabled={!spots.canUndo} title="Undo (Ctrl+Z)">undo</button>
             <button onClick={spots.redo} disabled={!spots.canRedo} title="Redo (Ctrl+Shift+Z)">redo</button>
           </div>
-          {spot.lines.length > 0 && (
-            <div className="row">
-              {active && <ShareButton label="share line" title="Send a link to this line, with its name and notes" />}
-              {spot.lines.length > 1 && (
-                <ShareButton
-                  label="share spot"
-                  title="Send a link to all lines of this spot; it opens as a copy the other person can save"
-                  url={() => `${location.origin}${location.pathname}#${spotHash(spot)}`}
-                />
-              )}
-            </div>
-          )}
-          {isDraft ? (
-            spot.lines.length > 0 && (
-              <div className="row">
-                <button className="primary" onClick={() => onSaving(true)}>Save&hellip;</button>
-                <Confirm label="Discard" sure="discard all" onConfirm={spots.discardDraft} />
-              </div>
-            )
-          ) : (
-            <div className="row">
-              <button onClick={() => { spots.toDraft(); setInSpot(false) }} title="Leave this spot; it stays saved">Close spot</button>
-              <Confirm label="Delete spot" sure="delete for good" onConfirm={() => { spots.removeSpot(spot.id); setInSpot(false) }} />
-            </div>
-          )}
+          <div className="row">
+            {active && <ShareButton label="share line" title="Send a link to this line, with its name and notes" />}
+            {spot.lines.length > 1 && (
+              <ShareButton label="share spot" title="Send a link to all lines of this spot" url={() => linkTo(spot)} />
+            )}
+          </div>
+          <div className="row">
+            <button onClick={spots.leaveSpot} disabled={holding} title="Leave this spot; it stays saved">Close spot</button>
+            <Confirm label="Delete spot" sure="delete for good" onConfirm={() => spots.removeSpot(spot.id)} />
+          </div>
         </>
       )}
     </aside>

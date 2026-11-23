@@ -353,7 +353,6 @@ export function App() {
    * There is one line that can be open, and it is always the planned one: picking a found line
    * places the planned line's two points on its anchors. A link with both points opens on it.
    */
-  const [open, setOpen] = useState((!!initial.line.a && !!initial.line.b) || !!sharedSpot)
   const [bbox, setBbox] = useState(initial.bbox)
   // Google's map zoom is the same web-mercator scale MapLibre uses, so it transfers directly.
   const [zoom, setZoom] = useState(13)
@@ -427,16 +426,19 @@ export function App() {
    * sync below.
    */
   const spots = useSpots({ line: initial.line, name: initial.name, spot: sharedSpot }, (l) => loadLine(l))
-  const specOf = (l: SpotLine | null | undefined): LineSpec | null => l ? { a: l.a, b: l.b, rig: l.rig, sag: l.sag } : null
-  const [line, setLine] = useState<LineSpec>(() => specOf(spots.spot.lines[spots.working.line]) ?? initial.line)
-  const loadLine = (l: SpotLine | null) => {
+  const [line, setLine] = useState<LineSpec>(() =>
+    spots.active ? { a: spots.active.a, b: spots.active.b, rig: spots.active.rig, sag: spots.active.sag } : initial.line,
+  )
+  const loadLine = (l: LineSpec | null) => {
     setOptimizing(false)
     setPlacing(null)
-    setLine(specOf(l) ?? NO_LINE)
+    setLine(l ? { a: l.a, b: l.b, rig: l.rig, sag: l.sag } : NO_LINE)
   }
   useEffect(() => spots.sync(line), [line])
+  /** The card is the open line: there is one exactly when a line is open, and closing it closes the line. */
+  const open = !!line.a && !!line.b
   const [spotsOpen, setSpotsOpen] = useRemembered('highline-finder.spotsopen', false)
-  const activeName = spots.spot.lines[spots.working.line]?.name
+  const activeName = spots.active?.name ?? (spots.open.kind === 'found' ? spots.open.name : null)
   const ownName = activeName && line.a && line.b && activeName !== defaultLineName(line.a, line.b) ? activeName : null
   const [saving, setSaving] = useState(false)
   const [lit, setLit] = useState<Lit | null>(null)
@@ -448,28 +450,39 @@ export function App() {
     setFocus({ bbox: [Math.min(...lats), Math.min(...lons), Math.max(...lats), Math.max(...lons)], key: Date.now() })
   }
   useEffect(() => {
-    if (!sharedSpot) return
-    setSpotsOpen(true)
-    if (!initial.bbox) focusOn(spots.spot)
+    if (sharedSpot && !initial.bbox && spots.spot) focusOn(spots.spot)
   }, [])
-  const savedDrawn: SavedDrawn[] = useMemo(
-    () =>
-      [...spots.lib.spots, spots.lib.draft].flatMap((s) =>
-        s.lines.flatMap((l, i) =>
-          s.id === spots.working.spot && i === spots.working.line
-            ? []
-            : [{
-                spot: s.id,
-                line: i,
-                a: l.a,
-                b: l.b,
-                working: s.id === spots.working.spot,
-                lit: lit?.spot === s.id && (lit.line === null || lit.line === i),
-              }],
-        ),
+  // Opening a line of a spot shows the spot, which is where its lines are named and kept.
+  const openSpotId = spots.spot?.id ?? null
+  useEffect(() => {
+    if (openSpotId) setSpotsOpen(true)
+  }, [openSpotId])
+  /** Which line of the open spot is the planner's, and so not drawn among the kept ones. */
+  const openIndex = spots.open.kind === 'spot' || spots.open.kind === 'shared' ? spots.open.line : null
+  const savedDrawn: SavedDrawn[] = useMemo(() => {
+    const o = spots.open
+    const openId = o.kind === 'spot' ? o.spot : o.kind === 'shared' ? 'shared' : null
+    const groups: [string, SavedDrawn['kind'], SpotLine[]][] = [
+      ...spots.lib.spots.map((s): [string, SavedDrawn['kind'], SpotLine[]] => [s.id, 'saved', s.lines]),
+      ...(spots.shared ? [['shared', 'shared', spots.shared.lines] as [string, SavedDrawn['kind'], SpotLine[]]] : []),
+      ...(spots.lib.draft && o.kind !== 'draft' ? [['draft', 'draft', [spots.lib.draft]] as [string, SavedDrawn['kind'], SpotLine[]]] : []),
+    ]
+    return groups.flatMap(([id, kind, lines]) =>
+      lines.flatMap((l, i) =>
+        id === openId && i === openIndex
+          ? []
+          : [{
+              spot: id,
+              line: i,
+              kind,
+              a: l.a,
+              b: l.b,
+              working: id === openId,
+              lit: lit?.spot === id && (lit.line === null || lit.line === i),
+            }],
       ),
-    [spots.lib, spots.working, lit],
-  )
+    )
+  }, [spots.lib, spots.shared, spots.open, openIndex, lit])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
@@ -573,7 +586,9 @@ export function App() {
   const sagDefault = params ? params.sagRatio * 100 : null
   const sagPct = sagDefault === null ? line.sag : Math.max(SAG_MIN_PCT, line.sag ?? sagDefault)
   const setSagPct = (pct: number) => setLine((l) => ({ ...l, sag: changed(pct, sagDefault) }))
-  const setRig = (r: RigHeights | null) => setLine((l) => ({ ...l, rig: r }))
+  const setRig = (r: RigHeights | null) => {
+    if (spots.editable) setLine((l) => ({ ...l, rig: r }))
+  }
 
   useEffect(() => {
     if (!DEV_MODE) return
@@ -834,13 +849,13 @@ export function App() {
    * Keyed on those lines alone, so dragging the active one does not measure them all again.
    */
   const companionKey = JSON.stringify(
-    spots.spot.lines.map((l, i) => (i === spots.working.line ? null : [l.a, l.b, l.rig, l.sag])),
+    (spots.spot?.lines ?? []).map((l, i) => (i === openIndex ? null : [l.a, l.b, l.rig, l.sag])),
   )
   const companionLines = useMemo(() => {
     if (!customUtm) return []
     const mid = { e: (customUtm.a.e + customUtm.b.e) / 2, n: (customUtm.a.n + customUtm.b.n) / 2 }
-    return spots.spot.lines.flatMap((l, index) => {
-      if (index === spots.working.line) return []
+    return (spots.spot?.lines ?? []).flatMap((l, index) => {
+      if (index === openIndex) return []
       const [a, b] = [l.a, l.b].map((p) => {
         const [e, n] = toUtm33(p.lat, p.lon)
         return { e, n }
@@ -877,22 +892,14 @@ export function App() {
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a
    * placeholder chart, so placing a line always produces the panel it is going to fill.
    */
-  const planPending = open && !!line.a && !!line.b && !planned
+  const planPending = open && !planned
 
-  /**
-   * Adopts a new pair of planned points. Selection happens here rather than in an effect: it is a
-   * consequence of the click, and an effect that both reads and writes the selection is exactly
-   * what produced a maximum-update-depth loop before.
-   */
-  const commit = (next: CustomPoints & Partial<LineSpec>, select: boolean) => {
+  /** Adopts a new pair of planned points. */
+  const commit = (next: CustomPoints & Partial<LineSpec>) => {
     // Any hand movement ends an optimisation: it is descending from a point the user has left.
     setOptimizing(false)
     const complete = !!next.a && !!next.b
     setLine((l) => ({ ...l, ...next, rig: complete ? (next.rig === undefined ? l.rig : next.rig) : null }))
-    // `select` is the difference between asking to see a line and merely moving one. Placing a
-    // point is a request for the panel; dragging an anchor is not, so a panel the user has closed
-    // stays closed while they rearrange things.
-    setOpen((cur) => complete && (select || cur))
   }
 
   /**
@@ -903,18 +910,19 @@ export function App() {
    * panel works on it without first having to turn it into something else.
    */
   const select = (id: string | null) => {
-    if (id === null) return setOpen(false)
-    if (id === PLANNED_ID) return setOpen(true)
+    if (spots.holding) return
+    if (id === null) return clearCustom()
+    if (id === PLANNED_ID) return
     const found = visible.find((c) => c.id === id)
     if (!found) return
     const rigged = Number.isFinite(found.a.aFrame) && Number.isFinite(found.b.aFrame)
-    // A saved spot changes only by being worked on; a line picked from the map is exploring.
-    spots.toDraft()
+    // Picking is looking: it changes no kept line, the draft line included.
+    spots.viewFound()
     commit({
       a: { lat: found.a.lat, lon: found.a.lon },
       b: { lat: found.b.lat, lon: found.b.lon },
       rig: rigged ? { a: found.a.aFrame, b: found.b.aFrame } : null,
-    }, true)
+    })
   }
 
   /** Turns one anchor class on or off. All three off is a legitimate setting: no lines. */
@@ -931,27 +939,79 @@ export function App() {
    */
   const placeNext = (at: LatLon) => {
     if (placing === 'a') {
-      commit({ a: at, b: null }, true)
+      spots.beginNewLine()
+      commit({ a: at, b: null, sag: null })
       setPlacing('b')
     } else {
-      commit({ a: line.a, b: at }, true)
+      commit({ a: line.a, b: at })
       setPlacing(null)
     }
   }
 
   /** Places one end of the planned line. */
-  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) =>
-    commit(place(line, which, at), true)
+  const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) => {
+    if (spots.editable) return commit(place(line, which, at))
+    spots.beginNewLine()
+    commit({ a: which === 'a' ? at : null, b: which === 'b' ? at : null, sag: null })
+  }
 
   // One call, not two setCustomPoint calls: both would read the same pre-update `custom`, so the
   // second would put the first end back.
   const clearCustom = () => {
-    commit({ a: null, b: null }, false)
-    spots.deselect()
+    if (spots.holding) return
+    commit({ a: null, b: null })
+    spots.close()
   }
 
+  const saveButton = (
+    <button className="keep" onClick={() => { setSpotsOpen(true); setSaving(true) }} title="Keep this line, on its own or with others nearby">
+      save
+    </button>
+  )
+  const editButton = (label: string, title: string) => (
+    <button className="keep" data-edit="true" onClick={() => spots.edit(line)} title={title}>{label}</button>
+  )
+  /** The card's buttons for keeping and changing the line, which depend on where it lives. */
+  const keep = (() => {
+    const o = spots.open
+    if (o.kind === 'draft') {
+      return (
+        <>
+          {saveButton}
+          <button className="keep" data-saved="true" onClick={spots.discardDraft} title="Throw this draft line away (undo brings it back)">
+            discard
+          </button>
+        </>
+      )
+    }
+    if (o.kind === 'found') {
+      return (
+        <>
+          {saveButton}
+          {spots.lib.draft
+            ? editButton('edit (replaces draft)', 'Move its anchors and rig: it becomes your draft line, in place of the one you have (undo brings that back)')
+            : editButton('edit', 'Move its anchors and rig: it becomes your draft line')}
+        </>
+      )
+    }
+    if (o.kind !== 'spot') return null
+    return (
+      <>
+        {o.editing ? (
+          <button className="keep" data-edit="true" onClick={spots.done} title="Stop editing; the line is saved as it is">
+            done editing
+          </button>
+        ) : (
+          editButton('edit', 'Move its anchors and rig; every change is saved as you make it')
+        )}
+      </>
+    )
+  })()
+
   /** Dragging an anchor handle. */
-  const moveAnchor = (which: 'a' | 'b', at: LatLon) => commit(place(line, which, at), false)
+  const moveAnchor = (which: 'a' | 'b', at: LatLon) => {
+    if (spots.editable) commit(place(line, which, at))
+  }
 
   /**
    * Swaps which end is called A.
@@ -963,8 +1023,8 @@ export function App() {
    * ends.
    */
   const flipAnchors = () => {
-    if (!line.a || !line.b) return
-    commit({ a: line.b, b: line.a, rig: line.rig && { a: line.rig.b, b: line.rig.a } }, true)
+    if (!line.a || !line.b || !spots.editable) return
+    commit({ a: line.b, b: line.a, rig: line.rig && { a: line.rig.b, b: line.rig.a } })
   }
 
   /**
@@ -1417,15 +1477,13 @@ export function App() {
         {spotsOpen && (
           <SpotsPanel
             spots={spots}
+            line={line}
             centre={bbox && { lat: (bbox[0] + bbox[2]) / 2, lon: (bbox[1] + bbox[3]) / 2 }}
             saving={saving}
             onSaving={setSaving}
             onLit={setLit}
             onFocus={focusOn}
-            onAddLine={() => {
-              spots.addLine()
-              setPlacing('a')
-            }}
+            onAddLine={() => setPlacing('a')}
             onClose={() => {
               setSpotsOpen(false)
               setSaving(false)
@@ -1629,18 +1687,29 @@ export function App() {
           <button
             className="planbtn"
             data-active={placing !== null}
+            data-editing={spots.holding || undefined}
             onClick={() => {
               if (placing) return setPlacing(null)
-              spots.toDraft()
+              if (spots.holding) return spots.done()
               setPlacing('a')
             }}
-            title={placing ? 'Stop placing' : 'Place two anchors on the map'}
+            title={
+              placing ? 'Stop placing'
+              : spots.holding ? 'Stop editing this line; it is saved as it is'
+              : spots.open.kind === 'spot' ? 'Place another line in this spot'
+              : spots.lib.draft ? 'Place two anchors for a new draft line; the first one replaces the draft line you have (undo brings it back)'
+              : 'Place two anchors on the map'
+            }
           >
             {placing
               ? `Tap the map for point ${placing.toUpperCase()} — cancel`
-              : line.a && line.b
-                ? 'Plan a new line'
-                : 'Plan a line'}
+              : spots.holding
+                ? 'Done editing'
+                : spots.open.kind === 'spot' && spots.spot
+                  ? `+ line in ${spotTitle(spots.spot)}`
+                  : spots.lib.draft
+                    ? 'Plan a new line (replaces draft)'
+                    : 'Plan a line'}
           </button>
 
           <CacheBadge />
@@ -1666,6 +1735,8 @@ export function App() {
             locating={locating}
             onLocate={setLocating}
             custom={line}
+            editable={spots.editable}
+            canClear={!spots.holding}
             showLines={showLines}
             onSelect={select}
             placing={placing}
@@ -1675,8 +1746,10 @@ export function App() {
             onMoveAnchor={moveAnchor}
             saved={savedDrawn}
             onOpenSaved={(spot, i) => {
-              spots.open(spot, i)
-              setOpen(true)
+              if (spots.holding) return
+              if (spot === 'draft') spots.openDraft()
+              else if (spot === 'shared') spots.openShared(i)
+              else spots.openLine(spot, i)
             }}
             focus={focus}
             onViewport={(b, z) => {
@@ -1752,32 +1825,14 @@ export function App() {
               companions={companions}
               onCompanion={(i) => {
                 const c = companions[i]
-                if (c) spots.open(spots.working.spot, c.index)
+                if (!c || !spots.spot) return
+                if (spots.open.kind === 'shared') spots.openShared(c.index)
+                else spots.openLine(spots.spot.id, c.index)
               }}
-              keep={
-                spots.isDraft ? (
-                  <button
-                    className="keep"
-                    onClick={() => {
-                      setSpotsOpen(true)
-                      setSaving(true)
-                    }}
-                    title="Keep this line, on its own or with others nearby"
-                  >
-                    save
-                  </button>
-                ) : (
-                  <button
-                    className="keep"
-                    data-saved="true"
-                    onClick={() => setSpotsOpen(true)}
-                    title="Saved; changes are kept as you make them"
-                  >
-                    saved &middot; {spotTitle(spots.spot)}
-                  </button>
-                )
-              }
-              onClose={() => setOpen(false)}
+              editable={spots.editable}
+              holding={spots.holding}
+              keep={keep}
+              onClose={clearCustom}
             />
           )}
         </div>

@@ -8,8 +8,8 @@ import { report } from './report.js'
  * A line kept on its own is a spot with one line in it, and the UI shows it as just that line. So
  * there is one list and one kind of thing in it, whether it holds a single line or an event's twenty.
  *
- * The draft is a spot too, kept apart from the saved ones: whatever is being explored when no saved
- * spot is open. It is stored like the rest, so closing the tab loses nothing.
+ * The draft is one line apart from them: the line being planned by hand when nothing saved is being
+ * edited. It is stored like the rest, so closing the tab loses nothing.
  */
 
 export interface SpotLine extends LineSpec {
@@ -30,7 +30,7 @@ export interface Spot {
 
 export interface Library {
   spots: Spot[]
-  draft: Spot
+  draft: SpotLine | null
 }
 
 /** How far from a saved spot a new line is offered to it rather than to a spot of its own. */
@@ -39,8 +39,6 @@ export const NEARBY_METRES = 10_000
 const STORE_KEY = 'highline-finder.spots'
 
 export const newId = () => crypto.randomUUID()
-
-export const emptySpot = (): Spot => ({ id: newId(), name: '', lines: [], edited: Date.now() })
 
 export const titleOf = (text: string) => text.split('\n')[0]!.trim()
 
@@ -213,10 +211,10 @@ export function loadLibrary(): Library {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as { spots?: unknown; draft?: unknown } | null
     const spots = Array.isArray(raw?.spots) ? raw.spots.map(asSpot).filter((s): s is Spot => s !== null) : []
-    return { spots, draft: asSpot(raw?.draft) ?? emptySpot() }
+    return { spots, draft: asLine(raw?.draft) }
   } catch (e) {
     report('reading the saved lines', e)
-    return { spots: [], draft: emptySpot() }
+    return { spots: [], draft: null }
   }
 }
 

@@ -240,8 +240,12 @@ interface Props {
   onGuide: () => void
   guideOpen: boolean
   onClose: () => void
-  /** Saving the line, or where it is saved. */
+  /** Saving the line, or where it is saved, and getting it into edit mode. */
   keep: ReactNode
+  /** Whether anchors and rig may be changed; framed in hazard stripes when they may. */
+  editable: boolean
+  /** A saved line held in edit mode, which the card cannot be closed out of. */
+  holding: boolean
   /** The spot's other lines, for the 3D view, and asking for one of them. */
   companions: Companion[]
   onCompanion: (index: number) => void
@@ -269,7 +273,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
   canopy, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep, companions, onCompanion,
+  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep, editable, holding, companions, onCompanion,
 }: Props) {
   /**
    * How much room the profile has, which is the only thing that decides how it is drawn.
@@ -551,6 +555,7 @@ export function Details({
     <div
       className="details"
       data-full={full || undefined}
+      data-editing={editable || undefined}
       data-sizing={sizing ?? undefined}
       onAnimationEnd={() => setSizing(null)}
       style={widthVar}
@@ -585,7 +590,7 @@ export function Details({
                 ? 'could not measure'
                 : 'measuring…'}
         </strong>
-        {c && (
+        {c && editable && (
           <button
             className="optimize"
             data-running={optimizing}
@@ -638,7 +643,12 @@ export function Details({
           {/* One way out, and it undoes one step: from the full view back to the card, and from the
               card back to the map. Two buttons side by side both saying close-ish is a choice
               nobody wants to have to read. */}
-          <button className="close" onClick={() => (full ? onFull(false) : onClose())}>
+          <button
+            className="close"
+            disabled={!full && holding}
+            title={!full && holding ? 'Finish editing first' : undefined}
+            onClick={() => (full ? onFull(false) : onClose())}
+          >
             close
           </button>
         </span>
@@ -665,7 +675,7 @@ export function Details({
             others={companions}
             onOtherTapped={onCompanion}
             hoverAt={hoverAt}
-            onMoveAnchor={onMoveAnchor}
+            onMoveAnchor={editable ? onMoveAnchor : undefined}
           />
         )}
 
@@ -873,7 +883,13 @@ export function Details({
 
         {full && c && (
           <>
-            <div className="rig" onPointerDown={() => setDragging(true)} onKeyDown={() => setDragging(true)}>
+            <fieldset
+              className="rig"
+              disabled={!editable}
+              title={editable ? undefined : 'Edit the line to change its rig heights'}
+              onPointerDown={() => setDragging(true)}
+              onKeyDown={() => setDragging(true)}
+            >
               {(['a', 'b'] as const).map((which) => {
                 const here = rigAt(which)
                 const measured = Number.isFinite(here)
@@ -952,7 +968,7 @@ export function Details({
               >
                 auto
               </button>
-            </div>
+            </fieldset>
             {rig === null && (
               <div className="note" style={{ margin: '4px 0 0' }}>
                 Rigged as level as the ground allows, then as high &mdash; the same choice the search
@@ -969,7 +985,7 @@ export function Details({
                 decides how this whole panel is laid out, and on a found line it was settled by
                 whichever anchor the search reached first -- so it is worth being able to say
                 otherwise. */}
-            {full && (
+            {full && editable && (
               <button className="flip" onClick={onFlip} title="Swap which end is A">
                 &#8646; flip A/B
               </button>

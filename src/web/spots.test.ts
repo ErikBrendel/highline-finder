@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  emptySpot, exportText, merged, nearbySpots, parseExport, spotFromHash, spotHash, type Spot, type SpotLine,
+  exportText, merged, nearbySpots, parseExport, spotFromHash, spotHash, type Spot, type SpotLine,
 } from './spots.js'
 import { startingPoint } from './useSpots.js'
 
@@ -56,40 +56,36 @@ describe('spotHash', () => {
 
 describe('startingPoint', () => {
   const saved = spot('s1', line(52), line(52.01))
-  const draft = { ...emptySpot(), lines: [line(60)] }
+  const draft = line(60)
   const lib = { spots: [saved], draft }
   const arrive = (l: SpotLine | null, name: string | null = null, shared: Spot | null = null) =>
     startingPoint(lib, { line: l ?? { a: null, b: null, rig: null, sag: null }, name, spot: shared })
 
-  it('opens the saved line a link names', () => {
-    const at = arrive(line(52.01), 'ignored')
-    expect(at.working).toEqual({ spot: 's1', line: 1 })
-    expect(at.replaced).toBeNull()
+  it('opens the saved line a link names, to look at', () => {
+    expect(arrive(line(52.01), 'ignored').open).toEqual({ kind: 'spot', spot: 's1', line: 1, editing: false })
   })
 
-  it('puts a line nobody saved into the draft under its name, keeping the old draft for undo', () => {
-    const at = arrive(line(70), 'From a friend')
-    expect(at.working).toEqual({ spot: draft.id, line: 0 })
-    expect(at.lib.draft.lines.map((l) => [l.a.lat, l.name])).toEqual([[70, 'From a friend']])
-    expect(at.replaced).toBe(draft)
+  it('looks at a line nobody saved under its name, leaving the draft alone', () => {
+    expect(arrive(line(70), 'From a friend').open).toEqual({ kind: 'found', name: 'From a friend' })
   })
 
-  it('puts a shared spot into the draft, on the line the link has open', () => {
-    const at = arrive(line(81), null, spot('x', line(80), line(81)))
-    expect(at.working).toEqual({ spot: draft.id, line: 1 })
-    expect(at.lib.draft.lines).toHaveLength(2)
-    expect(at.replaced).toBe(draft)
+  it('opens the draft line when the link is to it', () => {
+    expect(arrive(line(60)).open).toEqual({ kind: 'draft' })
+  })
+
+  it('holds a shared spot apart, on the line the link has open', () => {
+    const shared = spot('x', line(80), line(81))
+    expect(arrive(line(81), null, shared)).toEqual({ open: { kind: 'shared', line: 1 }, shared })
   })
 
   it('opens a shared spot that is already saved', () => {
-    const at = arrive(null, null, spot('x', line(52.01), line(52)))
-    expect(at.working).toEqual({ spot: 's1', line: 0 })
-    expect(at.lib).toBe(lib)
+    expect(arrive(null, null, spot('x', line(52.01), line(52)))).toEqual({
+      open: { kind: 'spot', spot: 's1', line: 0, editing: false },
+      shared: null,
+    })
   })
 
-  it('comes back to the draft as it was left on a bare link', () => {
-    const at = arrive(null)
-    expect(at.working).toEqual({ spot: draft.id, line: 0 })
-    expect(at.lib).toBe(lib)
+  it('comes back to the draft line on a bare link', () => {
+    expect(arrive(null).open).toEqual({ kind: 'draft' })
   })
 })

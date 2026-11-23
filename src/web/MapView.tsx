@@ -608,8 +608,10 @@ function bandFeature(a: LatLon, b: LatLon, p: Params): GeoJSON.FeatureCollection
 }
 
 export interface SavedDrawn {
+  /** A saved spot's id, or 'draft' or 'shared'. */
   spot: string
   line: number
+  kind: 'saved' | 'draft' | 'shared'
   a: LatLon
   b: LatLon
   /** In the spot being worked in. */
@@ -618,9 +620,12 @@ export interface SavedDrawn {
   lit: boolean
 }
 
+/** Saved lines green, the draft line orange, a shared spot's lines violet. */
+const KIND_COLOUR: maplibregl.ExpressionSpecification = ['match', ['get', 'kind'], 'draft', '#fb923c', 'shared', '#a78bfa', '#22c55e']
+
 /** Each kept line, and a dot per spot at the middle of its anchors for when the lines are too small. */
 function savedFeatures(saved: SavedDrawn[]): GeoJSON.FeatureCollection {
-  const props = (s: SavedDrawn) => ({ spot: s.spot, line: s.line, working: s.working, lit: s.lit })
+  const props = (s: SavedDrawn) => ({ spot: s.spot, line: s.line, kind: s.kind, working: s.working, lit: s.lit })
   const spots = new Map<string, SavedDrawn[]>()
   for (const s of saved) spots.set(s.spot, [...(spots.get(s.spot) ?? []), s])
   return {
@@ -647,6 +652,13 @@ function savedFeatures(saved: SavedDrawn[]): GeoJSON.FeatureCollection {
       }),
     ],
   }
+}
+
+function lockMarker(marker: maplibregl.Marker, editable: boolean) {
+  marker.setDraggable(editable)
+  const node = marker.getElement()
+  node.dataset.editing = String(editable)
+  node.title = editable ? 'Drag to move this anchor' : 'Edit the line to move this anchor'
 }
 
 function lineFeature(a: LatLon, b: LatLon): GeoJSON.FeatureCollection {
@@ -692,6 +704,10 @@ interface Props {
   locating: boolean
   onLocate: (following: boolean) => void
   custom: CustomPoints
+  /** Whether the anchors may be dragged: only while the line is being edited. */
+  editable: boolean
+  /** Whether the open line may be closed from here; not while a saved line is held for editing. */
+  canClear: boolean
   showLines: boolean
   onSelect: (id: string | null) => void
   /** Which point the next click on the map places, or null when a click means what it usually does. */
@@ -728,6 +744,8 @@ export function MapView({
   locating,
   onLocate,
   custom,
+  editable,
+  canClear,
   showLines,
   onSelect,
   placing,
@@ -1209,7 +1227,7 @@ export function MapView({
         filter: ['==', ['geometry-type'], 'LineString'],
         layout: { ...SPAN_CAPS },
         paint: {
-          'line-color': ['case', ['get', 'lit'], '#facc15', '#22c55e'],
+          'line-color': ['case', ['get', 'lit'], '#facc15', KIND_COLOUR],
           'line-width': ['case', ['get', 'lit'], 5, ['get', 'working'], 3, 2.5],
           'line-opacity': ['case', ['get', 'lit'], 1, ['get', 'working'], 0.8, 0.45],
         },
@@ -1223,7 +1241,7 @@ export function MapView({
         filter: ['==', ['geometry-type'], 'Point'],
         paint: {
           'circle-radius': 6,
-          'circle-color': ['case', ['get', 'lit'], '#facc15', '#22c55e'],
+          'circle-color': ['case', ['get', 'lit'], '#facc15', KIND_COLOUR],
           'circle-opacity': ['case', ['get', 'lit'], 1, 0.6],
           'circle-stroke-width': 1.5,
           'circle-stroke-color': '#052e16',
@@ -1614,6 +1632,7 @@ export function MapView({
       if (existing) {
         // Never fight the pointer: while this end is being dragged the marker is authoritative.
         if (dragging.current !== which) existing.setLngLat([pt.lon, pt.lat])
+        lockMarker(existing, editable)
         continue
       }
 
@@ -1635,9 +1654,10 @@ export function MapView({
         dragging.current = null
         report()
       })
+      lockMarker(marker, editable)
       anchorMarkers.current[which] = marker
     }
-  }, [custom, ready])
+  }, [custom, ready, editable])
 
   useEffect(() => {
     const m = map.current
@@ -1672,14 +1692,14 @@ export function MapView({
           >
             Set point B
           </button>
-          {(custom.a || custom.b) && (
+          {canClear && (custom.a || custom.b) && (
             <button
               onClick={() => {
                 onClearCustom()
                 setMenu(null)
               }}
             >
-              Clear custom line
+              Close line
             </button>
           )}
           <div className="coord">
