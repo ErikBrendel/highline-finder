@@ -293,10 +293,9 @@ export type MeshLayer = 'solid' | 'canopy'
 export function drape(
   patch: Patch, layer: MeshLayer, x0: number, z0: number, x1: number, z1: number, from = 0, to = 1,
 ): Seg[] {
-  const { side, step, height, ground, cover } = patch
-  const half = ((side - 1) * step) / 2
-  const u = (t: number) => (x0 + (x1 - x0) * t + half) / step
-  const v = (t: number) => (z0 + (z1 - z0) * t + half) / step
+  const half = ((patch.side - 1) * patch.step) / 2
+  const u = (t: number) => (x0 + (x1 - x0) * t + half) / patch.step
+  const v = (t: number) => (z0 + (z1 - z0) * t + half) / patch.step
   const cuts: number[] = []
   crossings(u(0), u(1), cuts)
   crossings(v(0), v(1), cuts)
@@ -307,28 +306,48 @@ export function drape(
     const mid = (ta + tb) / 2
     const col = Math.floor(u(mid))
     const row = Math.floor(v(mid))
-    if (col < 0 || row < 0 || col + 1 >= side || row + 1 >= side) continue
-    const a = row * side + col
-    const quad = [a, a + 1, a + side, a + side + 1]
-    // As meshOf draws it: the canopy sheet only over cells that are canopy at all four corners.
-    const sheet = quad.every((i) => cover[i] === COVER.canopy)
-    if (layer === 'canopy' && !sheet) continue
-    const [ha, hb, hc, hd] = quad.map((i) =>
-      layer === 'canopy' || cover[i] === COVER.building ? height[i]! : ground[i]!,
-    ) as [number, number, number, number]
-    if (Number.isNaN(ha + hb + hc + hd)) continue
-    // Split along b-c, as meshOf's indices are.
-    const lower = u(mid) - col + v(mid) - row <= 1
-    const at = (t: number) => {
-      const du = u(t) - col
-      const dv = v(t) - row
-      return lower
-        ? ha + (hb - ha) * du + (hc - ha) * dv
-        : hd + (hc - hd) * (1 - du) + (hb - hd) * (1 - dv)
-    }
+    const quad = quadAt(patch, layer, col, row)
+    if (!quad) continue
+    const at = (t: number) => onQuad(quad, u(t) - col, v(t) - row, u(mid) - col + v(mid) - row <= 1)
     out.push({ ta, tb, ya: at(ta), yb: at(tb) })
   }
   return out
+}
+
+/** The drawn solid ground at a point of the scene, NaN off the patch or where it is not drawn. */
+export function solidAt(patch: Patch, x: number, z: number): number {
+  const half = ((patch.side - 1) * patch.step) / 2
+  const u = (x + half) / patch.step
+  const v = (z + half) / patch.step
+  const col = Math.min(patch.side - 2, Math.floor(u))
+  const row = Math.min(patch.side - 2, Math.floor(v))
+  const quad = quadAt(patch, 'solid', col, row)
+  return quad ? onQuad(quad, u - col, v - row, u - col + v - row <= 1) : NaN
+}
+
+/**
+ * The corner heights of one quad as meshOf draws it, or null where it draws none: off the patch,
+ * unmeasured, or -- for the canopy -- not canopy at all four corners.
+ */
+function quadAt(patch: Patch, layer: MeshLayer, col: number, row: number): Quad | null {
+  const { side, height, ground, cover } = patch
+  if (col < 0 || row < 0 || col + 1 >= side || row + 1 >= side) return null
+  const a = row * side + col
+  const corners = [a, a + 1, a + side, a + side + 1]
+  if (layer === 'canopy' && !corners.every((i) => cover[i] === COVER.canopy)) return null
+  const quad = corners.map((i) =>
+    layer === 'canopy' || cover[i] === COVER.building ? height[i]! : ground[i]!,
+  ) as Quad
+  return Number.isNaN(quad[0] + quad[1] + quad[2] + quad[3]) ? null : quad
+}
+
+type Quad = [number, number, number, number]
+
+/** A point on a quad, split along b-c as meshOf's indices are. */
+function onQuad([ha, hb, hc, hd]: Quad, du: number, dv: number, lower: boolean): number {
+  return lower
+    ? ha + (hb - ha) * du + (hc - ha) * dv
+    : hd + (hc - hd) * (1 - du) + (hb - hd) * (1 - dv)
 }
 
 
@@ -454,7 +473,8 @@ function skirt(
  * the anchor's height comes from.
  *
  * `ci0`, `cj0` is the south-west cell and `cells` the number a side; the square drawn runs from
- * centre to centre. A skirt hangs from its outer edge to close the seam with the coarse ground.
+ * centre to centre. `at` is the caller's to give the outer ring the coarse ground's heights, so the
+ * two meet without a step.
  */
 export function padMesh(
   at: CellReader,
@@ -490,23 +510,6 @@ export function padMesh(
       indices.push(grid[sw]!, grid[se]!, grid[nw]!, grid[se]!, grid[ne]!, grid[nw]!)
     }
   }
-  // The outer ring, walked once round, each edge with a strip hanging below it.
-  const ring: number[] = []
-  for (let i = 0; i < cells; i++) ring.push(id(i, 0))
-  for (let j = 1; j < cells; j++) ring.push(id(cells - 1, j))
-  for (let i = cells - 2; i >= 0; i--) ring.push(id(i, cells - 1))
-  for (let j = cells - 2; j > 0; j--) ring.push(id(0, j))
-  ring.forEach((top, k) => {
-    const next = ring[(k + 1) % ring.length]!
-    if (Number.isNaN(heights[top]! + heights[next]!)) return
-    const drop = (v: number) => {
-      const [x, y, z] = [positions[grid[v]! * 3]!, positions[grid[v]! * 3 + 1]!, positions[grid[v]! * 3 + 2]!]
-      return vertex(x + centre.e, centre.n - z, y + datum - SKIRT_M, cover[grid[v]!] as CoverClass)
-    }
-    const [a, b] = [grid[top]!, grid[next]!]
-    const [c, d] = [drop(next), drop(top)]
-    indices.push(a, b, d, b, c, d)
-  })
   return {
     positions: Float32Array.from(positions),
     colors: colorsOf(Uint8Array.from(cover)),
@@ -514,5 +517,3 @@ export function padMesh(
   }
 }
 
-/** How far the edge of a pad hangs down, to cover the seam with the coarse ground beside it. */
-const SKIRT_M = 4

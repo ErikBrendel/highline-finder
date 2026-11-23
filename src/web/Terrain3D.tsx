@@ -8,12 +8,12 @@ import {
 import { ensureCover, onCoverChange, water } from './landcover.js'
 import { useRemembered } from './remembered.js'
 import {
-  COVER, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, type CoverClass, standingHeight, type Patch, type Readers,
+  COVER, coverOf, drape, groundAround, meshOf, padMesh, samplePatch, solidAt, type CoverClass, standingHeight, type Patch, type Readers,
 } from './terrainMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
 import type { Pad, Scene3D } from './scene3d.js'
-import { drapeCells } from './cellSurface.js'
+import { drapeCells, type CellReader } from './cellSurface.js'
 import { intervals, overlay, polyline } from './segments.js'
 import { IMAGERY_SHORT } from './surveys.js'
 
@@ -112,6 +112,9 @@ const SPAN_POINTS = 96
  * an anchor is being placed, small enough to rebuild on every nudge.
  */
 const PAD_HALF = 24
+
+/** How far a pad reaches over the coarse ground around it, in metres. */
+const PAD_OVERLAP = 0.25
 
 /** The cover of one cell, for colouring the pads as the rest of the ground is coloured. */
 const coverAt = (ci: number, cj: number): CoverClass =>
@@ -423,13 +426,22 @@ export function Terrain3D({
       line[i * 3 + 2] = -(a.n + (b.n - a.n) * t - g.centre.n)
     }
     const ends = [a, b].map((p) => ({ ci: Math.floor(p.e) - PAD_HALF, cj: Math.floor(p.n) - PAD_HALF }))
-    const pads: Pad[] = ends.map(({ ci, cj }) => ({
-      mesh: padMesh(standingCell, coverAt, ci, cj, 2 * PAD_HALF, g.centre, g.datum),
+    // The outer ring of each pad takes the coarse ground's height, so the two meet without a seam.
+    // Inside it the pad is the standing surface itself, which is what the anchor in the middle is on.
+    const readers = ends.map(({ ci, cj }): CellReader => (i, j) => {
+      const ring = i === ci || j === cj || i === ci + 2 * PAD_HALF - 1 || j === cj + 2 * PAD_HALF - 1
+      if (!ring || !patch.current) return standingCell(i, j)
+      return solidAt(patch.current, i + 0.5 - g.centre.e, -(j + 0.5 - g.centre.n))
+    })
+    const pads: Pad[] = ends.map(({ ci, cj }, k) => ({
+      mesh: padMesh(readers[k]!, coverAt, ci, cj, 2 * PAD_HALF, g.centre, g.datum),
+      // Cut a little inside the pad's edge: two surfaces meeting exactly on a line leave a crack of
+      // unpainted pixels along it, where an overlap leaves none.
       bounds: [
-        ci + 0.5 - g.centre.e,
-        ci + 2 * PAD_HALF - 0.5 - g.centre.e,
-        -(cj + 2 * PAD_HALF - 0.5 - g.centre.n),
-        -(cj + 0.5 - g.centre.n),
+        ci + 0.5 + PAD_OVERLAP - g.centre.e,
+        ci + 2 * PAD_HALF - 0.5 - PAD_OVERLAP - g.centre.e,
+        -(cj + 2 * PAD_HALF - 0.5 - PAD_OVERLAP - g.centre.n),
+        -(cj + 0.5 + PAD_OVERLAP - g.centre.n),
       ],
     }))
 
@@ -438,13 +450,14 @@ export function Terrain3D({
     // there is one and on the ground where there is not. Each lies on exactly what is drawn under
     // it -- the pads around the anchors, the coarse mesh between them -- and is lifted just clear.
     const [x0, z0, x1, z1] = [line[0]!, line[2]!, line[line.length - 3]!, line[line.length - 1]!]
-    const inPads = ends
-      .map(({ ci, cj }) => clip(a, b, ci + 0.5, cj + 0.5, ci + 2 * PAD_HALF - 0.5, cj + 2 * PAD_HALF - 0.5))
-      .filter((r): r is [number, number] => r !== null)
-    const solid = intervals(inPads.flat(), 0, 1).flatMap(([ta, tb]) => {
+    const inPads = ends.map(({ ci, cj }) =>
+      clip(a, b, ci + 0.5, cj + 0.5, ci + 2 * PAD_HALF - 0.5, cj + 2 * PAD_HALF - 0.5),
+    )
+    const solid = intervals(inPads.flatMap((r) => r ?? []), 0, 1).flatMap(([ta, tb]) => {
       const mid = (ta + tb) / 2
-      return inPads.some(([p, q]) => mid > p && mid < q)
-        ? drapeCells(standingCell, a.e, a.n, b.e, b.n, ta, tb)
+      const pad = inPads.findIndex((r) => r !== null && mid > r[0] && mid < r[1])
+      return pad >= 0
+        ? drapeCells(readers[pad]!, a.e, a.n, b.e, b.n, ta, tb)
         : patch.current
           ? drape(patch.current, 'solid', x0, z0, x1, z1, ta, tb)
           : []

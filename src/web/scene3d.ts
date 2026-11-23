@@ -299,6 +299,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   }
   const groundMat = groundMaterial(true)
   const padMat = groundMaterial(false)
+  // In front of the coarse ground where the two overlap at a pad's edge, rather than fighting it.
+  padMat.polygonOffset = true
+  padMat.polygonOffsetFactor = -1
+  padMat.polygonOffsetUnits = -4
 
   const ground = new Mesh(geometryOf(input.mesh), groundMat)
   scene.add(ground)
