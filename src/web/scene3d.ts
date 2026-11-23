@@ -172,6 +172,9 @@ const TAP_SLOP_PX = 5
 /** How much larger an anchor is drawn under the mouse. */
 const HOVER_GROWTH = 1.6
 
+/** The share of the way to its hovered size and colour an anchor moves each frame. */
+const HOVER_EASE = 0.4
+
 /** Points along a span being dragged. Fewer than the measured one; it is only a preview. */
 const DRAG_SEGMENTS = 48
 
@@ -532,12 +535,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   // Unit spheres, sized by `scale` rather than by geometry: a sphere is the one thing here that can
   // follow the zoom every frame for nothing, since scaling it uniformly is exactly right.
   const ballGeom = new SphereGeometry(1, 14, 10)
-  const ballMat = new MeshBasicMaterial({ color: '#fca5a5' })
-  const focusMat = new MeshBasicMaterial({ color: '#f43f5e' })
-  const hoverMat = new MeshBasicMaterial({ color: '#fb923c' })
-  const balls: Mesh[] = []
+  const ballColor = { plain: new Color('#fca5a5'), focused: new Color('#f43f5e'), hovered: new Color('#fb923c') }
+  const balls: Mesh<SphereGeometry, MeshBasicMaterial>[] = []
   for (const [x, , z] of anchors) {
-    const ball = new Mesh(ballGeom, ballMat)
+    const ball = new Mesh(ballGeom, new MeshBasicMaterial({ color: ballColor.plain }))
     ball.position.set(x, 0, z)
     scene.add(ball)
     balls.push(ball)
@@ -547,10 +548,15 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   let travelling = false
   /** The anchor under the mouse, drawn larger and in its own colour so it reads as something to take. */
   let hovered: 0 | 1 | null = null
-  const styleBalls = () =>
+  /** How far each ball has grown towards its hovered size, eased so a hover reads as a change. */
+  const grown = [1, 1]
+  /** Moves each ball `ease` of the way to the size and colour it should have; 0 only re-applies size. */
+  const styleBalls = (ease = 0) =>
     balls.forEach((ball, i) => {
-      ball.material = i === hovered ? hoverMat : i === focused ? focusMat : ballMat
-      ball.scale.setScalar(tubeRadius * 3 * (i === hovered ? HOVER_GROWTH : 1))
+      const want = i === hovered ? ballColor.hovered : i === focused ? ballColor.focused : ballColor.plain
+      ball.material.color.lerp(want, ease)
+      grown[i]! += ((i === hovered ? HOVER_GROWTH : 1) - grown[i]!) * ease
+      ball.scale.setScalar(tubeRadius * 3 * grown[i]!)
     })
 
   // Clear of the ball rather than on it, so the letter never sits over the thing it names.
@@ -729,10 +735,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   }
 
   /** The anchor drawn within reach of a point on the screen, the nearer if both are. */
-  const anchorAt = (x: number, y: number): 0 | 1 | null => {
+  const anchorAt = (x: number, y: number, reach = GRAB_PX): 0 | 1 | null => {
     const r = canvas.getBoundingClientRect()
     let best: 0 | 1 | null = null
-    let bestDistance = GRAB_PX
+    let bestDistance = reach
     balls.forEach((ball, i) => {
       if (!anchors[i]) return
       const p = ball.position.clone().project(camera)
@@ -798,7 +804,6 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     if (!dragging && Math.hypot(ev.clientX - pressed.x, ev.clientY - pressed.y) < TAP_SLOP_PX) return
     dragging = true
     hovered = pressed.which
-    styleBalls()
     canvas.style.cursor = 'grabbing'
     carry(ev.clientX, ev.clientY)
   }
@@ -913,13 +918,17 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     steer()
     followZoom()
     if (!pressed) {
-      const under = hover ? anchorAt(hover.x, hover.y) : null
+      // Held a little further out than it is taken, so a hover does not flicker at the rim.
+      const under = hover ? anchorAt(hover.x, hover.y, hovered === null ? GRAB_PX : GRAB_PX * 1.5) : null
       if (under !== hovered) {
         hovered = under
-        styleBalls()
+        // A turning view would carry the anchor out from under a mouse that is holding still.
+        if (under === null) resumeLater()
+        else pause()
       }
       canvas.style.cursor = under === null ? '' : under === focused && input.onAnchorMoved ? 'grab' : 'pointer'
     }
+    styleBalls(HOVER_EASE)
     controls.update()
     renderer.render(scene, camera)
   })
@@ -929,7 +938,6 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       if (which === focused) return
       focused = which
       travelling = true
-      styleBalls()
       if (which === null) return resumeLater()
       controls.minDistance = FOCUS_NEAREST
       pause()
@@ -1034,7 +1042,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       orthoMap.value?.dispose()
       for (const m of [
         groundMat, padMat, buildingMat, canopyMat, spanMat, trackMat, overMat,
-        ballMat, focusMat, hoverMat, stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
+        ...balls.map((b) => b.material), stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {
         m.dispose()
