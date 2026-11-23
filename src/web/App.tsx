@@ -48,6 +48,14 @@ import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './ur
 import { optimizeFrame, scanMargin, startingSpacing } from './optimize.js'
 import { emitProbes } from './probeOverlay.js'
 
+/**
+ * The tightest sag a line may be measured at, in per cent of span.
+ *
+ * A planned line is measured from the terrain on the spot, so it can be measured at any sag. Only
+ * the found lines are bound to the sag the dataset was generated at -- see `rescored`.
+ */
+const SAG_MIN_PCT = 1
+
 /** How long the button keeps offering a wider search after a run ends. */
 const OFFER_MS = 2000
 
@@ -505,10 +513,10 @@ export function App() {
    * the way the search measured it; the current defaults otherwise, with no file to wait for.
    */
   const params: Params | null = DEV_MODE ? (meta?.params ?? null) : DEFAULT_PARAMS
-  const sagFloor = params ? params.sagRatio * 100 : null
+  const sagDefault = params ? params.sagRatio * 100 : null
   useEffect(() => {
-    if (sagFloor !== null) setSagPct((cur) => Math.max(sagFloor, cur ?? sagFloor))
-  }, [sagFloor])
+    if (sagDefault !== null) setSagPct((cur) => Math.max(SAG_MIN_PCT, cur ?? sagDefault))
+  }, [sagDefault])
 
   useEffect(() => {
     if (!DEV_MODE) return
@@ -556,7 +564,9 @@ export function App() {
    */
   const rescored = useMemo(() => {
     if (!meta || sagPct === null) return []
-    if (sagPct === meta.params.sagRatio * 100) return candidates
+    // A sag looser than the dataset's leaves its lines where the dataset put them.
+    const generated = meta.params.sagRatio * 100
+    if (sagPct <= generated) return candidates
     return candidates
       .map((c) => rescoreAtSag(c, sagPct / 100, meta.params))
       .filter((c): c is Candidate => c !== null)
@@ -1169,9 +1179,7 @@ export function App() {
         bbox,
         custom,
         rig,
-        // The sag default is not a constant: the control cannot go below the floor the dataset was
-        // generated at, so that floor is the default and only a tightened sag belongs in a link.
-        sagPct: sagPct === null ? null : changed(sagPct, sagFloor),
+        sagPct: sagPct === null ? null : changed(sagPct, sagDefault),
         basemapMix: changed(basemapMix, MIX_MAX),
         showAreas: changed(showAreas, false),
         full: changed(full, false),
@@ -1188,7 +1196,7 @@ export function App() {
           : { showLines: null, showHotspots: null, kinds: null, filters: {} }),
       }),
     [
-      bbox, custom, rig, sagPct, sagFloor, basemapMix, showLines, showHotspots, showAreas, full,
+      bbox, custom, rig, sagPct, sagDefault, basemapMix, showLines, showHotspots, showAreas, full,
       kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
     ],
   )
@@ -1220,7 +1228,8 @@ export function App() {
   const bounds =
     meta && sagPct !== null
       ? {
-          sag: sagPct,
+          // The filter slider cannot go looser than the dataset, whatever the line's own slider says.
+          sag: Math.max(sagPct, meta.params.sagRatio * 100),
           sagFloor: meta.params.sagRatio * 100,
           maxScore: meta.ranges.score,
           minLen: Math.floor(meta.params.minLength),
@@ -1590,7 +1599,7 @@ export function App() {
               failed={terrainFailed}
               fetching={fetchingElevation}
               canopyKnown={canopyKnown}
-              sag={sagPct !== null && sagFloor !== null ? { pct: sagPct, floor: sagFloor } : null}
+              sag={sagPct !== null ? { pct: sagPct, floor: SAG_MIN_PCT } : null}
               onSag={setSagPct}
               full={full}
               onFull={setFull}

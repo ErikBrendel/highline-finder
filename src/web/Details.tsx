@@ -216,11 +216,11 @@ interface Props {
    */
   canopyKnown: boolean
   /**
-   * The sag every line is measured at, and the lowest the dataset allows.
+   * The sag every line is measured at, and the lowest it may go.
    *
    * The same state the filter panel's slider holds, not a copy: sag is the one control that
    * re-measures rather than hides, so a second one that meant something different would be two
-   * charts of the same line disagreeing. Null before the dataset has said what its floor is.
+   * charts of the same line disagreeing. Null until the parameters are known.
    */
   sag: { pct: number; floor: number } | null
   onSag: (pct: number) => void
