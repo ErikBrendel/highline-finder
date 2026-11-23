@@ -10,9 +10,12 @@ import {
 
 const everything: UrlState = {
   bbox: [52.1977, 13.6513, 52.2066, 13.6681],
-  custom: { a: { lat: 52.2001, lon: 13.6552 }, b: { lat: 52.2043, lon: 13.6614 } },
-  rig: { a: 0.5, b: 1.2 },
-  sagPct: 6.5,
+  line: {
+    a: { lat: 52.2001, lon: 13.6552 },
+    b: { lat: 52.2043, lon: 13.6614 },
+    rig: { a: 0.5, b: 1.2 },
+    sag: 6.5,
+  },
   basemapMix: 1.4,
   showLines: false,
   showHotspots: false,
@@ -34,10 +37,10 @@ describe('url state', () => {
   it('ignores malformed values rather than throwing', () => {
     const s = parseUrl('?at=1,2&a=notanumber&rig=0.5&sag=abc&b=52.2,13.6')
     expect(s.bbox).toBeNull()
-    expect(s.custom.a).toBeNull()
-    expect(s.rig).toBeNull()
-    expect(s.sagPct).toBeNull()
-    expect(s.custom.b).toEqual({ lat: 52.2, lon: 13.6 })
+    expect(s.line.a).toBeNull()
+    expect(s.line.rig).toBeNull()
+    expect(s.line.sag).toBeNull()
+    expect(s.line.b).toEqual({ lat: 52.2, lon: 13.6 })
   })
 
   it('reads a basemap blend of zero rather than treating it as absent', () => {
@@ -92,13 +95,13 @@ describe('url state', () => {
   })
 
   it('rejects coordinates outside the world', () => {
-    expect(parseUrl('?a=91,13.6').custom.a).toBeNull()
-    expect(parseUrl('?a=52.2,181').custom.a).toBeNull()
+    expect(parseUrl('?a=91,13.6').line.a).toBeNull()
+    expect(parseUrl('?a=52.2,181').line.a).toBeNull()
   })
 
   it('keeps one end of a half-placed line', () => {
-    const s = parseUrl(toSearch({ ...everything, custom: { a: everything.custom.a, b: null } }))
-    expect(s.custom).toEqual({ a: everything.custom.a, b: null })
+    const s = parseUrl(toSearch({ ...everything, line: { ...everything.line, b: null } }))
+    expect(s.line).toEqual({ ...everything.line, b: null })
   })
 })
 

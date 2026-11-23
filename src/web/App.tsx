@@ -23,7 +23,7 @@ import { DEV_MODE } from './devMode.js'
 import {
   BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer,
 } from './MapView.js'
-import { place, type CustomPoints, type LatLon } from './planPoints.js'
+import { place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
 import {
@@ -330,7 +330,6 @@ export function App() {
   const [lines, setLines] = useState<ByKind<Candidate[]> | null>(null)
   const [error, setError] = useState<string | null>(null)
   // null until the dataset is loaded, because the floor comes from the pipeline's own sag.
-  const [sagPct, setSagPct] = useState<number | null>(initial.sagPct)
   // Each slider starts where the link put it, or at the value where it filters nothing.
   const filter = <K extends keyof typeof FILTER_DEFAULTS>(field: K) =>
     initial.filters[field] ?? FILTER_DEFAULTS[field]
@@ -346,7 +345,7 @@ export function App() {
    * There is one line that can be open, and it is always the planned one: picking a found line
    * places the planned line's two points on its anchors. A link with both points opens on it.
    */
-  const [open, setOpen] = useState(!!initial.custom.a && !!initial.custom.b)
+  const [open, setOpen] = useState(!!initial.line.a && !!initial.line.b)
   const [bbox, setBbox] = useState(initial.bbox)
   // Google's map zoom is the same web-mercator scale MapLibre uses, so it transfers directly.
   const [zoom, setZoom] = useState(13)
@@ -414,9 +413,8 @@ export function App() {
   }, [])
 
   const [showAreas, setShowAreas] = useState(initial.showAreas ?? false)
-  const [custom, setCustom] = useState<CustomPoints>(initial.custom)
+  const [line, setLine] = useState<LineSpec>(initial.line)
   // null means "as level and as high as the ground allows", the same choice the search makes.
-  const [rig, setRig] = useState<RigHeights | null>(initial.rig)
   const [optimizing, setOptimizing] = useState(false)
   /**
    * Which point the next click on the map places, while the "plan a line" button is being followed.
@@ -506,9 +504,9 @@ export function App() {
    */
   const params: Params | null = DEV_MODE ? (meta?.params ?? null) : DEFAULT_PARAMS
   const sagDefault = params ? params.sagRatio * 100 : null
-  useEffect(() => {
-    if (sagDefault !== null) setSagPct((cur) => Math.max(SAG_MIN_PCT, cur ?? sagDefault))
-  }, [sagDefault])
+  const sagPct = sagDefault === null ? line.sag : Math.max(SAG_MIN_PCT, line.sag ?? sagDefault)
+  const setSagPct = (pct: number) => setLine((l) => ({ ...l, sag: changed(pct, sagDefault) }))
+  const setRig = (r: RigHeights | null) => setLine((l) => ({ ...l, rig: r }))
 
   useEffect(() => {
     if (!DEV_MODE) return
@@ -669,11 +667,11 @@ export function App() {
   ])
 
   const customUtm = useMemo(() => {
-    if (!custom.a || !custom.b) return null
-    const [ae, an] = toUtm33(custom.a.lat, custom.a.lon)
-    const [be, bn] = toUtm33(custom.b.lat, custom.b.lon)
+    if (!line.a || !line.b) return null
+    const [ae, an] = toUtm33(line.a.lat, line.a.lon)
+    const [be, bn] = toUtm33(line.b.lat, line.b.lon)
     return { a: { e: ae, n: an }, b: { e: be, n: bn } }
-  }, [custom])
+  }, [line.a, line.b])
 
   // The only job of this effect is fetching. It deliberately does not compute or store the
   // measurement: an effect that writes what another effect reads is how this file previously
@@ -745,7 +743,7 @@ export function App() {
       // deliberately does not get this: it evaluates dozens of positions a step, and it is choosing
       // where to put an anchor rather than reporting what is under one.
       { ...params, ...VIEWER_PROFILE },
-      rig,
+      line.rig,
       scene,
       // A dragged anchor crosses into ground still being fetched constantly, and a chart of most of
       // the line beats a spinner over all of it. What is missing comes back as a count and the panel
@@ -761,25 +759,24 @@ export function App() {
           ) !== 'none',
       },
     )
-  }, [params, customUtm, sagPct, terrainVersion, rig, scene])
+  }, [params, customUtm, sagPct, terrainVersion, line.rig, scene])
 
   /**
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a
    * placeholder chart, so placing a line always produces the panel it is going to fill.
    */
-  const planPending = open && !!custom.a && !!custom.b && !planned
+  const planPending = open && !!line.a && !!line.b && !planned
 
   /**
    * Adopts a new pair of planned points. Selection happens here rather than in an effect: it is a
    * consequence of the click, and an effect that both reads and writes the selection is exactly
    * what produced a maximum-update-depth loop before.
    */
-  const commit = (next: CustomPoints, select: boolean) => {
+  const commit = (next: CustomPoints & Partial<LineSpec>, select: boolean) => {
     // Any hand movement ends an optimisation: it is descending from a point the user has left.
     setOptimizing(false)
-    setCustom(next)
     const complete = !!next.a && !!next.b
-    if (!complete) setRig(null)
+    setLine((l) => ({ ...l, ...next, rig: complete ? (next.rig === undefined ? l.rig : next.rig) : null }))
     // `select` is the difference between asking to see a line and merely moving one. Placing a
     // point is a request for the panel; dragging an anchor is not, so a panel the user has closed
     // stays closed while they rearrange things.
@@ -798,9 +795,12 @@ export function App() {
     if (id === PLANNED_ID) return setOpen(true)
     const found = visible.find((c) => c.id === id)
     if (!found) return
-    commit({ a: { lat: found.a.lat, lon: found.a.lon }, b: { lat: found.b.lat, lon: found.b.lon } }, true)
     const rigged = Number.isFinite(found.a.aFrame) && Number.isFinite(found.b.aFrame)
-    setRig(rigged ? { a: found.a.aFrame, b: found.b.aFrame } : null)
+    commit({
+      a: { lat: found.a.lat, lon: found.a.lon },
+      b: { lat: found.b.lat, lon: found.b.lon },
+      rig: rigged ? { a: found.a.aFrame, b: found.b.aFrame } : null,
+    }, true)
   }
 
   /** Turns one anchor class on or off. All three off is a legitimate setting: no lines. */
@@ -820,21 +820,21 @@ export function App() {
       commit({ a: at, b: null }, true)
       setPlacing('b')
     } else {
-      commit({ a: custom.a, b: at }, true)
+      commit({ a: line.a, b: at }, true)
       setPlacing(null)
     }
   }
 
   /** Places one end of the planned line. */
   const setCustomPoint = (which: 'a' | 'b', at: LatLon | null) =>
-    commit(place(custom, which, at), true)
+    commit(place(line, which, at), true)
 
   // One call, not two setCustomPoint calls: both would read the same pre-update `custom`, so the
   // second would put the first end back.
   const clearCustom = () => commit({ a: null, b: null }, false)
 
   /** Dragging an anchor handle. */
-  const moveAnchor = (which: 'a' | 'b', at: LatLon) => commit(place(custom, which, at), false)
+  const moveAnchor = (which: 'a' | 'b', at: LatLon) => commit(place(line, which, at), false)
 
   /**
    * Swaps which end is called A.
@@ -846,10 +846,8 @@ export function App() {
    * ends.
    */
   const flipAnchors = () => {
-    if (!custom.a || !custom.b) return
-    const held = rig
-    commit({ a: custom.b, b: custom.a }, true)
-    setRig(held && { a: held.b, b: held.a })
+    if (!line.a || !line.b) return
+    commit({ a: line.b, b: line.a, rig: line.rig && { a: line.rig.b, b: line.rig.a } }, true)
   }
 
   /**
@@ -944,12 +942,12 @@ export function App() {
   /**
    * The optimiser, run as an animation rather than to completion.
    *
-   * The loop reads the live positions from a ref instead of taking `custom` as a dependency: an
+   * The loop reads the live positions from a ref instead of taking `line` as a dependency: an
    * effect that both reads and writes the same state is how this file previously managed to feed
    * itself, and here it would do so sixty times a second rather than once.
    */
-  const customRef = useRef(custom)
-  customRef.current = custom
+  const lineRef = useRef(line)
+  lineRef.current = line
 
   /** Ends a run, however it ended, and puts the next reach up on the button. */
   const endRun = () => {
@@ -974,7 +972,7 @@ export function App() {
 
     const tick = async () => {
       if (stopped) return
-      const live = customRef.current
+      const live = lineRef.current
       if (!live.a || !live.b) return endRun()
       const [ae, an] = toUtm33(live.a.lat, live.a.lon)
       const [be, bn] = toUtm33(live.b.lat, live.b.lon)
@@ -991,7 +989,7 @@ export function App() {
             surface: surfaceSampler,
             sagRatio: sagPct / 100,
             params,
-            rig,
+            rig: line.rig,
             scene,
             reach,
             onProbe: (e, n) => probes.push(e, n),
@@ -1018,7 +1016,7 @@ export function App() {
       if (!advance) return endRun()
       spacing = advance.spacing
       const { plan } = advance
-      setCustom({ a: toWgs84(plan.a.e, plan.a.n), b: toWgs84(plan.b.e, plan.b.n) })
+      setLine((l) => ({ ...l, a: toWgs84(plan.a.e, plan.a.n), b: toWgs84(plan.b.e, plan.b.n) }))
       timer = setTimeout(() => void tick(), 100)
     }
 
@@ -1031,7 +1029,7 @@ export function App() {
     // a dependency -- otherwise every step would restart the run and reset that origin. `reach` is
     // set in the same click that starts the run, so it is already current when this effect runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optimizing, params, sagPct, rig])
+  }, [optimizing, params, sagPct, line.rig])
 
   const shownProfile = useMemo(() => {
     if (!selected?.profile || sagPct === null || !params) return null
@@ -1169,9 +1167,7 @@ export function App() {
     () =>
       toSearch({
         bbox,
-        custom,
-        rig,
-        sagPct: sagPct === null ? null : changed(sagPct, sagDefault),
+        line,
         basemapMix: changed(basemapMix, MIX_MAX),
         showAreas: changed(showAreas, false),
         full: changed(full, false),
@@ -1188,7 +1184,7 @@ export function App() {
           : { showLines: null, showHotspots: null, kinds: null, filters: {} }),
       }),
     [
-      bbox, custom, rig, sagPct, sagDefault, basemapMix, showLines, showHotspots, showAreas, full,
+      bbox, line, basemapMix, showLines, showHotspots, showAreas, full,
       kinds, minScore, minLength, maxLength, minExposure, maxCanopy, maxOffLevel,
     ],
   )
@@ -1494,7 +1490,7 @@ export function App() {
           >
             {placing
               ? `Tap the map for point ${placing.toUpperCase()} — cancel`
-              : custom.a && custom.b
+              : line.a && line.b
                 ? 'Plan a new line'
                 : 'Plan a line'}
           </button>
@@ -1521,7 +1517,7 @@ export function App() {
             fix={fix}
             locating={locating}
             onLocate={setLocating}
-            custom={custom}
+            custom={line}
             showLines={showLines}
             onSelect={select}
             placing={placing}
@@ -1585,7 +1581,7 @@ export function App() {
                 setOptimizing(true)
               }}
               planned={planned}
-              at={custom.a && custom.b ? { a: custom.a, b: custom.b } : null}
+              at={line.a && line.b ? { a: line.a, b: line.b } : null}
               failed={terrainFailed}
               fetching={fetchingElevation}
               canopy={canopy}
@@ -1597,7 +1593,7 @@ export function App() {
               onFlip={flipAnchors}
               onGuide={guide.show}
               guideOpen={guide.open}
-              rig={rig}
+              rig={line.rig}
               onRig={setRig}
               onClose={() => setOpen(false)}
             />

@@ -1,6 +1,5 @@
-import type { RigHeights } from '../shared/plan.js'
 import { LINE_KINDS, type LineKind } from '../shared/types.js'
-import type { CustomPoints, LatLon } from './planPoints.js'
+import { NO_LINE, type LatLon, type LineSpec } from './planPoints.js'
 
 /**
  * The part of the app's state that belongs in the URL, so a view can be shared.
@@ -59,9 +58,7 @@ const FILTER_PARAMS: Record<keyof Filters, string> = {
 export interface UrlState {
   /** south, west, north, east. */
   bbox: [number, number, number, number] | null
-  custom: CustomPoints
-  rig: RigHeights | null
-  sagPct: number | null
+  line: LineSpec
   /** Basemap blend position. Left unclamped here; the caller owns the valid range. */
   basemapMix: number | null
   /** Layer toggles. Null means the default, which is on for both. */
@@ -86,9 +83,7 @@ export interface UrlState {
 
 const EMPTY: UrlState = {
   bbox: null,
-  custom: { a: null, b: null },
-  rig: null,
-  sagPct: null,
+  line: NO_LINE,
   basemapMix: null,
   showLines: null,
   showHotspots: null,
@@ -201,9 +196,12 @@ export function parseUrl(search: string): UrlState {
   return {
     ...EMPTY,
     bbox: at ? (at as [number, number, number, number]) : null,
-    custom: { a: point(q.get('a')), b: point(q.get('b')) },
-    rig: rig ? { a: rig[0]!, b: rig[1]! } : null,
-    sagPct: sag ? sag[0]! : null,
+    line: {
+      a: point(q.get('a')),
+      b: point(q.get('b')),
+      rig: rig ? { a: rig[0]!, b: rig[1]! } : null,
+      sag: sag ? sag[0]! : null,
+    },
     basemapMix: map ? map[0]! : null,
     showLines: toggle(q.get('lines')),
     showHotspots: toggle(q.get('spots')),
@@ -217,10 +215,11 @@ export function parseUrl(search: string): UrlState {
 export function toSearch(s: UrlState): string {
   const q = new URLSearchParams()
   if (s.bbox) q.set('at', bboxText(s.bbox))
-  if (s.custom.a) q.set('a', `${coord(s.custom.a.lat)},${coord(s.custom.a.lon)}`)
-  if (s.custom.b) q.set('b', `${coord(s.custom.b.lat)},${coord(s.custom.b.lon)}`)
-  if (s.rig) q.set('rig', `${s.rig.a.toFixed(2)},${s.rig.b.toFixed(2)}`)
-  if (s.sagPct !== null) q.set('sag', s.sagPct.toFixed(1))
+  const { a, b, rig, sag } = s.line
+  if (a) q.set('a', `${coord(a.lat)},${coord(a.lon)}`)
+  if (b) q.set('b', `${coord(b.lat)},${coord(b.lon)}`)
+  if (rig) q.set('rig', `${rig.a.toFixed(2)},${rig.b.toFixed(2)}`)
+  if (sag !== null) q.set('sag', sag.toFixed(1))
   if (s.basemapMix !== null) q.set('map', s.basemapMix.toFixed(1))
   if (s.showLines === false) q.set('lines', '0')
   if (s.showHotspots === false) q.set('spots', '0')

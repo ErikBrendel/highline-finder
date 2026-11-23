@@ -1,4 +1,5 @@
 import { toUtm33, groundDistance } from '../shared/geo.js'
+import type { RigHeights } from '../shared/plan.js'
 
 /**
  * The planned line's two ends, and the one rule that governs placing them.
@@ -16,6 +17,15 @@ export interface CustomPoints {
   a: LatLon | null
   b: LatLon | null
 }
+
+/** Everything that makes a planned line what it is. */
+export interface LineSpec extends CustomPoints {
+  rig: RigHeights | null
+  /** Sag in per cent of span, or null for the default. */
+  sag: number | null
+}
+
+export const NO_LINE: LineSpec = { a: null, b: null, rig: null, sag: null }
 
 /**
  * Longest span the planner will hold both ends of.
