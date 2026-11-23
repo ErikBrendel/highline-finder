@@ -545,6 +545,13 @@ export function ProfileChart({
         onHover?.(null)
       }}
     >
+      <rect
+        x={PAD.left}
+        y={PAD.top}
+        width={W - PAD.left - PAD.right}
+        height={H - PAD.top - PAD.bottom}
+        fill="var(--sky)"
+      />
       {ticks.map((t) => (
         <g key={t}>
           <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="var(--border)" strokeWidth="1" />

@@ -21,6 +21,7 @@
   --canopy: #3f7d3f;
   --building: #9aa4b8;
   --water: #2f6f9e;
+  --sky: #eaf2fa;
   /* Rig-height bands: the thin top of a tree, and anything above what is standing there. The
      ground and the trunk reuse --ground and --canopy, since they are the same two things. */
   --crown: #6d9a55;
