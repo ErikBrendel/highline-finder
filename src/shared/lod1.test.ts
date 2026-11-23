@@ -67,13 +67,18 @@ describe('rasteriseFaces', () => {
 })
 
 describe('growRoofs', () => {
-  it('takes the eaves the surface model sees past the footprint, and not the tree beside them', () => {
-    // One row: footprint at 2-3, eaves at 1 and 4, a tree at another height at 5, more eaves at 0.
-    const roof = Grid.filled(7, 1, 0, 1, 1)
-    roof.data.set([NaN, NaN, 20, 20, NaN, NaN, NaN])
-    const surface = Grid.filled(7, 1, 0, 1, 1)
-    surface.data.set([121, 121.5, 122, 122, 121, 117, 121])
-    expect(growRoofs(roof, surface)).toBe(3)
-    expect([...roof.data]).toEqual([20, 20, 20, 20, 20, NaN, NaN])
+  it('follows a building down to the street and stops where a tree climbs again', () => {
+    // One row over flat ground at 100: open ground, a loggia and a wall cell stepping down from the
+    // footprint at 2-3, then the eaves on the other side and a tree rising past them.
+    const row = (values: number[]) => {
+      const g = Grid.filled(values.length, 1, 0, 1, 1)
+      g.data.set(values)
+      return g
+    }
+    const roof = row([NaN, NaN, NaN, 20, 20, NaN, NaN, NaN])
+    const surface = row([101, 110, 120.5, 122, 122, 121, 124, 115])
+    const grown = growRoofs(roof, surface, row(Array(8).fill(100)))
+    expect([...roof.data]).toEqual([NaN, 20, 20, 20, 20, 20, NaN, NaN])
+    expect(grown).toBe(3)
   })
 })

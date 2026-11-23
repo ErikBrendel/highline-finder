@@ -90,23 +90,29 @@ export function rasteriseFaces(faces: LevelFace[], into: Grid): number {
 }
 
 
-/** How close in height a neighbour of a roof has to read to be more of the same building. */
-const EAVES_TOLERANCE = 1.5
 /** How far past its footprint a building may be grown, in cells. */
-const EAVES_REACH = 2
+const EAVES_REACH = 4
+/** How much a cell may read above the roof cell it grows from: survey noise, not a step up. */
+const EAVES_NOISE = 0.5
+/** Below this over the terrain a cell is open ground, as `CANOPY_FROM` has it in the 3D view. */
+const STANDING = 2
 
 /**
- * Grows each roof into the cells beside it where the surface model reads the same height.
+ * Grows each roof into what the surface model shows standing against it.
  *
- * A footprint is the wall line from the cadastre; the surface model sees the eaves, a metre or so
- * further out, and a cell straddling a wall reads the roof. Left alone, that fringe stands two
- * metres and more above the terrain and off any footprint -- so it reads as a row of trees hugging
- * every building, and in the 3D view as a green wall down each face. Measured over a Leipzig tile,
- * cells beside a footprint at the roof's height ran five times as common as the trees found three to
- * five cells out. Two cells and a metre and a half take that fringe and leave a tree that grows
- * against a wall at another height alone.
+ * A footprint is the wall line from the cadastre. The surface model also sees what sticks out of
+ * it -- eaves, loggias and balconies, a metre to several out -- and the cells straddling the outer
+ * wall, which read somewhere between roof and street. None of that is on a footprint, so all of it
+ * stood two metres and more above the terrain off any building, which is what canopy is: a row of
+ * trees hugging every facade, and in the 3D view a green wall down each one. On a Leipzig
+ * Plattenbau the footprint stopped four metres short of the loggias.
+ *
+ * Grown outwards from the footprint through cells that stand and never rise above the cell they
+ * are reached from: a building steps down from its roof to the street, where a tree beside it
+ * climbs again to its own crown, and that climb is where the growing stops. Only the cover changes;
+ * the height drawn and measured there stays the surface model's own.
  */
-export function growRoofs(roof: Grid, surface: Grid): number {
+export function growRoofs(roof: Grid, surface: Grid, ground: Grid): number {
   const { w, h } = roof
   let grown = 0
   for (let pass = 0; pass < EAVES_REACH; pass++) {
@@ -115,10 +121,10 @@ export function growRoofs(roof: Grid, surface: Grid): number {
       for (let col = 0; col < w; col++) {
         const i = row * w + col
         const top = surface.data[i]!
-        if (!Number.isNaN(before[i]!) || Number.isNaN(top)) continue
+        if (!Number.isNaN(before[i]!) || !(top - ground.data[i]! >= STANDING)) continue
         for (const j of [i - w, i + w, col > 0 ? i - 1 : -1, col + 1 < w ? i + 1 : -1]) {
           if (j < 0 || j >= w * h || Number.isNaN(before[j]!)) continue
-          if (Math.abs(surface.data[j]! - top) > EAVES_TOLERANCE) continue
+          if (top > surface.data[j]! + EAVES_NOISE) continue
           roof.data[i] = before[j]!
           grown++
           break

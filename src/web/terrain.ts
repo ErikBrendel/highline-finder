@@ -248,7 +248,7 @@ async function loadWindow(tx: number, ty: number): Promise<void> {
   // elevation. The roof grid starts all NaN, which is the same answer as open ground. Only asked of
   // a source with a city model -- of any other it would be a 404 per tile.
   if (used.cityModel) {
-    await loadRoofs(used.cityModel, e0, n0, roof).then(() => growRoofs(roof, surface)).catch((e: unknown) =>
+    await loadRoofs(used.cityModel, e0, n0, roof).then(() => growRoofs(roof, surface, ground)).catch((e: unknown) =>
       report(`rasterising buildings into the window at ${e0},${n0}`, e),
     )
   }
