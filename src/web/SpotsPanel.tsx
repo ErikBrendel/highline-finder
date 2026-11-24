@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { spanGeometry, type LatLon, type LineSpec } from './planPoints.js'
 import {
-  defaultLineName, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type ExportFile, type Spot,
+  defaultLineName, lineTitle, nearbySpots, parseExport, spotHash, spotTitle, type ExportFile, type Spot,
 } from './spots.js'
 import { ShareButton } from './ShareButton.js'
 import type { Imported, MoveTarget, Spots } from './useSpots.js'
@@ -30,19 +30,13 @@ const enterTo = (done: () => void) => (e: KeyboardEvent) => {
   done()
 }
 
-/**
- * A text box as tall as what is in it, so a name with notes under it is all on screen.
- *
- * With a `fallback`, a title left empty gets it back when the box is left, not while typing: a line
- * always has a name, and clearing one to type another must not have the old one jump back in.
- */
-function Grow({ value, onChange, placeholder, onEnter, autoFocus, fallback }: {
+/** A text box as tall as what is in it, so a name with notes under it is all on screen. */
+function Grow({ value, onChange, placeholder, onEnter, autoFocus }: {
   value: string
   onChange: (v: string) => void
   placeholder: string
   onEnter?: () => void
   autoFocus?: boolean
-  fallback?: string
 }) {
   return (
     <textarea
@@ -53,9 +47,6 @@ function Grow({ value, onChange, placeholder, onEnter, autoFocus, fallback }: {
       autoFocus={autoFocus}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={onEnter ? enterTo(onEnter) : undefined}
-      onBlur={() => {
-        if (fallback && !titleOf(value)) onChange([fallback, ...value.split('\n').slice(1)].join('\n'))
-      }}
     />
   )
 }
@@ -88,7 +79,7 @@ function Confirm({ label, sure, onConfirm }: { label: string; sure: string; onCo
 function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a: LatLon; b: LatLon }; onDone: () => void }) {
   const nearby = nearbySpots(spots.lib.spots, [line.a, line.b])
   const named = spots.open.kind === 'found' ? spots.open.name : spots.lib.draft?.name
-  const [name, setName] = useState(named ?? defaultLineName(line.a, line.b))
+  const [name, setName] = useState(named ?? '')
   const [into, setInto] = useState<string | null>(nearby.length === 1 ? nearby[0]!.spot.id : null)
   const target = nearby.find((n) => n.spot.id === into)?.spot
   const [secretChoice, setSecret] = useRemembered('highline-finder.save-secret', false)
@@ -107,10 +98,9 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
         <Grow
           value={name}
           onChange={setName}
-          placeholder="Name, and notes under it"
+          placeholder={defaultLineName(line.a, line.b)}
           onEnter={save}
           autoFocus
-          fallback={target ? defaultLineName(line.a, line.b) : undefined}
         />
       </label>
       {nearby.length > 0 && (
@@ -342,7 +332,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
         <ul className="spotlist">
           {spots.shared && row('shared', spotTitle(spots.shared), <><span className="unsaved">shared</span> · {spots.shared.lines.length} lines</>,
             open.kind === 'shared', () => { spots.openShared(null); setBrowsing(false); onFocus(spots.shared!) }, { spot: 'shared', line: null })}
-          {lib.draft && row('draft', titleOf(lib.draft.name) || 'Untitled', <span className="draft">draft</span>,
+          {lib.draft && row('draft', lineTitle(lib.draft), <span className="draft">draft</span>,
             open.kind === 'draft', spots.openDraft, { spot: 'draft', line: null })}
           {sorted.map(({ s, metres }) => row(
             s.id,
@@ -474,7 +464,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
               onMouseEnter={() => onLit({ spot: isShared ? 'shared' : spot.id, line: i })}
               onMouseLeave={() => onLit(null)}
             >
-              <span className="title">{titleOf(l.name) || 'Untitled'}</span>
+              <span className="title">{lineTitle(l)}</span>
               <span className="sub">{Math.round(spanGeometry(l.a, l.b).length)} m</span>
             </button>
             {!isShared && !holding && <MoveTo spots={spots} from={spot} index={i} />}
@@ -499,8 +489,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
           <Grow
             value={active.name}
             onChange={spots.renameActive}
-            placeholder="Name, and notes under it"
-            fallback={defaultLineName(active.a, active.b)}
+            placeholder={defaultLineName(active.a, active.b)}
           />
         </label>
       )}

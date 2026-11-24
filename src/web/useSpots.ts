@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { RigHeights } from '../shared/plan.js'
 import type { LineSpec } from './planPoints.js'
 import {
-  defaultLineName, exportText, titleOf, findLine, isShell, loadLibrary, merged, newId, normalized, opened, rebased, sameAnchors,
+  exportText, titleOf, findLine, isShell, loadLibrary, merged, newId, normalized, opened, rebased, sameAnchors,
   sameLines, sealedForm, spotOfText, spotText, storeLibrary, watchLibrary, type ExportFile, type Library, type Spot,
   type SpotLine,
 } from './spots.js'
@@ -57,12 +57,12 @@ const sameRig = (p: RigHeights | null, q: RigHeights | null) =>
 
 /**
  * A spot with one more line. A spot of one line saved before spots had names of their own carries
- * its name on the line; it moves up to the spot, and the line gets the name every line starts with.
+ * its name on the line; it moves up to the spot, and the line is left unnamed, as every line starts.
  */
 export function joined(s: Spot, line: SpotLine): Spot {
   const [only] = s.lines
   if (s.lines.length !== 1 || titleOf(s.name)) return { ...s, lines: [...s.lines, line] }
-  return { ...s, name: only!.name, lines: [{ ...only!, name: defaultLineName(only!.a, only!.b) }, line] }
+  return { ...s, name: only!.name, lines: [{ ...only!, name: '' }, line] }
 }
 
 /** Where the page starts: on what the link names, or back on the draft line. */
@@ -318,8 +318,7 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
     const o = openRef.current
     const held = lineOf(o)
     if (held && sameAnchors(held, a, b) && sameRig(held.rig, rig) && held.sag === sag) return
-    const name = !held || held.name === defaultLineName(held.a, held.b) ? defaultLineName(a, b) : held.name
-    const line: SpotLine = { id: held?.id ?? newId(), name, a, b, rig, sag }
+    const line: SpotLine = { id: held?.id ?? newId(), name: held?.name ?? '', a, b, rig, sag }
     if (o.kind === 'draft') change(DRAFT, line, true)
     if (o.kind === 'spot' && o.editing && o.line !== null) {
       const at = o.line
@@ -570,7 +569,7 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
       const o = openRef.current
       if (o.kind === 'found' && current.a && current.b) {
         const { a, b, rig, sag } = current
-        change(DRAFT, { id: newId(), name: o.name ?? defaultLineName(a, b), a, b, rig, sag })
+        change(DRAFT, { id: newId(), name: o.name ?? '', a, b, rig, sag })
         show({ kind: 'draft' })
         return
       }
@@ -643,16 +642,14 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
      * Keeps the open draft or found line: as a spot of its own, or added to `into`. A saved draft
      * line leaves the draft. The saved line is open afterwards, to look at.
      *
-     * `name` is the new spot's, whose one line keeps the name it was given automatically, or the
-     * line's where it joins a spot that has one.
+     * `name` is the new spot's, whose one line stays unnamed, or the line's where it joins a spot.
      */
     save: ({ into, name, secret }: { into: string | null; name: string; secret: boolean }, current: LineSpec) => {
       const o = openRef.current
       const { a, b, rig, sag } = current
       if ((o.kind !== 'draft' && o.kind !== 'found') || !a || !b) return
       const target = into ? spotOf(into) : undefined
-      // Enter saves without the box being left, so the name it falls back to is given here as well.
-      const line: SpotLine = { id: newId(), name: target && titleOf(name) ? name : defaultLineName(a, b), a, b, rig, sag }
+      const line: SpotLine = { id: newId(), name: target ? name : '', a, b, rig, sag }
       if (o.kind === 'draft') change(DRAFT, null)
       if (target) {
         changeSpot(target.id, (s) => joined(s, line))

@@ -25,7 +25,7 @@ import {
 } from './MapView.js'
 import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
 import { useSpots } from './useSpots.js'
-import { defaultLineName, spotFromHash, type Spot, type SpotLine } from './spots.js'
+import { spotFromHash, type Spot, type SpotLine } from './spots.js'
 import { SpotsPanel, type Lit } from './SpotsPanel.js'
 import { SecretToggle } from './SecretToggle.js'
 import type { SavedDrawn } from './MapView.js'
@@ -442,7 +442,7 @@ export function App() {
   // A spot of one line is called by the spot's name, and so is a link to its line.
   const single = spots.spot?.lines.length === 1 ? spots.spot : null
   const activeName = (single && spots.active ? single.name : spots.active?.name) ?? (spots.open.kind === 'found' ? spots.open.name : null)
-  const ownName = activeName && line.a && line.b && activeName !== defaultLineName(line.a, line.b) ? activeName : null
+  const ownName = activeName || null
   const [saving, setSaving] = useState(false)
   const [lit, setLit] = useState<Lit | null>(null)
   const [focus, setFocus] = useState<{ bbox: [number, number, number, number]; key: number } | null>(null)

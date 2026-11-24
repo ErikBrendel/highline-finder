@@ -65,15 +65,18 @@ export const opened = (lib: Library, known: Map<string, Spot>): Library => ({
 
 export const titleOf = (text: string) => text.split('\n')[0]!.trim()
 
+export const defaultLineName = (a: LatLon, b: LatLon) => `${Math.round(spanGeometry(a, b).length)} m line`
+
+/** A line without a name of its own is called by its length, worked out each time so it stays true. */
+export const lineTitle = (l: Pick<SpotLine, 'name' | 'a' | 'b'>) => titleOf(l.name) || defaultLineName(l.a, l.b)
+
 /**
  * A spot is called by its own name. Its lines' names are only shown once it holds more than one:
  * a spot of one line is that line, and the name given when it was saved is the spot's.
  */
 export function spotTitle(s: Spot): string {
-  return titleOf(s.name) || titleOf(s.lines[0]?.name ?? '') || 'Untitled'
+  return titleOf(s.name) || (s.lines[0] ? lineTitle(s.lines[0]) : 'Untitled')
 }
-
-export const defaultLineName = (a: LatLon, b: LatLon) => `${Math.round(spanGeometry(a, b).length)} m line`
 
 /** Appends to the title, leaving the notes under it alone. */
 export function retitled(text: string, suffix: string): string {

@@ -185,6 +185,6 @@ describe('joined', () => {
     const named = { ...spot('s1', line(52, '61 m line')), name: 'Crag' }
     expect(joined(named, line(53)).name).toBe('Crag')
     const old = joined(spot('s1', line(52, 'Quarry')), line(53))
-    expect([old.name, old.lines[0]!.name]).toEqual(['Quarry', '111 m line'])
+    expect([old.name, old.lines[0]!.name]).toEqual(['Quarry', ''])
   })
 })
