@@ -834,16 +834,15 @@ export function Details({
             <b>
               {roadState === 'loading'
                 ? 'Checking what this line passes over…'
-                : 'No roads or water for this ground'}
+                : 'Roads and water did not load'}
             </b>
             <div>
               {roadState === 'loading'
                 ? 'Clearance over roads and railways is not in the figures below yet.'
-                : 'Outside Berlin and Brandenburg this is asked of OpenStreetMap as the line is ' +
-                  'placed, and that request did not come back. Until it does, a span over a road ' +
-                  'reads as a span over a field, and a span over a lake is held to the three metres ' +
-                  'this search asks over ground rather than the one it asks over water. Cautious in ' +
-                  'both directions, and blind in both. Moving an anchor asks again.'}
+                : 'The OpenStreetMap data for this ground could not be fetched. Until it is, a span ' +
+                  'over a road reads as a span over a field, and a span over a lake is held to the ' +
+                  'three metres this search asks over ground rather than the one it asks over water. ' +
+                  'Cautious in both directions, and blind in both. Moving an anchor asks again.'}
             </div>
           </div>
         )}

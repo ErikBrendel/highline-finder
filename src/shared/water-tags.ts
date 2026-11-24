@@ -3,9 +3,9 @@ import type { OsmKind } from './osmBlocks.js'
 /**
  * Which water tags are worth drawing, and as what.
  *
- * Shared, because two things now classify OpenStreetMap: the tool that builds the blocks this app
- * ships with, and the browser when it asks Overpass for ground those blocks do not cover. If the
- * two disagreed, a lake would be a lake on one side of a state border and dry land on the other.
+ * Kept apart from the tool that builds the blocks because it is the definition of water for the
+ * whole project: whatever classifies OpenStreetMap has to agree with it, or a lake is a lake in one
+ * place and dry land in another.
  */
 export function waterKind(tags: Record<string, string>): OsmKind | null {
   if (tags.natural === 'water') return 'water'

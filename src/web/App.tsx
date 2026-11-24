@@ -518,8 +518,8 @@ export function App() {
   // depends on. Keeping it a counter rather than storing the measurement means the planned line is
   // computed, not held in state, so no effect has to write it.
   const [terrainVersion, setTerrainVersion] = useState(0)
-  // The same idea for land cover: bumped when an Overpass request delivers a corridor that was
-  // missing, which is what makes the planned line re-measure against the roads it just learned of.
+  // The same idea for land cover: bumped when an OSM block delivers a corridor that was missing,
+  // which is what makes the planned line re-measure against the roads it just learned of.
   const [coverVersion, setCoverVersion] = useState(0)
   /** Why the elevation for the planned line could not be had, or null while it can. */
   const [terrainFailed, setTerrainFailed] = useState<string | null>(null)
@@ -1292,8 +1292,8 @@ export function App() {
    * Land cover along whatever line is on screen: water for the chart to draw, and roads for the
    * planner to hold the line to.
    *
-   * Debounced, because dragging an anchor moves the line many times a second and this is a public
-   * Overpass instance. Buildings need no equivalent -- they arrive with the elevation, since they
+   * Debounced, because dragging an anchor moves the line many times a second and each new block is a
+   * request. Buildings need no equivalent -- they arrive with the elevation, since they
    * are part of the measurement rather than an annotation on it.
    *
    * One fetch serves both, because the shown line is always the planned one.

@@ -15,7 +15,7 @@ import { ensureExtract, extractPath } from './extract.js'
  * the whole state, changes only when OpenStreetMap does, and its output is committed. Coupling them
  * would mean every parameter tweak re-read three hundred megabytes to produce identical bytes.
  *
- * What it costs: one 4.4 GB download, cached, and a quarter of an hour of work. What it buys: the
+ * What it costs: one 4.7 GB download, cached, and three quarters of an hour at 12 GB of memory. What it buys: the
  * deployed site asks nothing of any third party at run time, and the pipeline and the browser read
  * the same bytes rather than querying the same service separately and disagreeing.
  *

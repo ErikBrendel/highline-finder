@@ -138,11 +138,6 @@ anchors only, one AOI, static viewer.
   so a line cannot run into unloaded terrain. It only pays where relief is sparse relative to the
   tile grid. Fetching terrain from the WCS by window instead of by published tile would let the mask
   work at its own resolution.
-- **OSM beyond Brandenburg.** The shipped blocks come from the Brandenburg extract, which includes
-  Berlin and stops at the state border. Extending the search into a neighbouring state means adding
-  its extract to `osmRefresh.ts` and re-running — the block grid and the format do not care, but
-  nothing currently notices when a region reaches past what was extracted, so it would read as
-  empty rather than as missing.
 - **Bridges we do not measure.** A crossing tagged `bridge=yes` takes its clearance from the surface
   model, on the reasoning that the photogrammetric model sees the deck. It also sees whatever is
   standing on the deck at the moment of capture, and the railings, so the figure runs a metre or two
@@ -692,47 +687,26 @@ WCS planned); Saxony now comes through the proxy below.
 Explored and postponed. The free tiers below were checked in September 2026; they are the numbers
 the whole question turns on, so re-check them before acting rather than trusting this list.
 
-**Where it stands.** GitHub Pages from a public repo. The deployed payload is 16 MB of
-`candidates.json` (3.15 MB gzipped) and 34 MB across 703 OSM blocks held in Git LFS. Pages caps a
-site at 1 GB with a soft 100 GB/month of bandwidth, and serves everything with a fixed
-`max-age=600` that cannot be tuned from this side.
+**Where it stands.** GitHub Pages from a public repo, serving 16 MB of `candidates.json` (3.15 MB
+gzipped). Pages caps a site at 1 GB with a soft 100 GB/month of bandwidth, and serves everything
+with a fixed `max-age=600` that cannot be tuned from this side.
 
-**LFS is the first thing to actually bind.** Every CI checkout pulls the whole 34 MB against a free
-quota of about 1 GB/month, so roughly thirty deploys -- and that is before a second state is
-shipped, never mind the rest of the country.
+### R2 for the OSM blocks -- done, November 2026
 
-### R2 for the OSM blocks
+The roads and water for all of Germany are built by `npm run osm` from the 4.7 GB Geofabrik dump
+and published by `npm run osm:upload` to the `highline-finder-osm` bucket, which the proxy Worker
+serves as `/osm/` (R2: 10 GB storage, free egress, 1 M class A and 10 M class B operations a month).
+Blocks sit under a build version, the index naming it is swapped last and fetched past every cache,
+so a browser reads one build whole.
 
-Cloudflare R2 gives 10 GB of storage with free egress, 1 M class A and 10 M class B operations a
-month. A Germany-wide block set is estimated at 440-700 MB, area-scaling the ~50 MB that Saxony and
-Sachsen-Anhalt came to with simplification, so it fits several times over.
+That took Git LFS out of the project, and with it the live Overpass fallback: `overpass.ts`, the
+patch index beside the blocks in `landcover.ts`, its request queue and 429 handling, and the
+two-source merges in `coverAlong`, `roadsFor` and the water windows -- where the recent bugs lived.
+The cost is that land cover is a snapshot: a gap is fixed by rebuilding and re-uploading, not by a
+query.
 
-That removes Git LFS from the project outright: the repository drops to ~20 MB, `lfs: true` and its
-silent-empty-blocks footgun leave the workflow, and blocks are uploaded once rather than
-republished with every deploy. Runtime barely changes -- `keysFor` already fetches blocks lazily,
-so only the URL is different.
-
-It is also the answer to *What stops fitting in one file* above: 790 MB of per-chunk candidate
-files has the same shape and the same home.
-
-### Which is what would let Overpass be deleted
-
-`hoehendaten.covers()` is `nearState('Germany')`, so anywhere in the country is plannable and can
-therefore ask for land cover. A partial extract leaves the fallback alive for everywhere it does
-not reach, so the bar is Germany-wide or nothing -- half measures buy no code back.
-
-What goes is not a backend swap but a whole parallel index: all 219 lines of `overpass.ts`, plus
-`patches`, `patching`, `patchFailed`, `patchesWanted`, `blockUnder` and `patchesUnder` in
-`landcover.ts`, the serialised request queue, the 429 handling, the two-source merge in `coverAlong`
-and `roadsFor`, and the `waterWindows` invalidation that hangs off it. That is precisely where the
-recent bugs lived -- the EMPTY-block "checked, no roads", the 429 storm from six parallel patches,
-and the 3D view holding stale colours. `onCoverChange` stays: that race is about shipped blocks
-arriving and has nothing to do with Overpass.
-
-The cost is that land cover becomes a snapshot with no live fallback -- a gap is fixed by
-regenerating and re-uploading rather than by a query -- and that regenerating means a ~4 GB Germany
-PBF through the three-pass reader. For lakes and roads over a season that is an acceptable trade.
-Sequence matters: ship Germany-wide blocks and verify the coverage *first*, delete second.
+**Spending.** R2 and Workers bill past the free tier automatically once a payment method is on the
+account. Alerts and a guard on `/osm/` requests are still to be set up.
 
 ### A Worker for CORS, and for nothing else
 

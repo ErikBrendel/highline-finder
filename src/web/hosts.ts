@@ -33,5 +33,8 @@ export const reachable = (url: string): string =>
  */
 const PROXY = 'https://highline-finder-proxy.erik-brendel.workers.dev'
 
+/** The OpenStreetMap blocks, which the same worker serves out of R2 -- in development too. */
+export const osmUrl = (path: string): string => `${PROXY}/osm/${path}`
+
 export const proxied = (host: ProxiedHost, path: string): string =>
   import.meta.env?.DEV ? `/via/${host}${path}` : `${PROXY}/${host}${path}`

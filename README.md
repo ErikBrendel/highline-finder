@@ -199,7 +199,7 @@ the segments gives exact distances along the span, which is also what the profil
 against — and a bridge is measured against its deck, which the terrain model has no idea exists but
 the photogrammetric surface model does.
 
-### The OSM data ships with the app
+### The OSM data is built here, for all of Germany
 
 Roads and water used to be fetched from the public Overpass API at run time, by the pipeline and the
 browser separately. That was wrong twice over. It is a shared community service, and asking it for a
@@ -207,31 +207,42 @@ state's road network got this project's machine refused outright — 112 one-squ
 was enough. And the two halves asked it independently, so they could disagree about what a line
 passes over, which is the exact thing the project refuses to allow for terrain and roofs.
 
-So `npm run osm` extracts it once from a Geofabrik dump and commits the result:
+So `npm run osm` extracts it from the Geofabrik Germany dump, and `npm run osm:upload` publishes it
+to the `highline-finder-osm` R2 bucket, which the proxy Worker serves as `/osm/`:
 
 ```
-brandenburg-latest.osm.pbf   285 MB   downloaded once, cached, gitignored
-  ↓  1.1 M roads, 36 k railways, 29 k water outlines
-src/web/public/osm/*.bin      32 MB   702 blocks of 8 km, committed via Git LFS
+germany-latest.osm.pbf       4.7 GB   downloaded once, cached, gitignored
+  ↓  16.9 M kept of 71.7 M ways: roads, railways, water outlines
+data/osm/<version>/*.bin     467 MB   6,212 blocks of 8 km, gitignored, uploaded to R2
 ```
+
+Updating is three commands, run whenever OpenStreetMap has moved enough to matter:
+
+```
+npm run osm -- --fresh          # new extract, rebuild data/osm/
+npm run osm:upload              # blocks under the new version, then index.json naming it
+npm run osm:upload -- --prune   # next time: drop all but the newest two versions
+```
+
+A browser reads the index fresh and every block under the version it names, and keeps blocks in
+IndexedDB by that URL — so it holds one build or the other, never a mix.
 
 Coordinates are decimetres of EPSG:25833, delta-encoded along each way, gzipped — about four bytes
 per point. A tenth of a metre is finer than anything else here measures (the rasters are 1 m), and
 it is what keeps a crossing's position along a span exact enough to draw.
 
-The pipeline reads the blocks its region touches; the browser fetches the one to four a line needs
-and keeps them in the same IndexedDB store as the elevation windows. **Neither asks anything of a
-third party at run time**, and both read the identical bytes, so a planned line and a found one
+The pipeline reads the blocks its region touches from `data/osm/`; the browser fetches the one to
+four a line needs and keeps them in the same IndexedDB store as the elevation windows. **Neither asks
+anyone else's service at run time**, and both read the identical bytes, so a planned line and a found one
 cannot disagree. A block that is not in `index.json` means there is genuinely nothing in that
 square; a block that *is* listed and will not load is a broken deployment, and says so.
 
 The script is deliberately separate from the search pipeline: that one is about one area of interest
-and re-runs whenever a parameter changes, this one is about the whole state and changes only when
+and re-runs whenever a parameter changes, this one is about the whole country and changes only when
 OpenStreetMap does.
 
-**Working on this repo needs `git lfs install` first**, and the Pages workflow checks out with
-`lfs: true`. Without either, the blocks arrive as 130-byte pointer files and every one of them reads
-as empty.
+Running the pipeline needs `npm run osm` once first, since the blocks are no longer in the
+repository; it stops with that instruction when they are missing.
 
 ### Natural, mixed and urban
 

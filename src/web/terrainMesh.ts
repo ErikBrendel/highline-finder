@@ -199,8 +199,7 @@ export function standingHeight(patch: Patch, x: number, z: number, radius: numbe
 /**
  * The cover classes again, over a patch already read.
  *
- * Land cover outside Brandenburg is fetched from Overpass as the view is opened, and arrives some
- * seconds after the ground does. Re-reading the heights to colour a lake in would mean sampling a
+ * Land cover can arrive after the ground does, when the view opens on blocks not yet fetched. Re-reading the heights to colour a lake in would mean sampling a
  * quarter of a million points twice; this walks the same grid and asks only the two questions that
  * have changed their answer.
  */

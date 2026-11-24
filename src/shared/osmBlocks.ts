@@ -11,10 +11,10 @@ import { ROAD_TIERS, type RoadTier } from './types.js'
  * asked it independently, so they could disagree about what a line passes over -- which is exactly
  * the thing the project insists on for terrain and roofs.
  *
- * So the data is extracted once from a Geofabrik extract (see src/tools/osmRefresh.ts), reduced to
- * what the search actually reads, and committed. The pipeline and the browser then load the same
- * bytes, the deployed site depends on nothing at run time, and there is no failure mode left to
- * handle.
+ * So the data is extracted from the Geofabrik Germany extract (see src/tools/osmRefresh.ts),
+ * reduced to what the search actually reads, and published to R2 (src/tools/osmUpload.ts). The
+ * pipeline and the browser then load the same bytes, and the site depends on nobody else's
+ * service at run time.
  *
  * Blocked at 8 km so the browser fetches one to four for a line rather than a state's worth, and
  * the pipeline just loads every block its region touches.

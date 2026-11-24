@@ -565,10 +565,8 @@ export function Terrain3D({
         done++
         setFetching(done >= total ? null : { done, total })
       })
-      // Elevation only. Land cover is asked for below and never waited on: outside Brandenburg it
-      // is an Overpass request that takes tens of seconds, and having it in here meant the view sat
-      // on "reading the ground" long after the ground had been read. A picture of the terrain now
-      // is worth more than a picture with the lakes already in it later, and the lakes repaint
+      // Elevation only. Land cover is asked for below and never waited on: a picture of the terrain
+      // now is worth more than a picture with the lakes already in it later, and the lakes repaint
       // themselves when they land.
       try {
         await ensureTerrain(g.centre, g.centre, g.halfSide)
@@ -651,9 +649,9 @@ export function Terrain3D({
       /**
        * And now the rest of the square's land cover, which the picture does not wait for.
        *
-       * Inside Brandenburg the blocks are already held and this returns at once. Outside it, every
-       * kilometre of the square is a request to Overpass -- so the ground is drawn brown, the lakes
-       * arrive when they arrive, and only the colours change when they do.
+       * Usually the blocks are already held for the line and this returns at once. When they are not,
+       * the ground is drawn brown, the lakes arrive when their block does, and only the colours
+       * change.
        */
       const half = g.halfSide
       setCoverPending(true)

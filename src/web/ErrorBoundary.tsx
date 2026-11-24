@@ -12,7 +12,7 @@ import { failureText, onFailure, type Failure } from './report.js'
  *
  * Window-level handlers as well as the boundary, because the two catch different halves. A boundary
  * only sees errors thrown during render, and a great deal of this app happens in effects and
- * promises -- a failed tile fetch, an Overpass request, an elevation window -- none of which reach
+ * promises -- a failed tile fetch, an OSM block, an elevation window -- none of which reach
  * it. Those do not blank the page, so they are shown as a dismissible banner rather than as a
  * replacement for the app.
  *
@@ -104,7 +104,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
  * to be invisible, and a spinner that never resolves needs its reason to still be on screen when
  * someone finally looks for it.
  *
- * Development only. A refused elevation window or a timed-out Overpass query is a fact about the
+ * Development only. A refused elevation window or a timed-out tile is a fact about the
  * survey servers, not about anything a visitor did or can do -- the app is designed to keep working
  * through them, and a counter in the corner asks them to worry about a thing that is being handled.
  * `report` still logs every one to the console, so the reason is there for whoever opens it. Vite

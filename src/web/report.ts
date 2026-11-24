@@ -2,7 +2,7 @@
  * One place every failure the app decides to survive is announced.
  *
  * The app is full of `catch` clauses that are correct in principle -- a missing city-model tile, a
- * refused IndexedDB, an Overpass timeout -- because none of them should take the map down. What was
+ * refused IndexedDB, a survey server timing out -- because none of them should take the map down. What was
  * wrong is that they all discarded the reason. Nothing reached the console, nothing reached the
  * error boundary (a swallowed rejection is never an unhandled one), and the user was left with a
  * spinner that never stopped or a message that blamed the data for a bug in the code.

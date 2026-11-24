@@ -192,10 +192,9 @@ export async function fetchCached(url: string, signal?: AbortSignal): Promise<Ar
 /**
  * The same store, for bytes that did not come from a GET.
  *
- * Land cover fetched from Overpass is a POST and arrives as JSON, and what is worth keeping is the
- * packed block it is turned into rather than the reply. So it is stored under a key of its own --
- * `overpass:` rather than a host -- in the same database as every tile, so one "clear" empties both
- * and one quota covers both.
+ * What is worth keeping is sometimes not the reply but what it is turned into, so it is stored under
+ * a key of its own rather than a URL -- in the same database as every tile, so one "clear" empties
+ * both and one quota covers both.
  */
 export const readCached = (key: string): Promise<ArrayBuffer | null> => read(key).catch(cacheMiss)
 

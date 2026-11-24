@@ -860,9 +860,9 @@ async function main() {
           },
           {
             name: 'OpenStreetMap roads, railways and water',
-            url: 'https://download.geofabrik.de/europe/germany/brandenburg-latest.osm.pbf',
+            url: 'https://download.geofabrik.de/europe/germany-latest.osm.pbf',
             attribution: 'OpenStreetMap contributors, ODbL',
-            note: 'extracted once by `npm run osm` and shipped as blocks under public/osm; sets the clearance a line owes over traffic. Brandenburg extract, which includes Berlin',
+            note: 'extracted by `npm run osm` into 8 km blocks for all of Germany, served to the browser out of R2; sets the clearance a line owes over traffic, and the lesser one owed over water',
           },
         ],
         stats: {
