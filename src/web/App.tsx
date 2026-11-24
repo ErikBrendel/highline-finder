@@ -898,6 +898,7 @@ export function App() {
       return [{
         spot: c.spot, line: c.line, a: c.a, b: c.b, widens: c.widens,
         anchorA: m.a.anchor, anchorB: m.b.anchor, sagRatio: m.length > 0 ? m.sag / m.length : 0,
+        noFall: measured.noFall.map((z): [number, number] => [z.from / m.length, z.to / m.length]),
       }]
     })
   }, [companionLines, params, sagDefault, terrainVersion])
@@ -1128,6 +1129,10 @@ export function App() {
 
   // The planned line is exempt from every filter and from the validity gate, by design.
   const selected = open ? (planned?.candidate ?? null) : null
+  const noFallShown = useMemo(
+    () => (selected && planned ? planned.noFall.map((z): [number, number] => [z.from / selected.length, z.to / selected.length]) : []),
+    [selected, planned],
+  )
 
   /**
    * The optimiser, run as an animation rather than to completion.
@@ -1752,6 +1757,7 @@ export function App() {
             locating={locating}
             onLocate={setLocating}
             custom={line}
+            noFall={noFallShown}
             editable={spots.editable}
             canClear={!spots.holding}
             showLines={showLines}

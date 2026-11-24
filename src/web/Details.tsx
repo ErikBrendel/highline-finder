@@ -493,7 +493,12 @@ export function Details({
   }
   const pct = (v: number) => (v * 100).toFixed(0)
 
+  const midspan = planned && c ? planned.noFall.filter((z) => z.from > 0.5 && z.to < c.length - 0.5) : []
   const rows: { label: string; value: string; neg?: boolean }[] = [
+    {
+      label: 'Walk (no-fall zones off)',
+      value: planned ? stat((c) => `${planned.walk.toFixed(0)} of ${c.length.toFixed(0)} m`) : DASH,
+    },
     { label: 'Exposure (max air)', value: stat((c) => `${c.exposure.toFixed(1)} m`) },
     { label: 'Min terrain clearance', value: stat((c) => `${c.clearanceMin.toFixed(1)} m`) },
     {
@@ -658,6 +663,7 @@ export function Details({
             others={companions}
             onOtherTapped={onCompanion}
             hoverAt={hoverAt}
+            noFall={planned?.noFall ?? []}
             onMoveAnchor={editable ? onMoveAnchor : undefined}
           />
         )}
@@ -692,6 +698,7 @@ export function Details({
                 canopyKnown={canopy !== 'none'}
                 box={chartBox}
                 onHover={setHoverAt}
+                noFall={planned?.noFall ?? []}
               />
               {/* Over the chart rather than instead of it, and only where the chart has a hole to
                   explain. Elevation is in flight for all sorts of reasons -- another line, the
@@ -739,6 +746,7 @@ export function Details({
             <span><i style={{ background: 'var(--road)' }} />road or rail crossed (OSM)</span>
             <span><i className="dashed" style={{ borderColor: 'var(--road)' }} />clearance required</span>
             <span><i style={{ background: 'var(--line)' }} />line with sag</span>
+            <span><i style={{ background: 'var(--nofall)' }} />no-fall zone: a fall would reach the ground</span>
           </div>
         </div>
       </div>
@@ -856,10 +864,16 @@ export function Details({
           ) : (
             <div className="note" style={{ margin: '8px 0 0' }}>
               {DEV_MODE
-                ? 'Meets every hard constraint — the search would have accepted this line.'
+                ? 'Meets every hard constraint.'
                 : 'Clears every hard limit this tool checks.'}
             </div>
           )
+        )}
+        {midspan.length > 0 && (
+          <div className="note" style={{ margin: '8px 0 0' }}>
+            No-fall midspan:{' '}
+            {midspan.map((z) => `${(z.to - z.from).toFixed(0)} m at ${z.from.toFixed(0)} m`).join(', ')}
+          </div>
         )}
 
 

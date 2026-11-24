@@ -3,11 +3,13 @@ import { buildProfile, packProfile } from './profile.js'
 import {
   chooseHeights,
   maxFeasibleSag,
+  noFallZones,
   penaltyOf,
   rawMetricsAt,
   scoreOf,
   violationsOf,
   type Metrics,
+  type Stretch,
 } from './scoring.js'
 import { lineKind, rigCost, rigRange, type Standing } from './anchoring.js'
 import type { Scene } from './scene.js'
@@ -40,6 +42,14 @@ export interface PlannedLine {
    * none, and the two always agree: no violation is free and nothing else is charged for.
    */
   penalty: number
+  /**
+   * Where a fall would reach the ground, measured on this line at this sag. Clearance is waived
+   * here instead of at the search's fixed `anchorZone`, so a hand-placed line fails on clearance
+   * only where it rests on the ground midspan.
+   */
+  noFall: Stretch[]
+  /** The span less its no-fall zones: what is actually walked. */
+  walk: number
 }
 
 /**
@@ -192,7 +202,7 @@ export function planLine(
   // whose figures are unknown rather than a line that does not exist. NaN says unknown where zero
   // would say measured-and-fine, and the charges are zero because nothing seen is nothing to charge.
   const raw =
-    rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings) ??
+    rawMetricsAt(stored, length, h.hA, h.hB, sagRatio, p, crossings, 'measured') ??
     (tolerateGaps ? NOTHING_MEASURED : null)
   if (!raw) return null
   // The same NaN, for the same reason, one step further out: nobody looked above this ground, so
@@ -202,6 +212,7 @@ export function planLine(
   const m =
     canopyKnown ? raw : { ...raw, canopyClearanceMin: NaN, canopyBlockedFraction: NaN }
 
+  const noFall = noFallZones(stored, length, h.hA, h.hB, sagRatio, p)
   const r2 = (v: number) => Math.round(v * 100) / 100
   const { score, parts } = scoreOf(length, h.offLevel, m, p)
   // The one failure no anchor move can undo, so it is charged here rather than inside scoreOf: it
@@ -236,12 +247,14 @@ export function planLine(
       // one decimal a gentle slope reads as flat and the walk stops after its first step.
       score: score - rigCharge,
       scoreParts: parts,
-      maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p, crossings),
+      maxSagRatio: maxFeasibleSag(stored, length, h.hA, h.hB, p, crossings, 'measured'),
       crossings,
       profile: stored,
     },
     violations: violationsOf(m, length, h.offLevel, p, crossings),
     penalty: penaltyOf(m, length, h.offLevel, p) + rigCharge,
+    noFall,
+    walk: Math.max(0, length - noFall.reduce((sum, z) => sum + z.to - z.from, 0)),
   }
 }
 

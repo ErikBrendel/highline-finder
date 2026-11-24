@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Pos } from '../shared/grid.js'
 import { toWgs84 } from '../shared/geo.js'
-import { lineHeightAt } from '../shared/scoring.js'
+import { lineHeightAt, type Stretch } from '../shared/scoring.js'
 import {
   bareGround, ensureTerrain, missingWindows, onBuilding, onRoof, onWindowActivity, standingCell, surfaceSampler,
 } from './terrain.js'
@@ -14,7 +14,7 @@ import {
 import { buildingMesh, type BuildingCells } from './buildingMesh.js'
 import { failureText, report } from './report.js'
 import type { LatLon } from './planPoints.js'
-import type { Scene3D } from './scene3d.js'
+import type { NoFall, Scene3D } from './scene3d.js'
 import { drapeCells, type CellReader } from './cellSurface.js'
 import { intervals, overlay, polyline } from './segments.js'
 import { IMAGERY_SHORT } from './surveys.js'
@@ -175,13 +175,14 @@ export interface Companion {
   anchorA: number
   anchorB: number
   sagRatio: number
+  noFall: NoFall
 }
 
 /** What one press of a nudge arrow moves an anchor by, in metres. */
 const STEPS = [0.1, 0.5, 1, 5]
 
 export function Terrain3D({
-  a, b, anchorA, anchorB, sagRatio, others, hoverAt, onMoveAnchor, onOtherTapped,
+  a, b, anchorA, anchorB, sagRatio, others, hoverAt, onMoveAnchor, onOtherTapped, noFall,
 }: {
   a: Pos
   b: Pos
@@ -194,6 +195,8 @@ export function Terrain3D({
   hoverAt?: number | null
   /** Omit to make the view read-only; with it, a tapped anchor can be stepped or dragged. */
   onMoveAnchor?: (which: 'a' | 'b', at: LatLon) => void
+  /** In metres from A, as the planner measures them. */
+  noFall: Stretch[]
 }) {
   const host = useRef<HTMLDivElement>(null)
   const scene = useRef<Scene3D | null>(null)
@@ -457,6 +460,7 @@ export function Terrain3D({
       index: o.index,
       line: hang(o.a, o.b, o.anchorA, o.anchorB, o.sagRatio),
       anchors: [at(o.a, o.anchorA), at(o.b, o.anchorB)] as [[number, number, number], [number, number, number]],
+      noFall: o.noFall,
     }))
     // Round each anchor the ground is drawn cell by cell, as its height is measured, and the track
     // lies on it there. Where the buildings are drawn apart, the earth under them is drawn instead,
@@ -497,13 +501,18 @@ export function Terrain3D({
       [a.e - g.centre.e, anchorA - g.datum, -(a.n - g.centre.n)],
       [b.e - g.centre.e, anchorB - g.datum, -(b.n - g.centre.n)],
     ]
-    return { line, track, overTrack, anchors, mesh, others: drawnOthers, lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum }
+    const span = Math.hypot(b.e - a.e, b.n - a.n)
+    const zones: NoFall = span > 0 ? noFall.map((z) => [z.from / span, z.to / span]) : []
+    return {
+      line, track, overTrack, anchors, mesh, others: drawnOthers, noFall: zones,
+      lookAt: (anchorA + anchorB) / 2 - sag / 2 - g.datum,
+    }
   }
   const spanRef = useRef(spanOf)
   spanRef.current = spanOf
   const redrape = (g: Ground) => {
-    const { line, track, overTrack, anchors, mesh, others } = spanRef.current(g)
-    scene.current?.setLine(line, track, overTrack, anchors, mesh, others)
+    const { line, track, overTrack, anchors, mesh, others, noFall } = spanRef.current(g)
+    scene.current?.setLine(line, track, overTrack, anchors, mesh, others, noFall)
   }
 
   // Building the ground: the expensive half, and the one that must not run while an anchor is being
@@ -703,13 +712,17 @@ export function Terrain3D({
   // Moving the span: the cheap half, and the one that runs on every step of an optimiser run.
   const lineKey = [a, b, ...others.flatMap((o) => [o.a, o.b])]
     .flatMap((p) => [p.e, p.n])
-    .concat([anchorA, anchorB, sagRatio], others.flatMap((o) => [o.anchorA, o.anchorB, o.sagRatio]))
+    .concat(
+      [anchorA, anchorB, sagRatio],
+      others.flatMap((o) => [o.anchorA, o.anchorB, o.sagRatio, ...o.noFall.flat()]),
+      noFall.flatMap((z) => [z.from, z.to]),
+    )
     .map((v) => Math.round(v * 100))
     .join('_')
   useEffect(() => {
     if (state !== 'ready' || !ground.current) return
-    const { line, track, overTrack, anchors, mesh, others } = spanRef.current(ground.current)
-    scene.current?.setLine(line, track, overTrack, anchors, mesh, others)
+    const { line, track, overTrack, anchors, mesh, others, noFall } = spanRef.current(ground.current)
+    scene.current?.setLine(line, track, overTrack, anchors, mesh, others, noFall)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineKey, state])
 

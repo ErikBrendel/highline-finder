@@ -484,6 +484,8 @@ interface Props {
   locating: boolean
   onLocate: (following: boolean) => void
   custom: CustomPoints
+  /** The planned line's no-fall zones, as fractions of its span from A. */
+  noFall: [number, number][]
   /** Whether the anchors may be dragged: only while the line is being edited. */
   editable: boolean
   /** Whether the open line may be closed from here; not while a saved line is held for editing. */
@@ -525,6 +527,7 @@ export function MapView({
   locating,
   onLocate,
   custom,
+  noFall,
   editable,
   canClear,
   showLines,
@@ -1062,6 +1065,13 @@ export function MapView({
         layout: { ...SPAN_CAPS },
         paint: { 'line-color': '#22c55e', 'line-width': 3.5 },
       })
+      m.addSource('customNoFall', { type: 'geojson', data: emptyCollection })
+      m.addLayer({
+        id: 'customNoFall',
+        type: 'line',
+        source: 'customNoFall',
+        paint: { 'line-color': '#f59e0b', 'line-width': 3.5 },
+      })
       for (const id of ['custom', 'customCasing']) {
         m.on('click', id, () => placingRef.current.placing || onSelectRef.current(PLANNED_ID))
         m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer' })
@@ -1336,6 +1346,24 @@ export function MapView({
     const src = m.getSource('custom') as maplibregl.GeoJSONSource | undefined
     src?.setData(custom.a && custom.b ? lineFeature(custom.a, custom.b) : emptyCollection)
   }, [custom, ready])
+
+  useEffect(() => {
+    const m = map.current
+    if (!m || !ready) return
+    const src = m.getSource('customNoFall') as maplibregl.GeoJSONSource | undefined
+    const { a, b } = custom
+    if (!src) return
+    if (!a || !b) {
+      src.setData(emptyCollection)
+      return
+    }
+    const at = (t: number) => [a.lon + (b.lon - a.lon) * t, a.lat + (b.lat - a.lat) * t]
+    src.setData({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'MultiLineString', coordinates: noFall.map(([t0, t1]) => [at(t0), at(t1)]) },
+    })
+  }, [custom, noFall, ready])
 
   useEffect(() => {
     const m = map.current

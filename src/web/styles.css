@@ -29,6 +29,7 @@
   /* What a stem is made of above everything standing there: not wood, so not brown. */
   --metal: #8a93a3;
   --line: #f43f5e;
+  --nofall: #f59e0b;
   /* Roads and railways in the profile: the carriageway slab, its icon and the clearance it wants. */
   --road: #a68a1f;
   /* Anything failing a hard constraint, so a too-low crossing reads as a problem at a glance. */

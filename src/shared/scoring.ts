@@ -162,6 +162,81 @@ export function lineHeightAt(hA: number, hB: number, sag: number, t: number): nu
 
 const r2 = (v: number) => Math.round(v * 100) / 100
 
+/** A stretch of the span, in metres from A. */
+export interface Stretch {
+  from: number
+  to: number
+}
+
+/** How far a no-fall zone reaches past the last point where the line is actually too low. */
+export const NO_FALL_MARGIN = 1
+
+/**
+ * Where along the span a fall would reach the ground: every stretch where the line is lower over
+ * what is under it than a fall needs, widened by {@link NO_FALL_MARGIN} and merged.
+ *
+ * Measured rather than a fixed distance from each anchor, so a rooftop anchor over a street gets a
+ * metre or two, one on a slope gets however long the slope keeps the ground close, and a hump
+ * midspan gets a zone of its own. It moves with the sag and the rig heights, so it is taken when
+ * the line is measured and never stored.
+ *
+ * The sagging line is where the walker is at each station, so where it runs into the ground next
+ * to an anchor the walker is standing on it: part of the zone. Midspan the same thing means the
+ * line itself rests on the ground, which `rawMetricsAt` still counts as a clearance failure.
+ *
+ * Hard ground only, the band and the buildings in it. A line through a wood can be perfectly good
+ * with the crowns high above it, and nothing here can tell that apart from one in the branches.
+ *
+ * Edges are interpolated between stations, so the zone does not jump by a sample as the sag moves.
+ */
+export function noFallZones(
+  sp: StoredProfile,
+  length: number,
+  hA: number,
+  hB: number,
+  sagRatio: number,
+  p: Params,
+): Stretch[] {
+  const last = sp.ground.length - 1
+  const sag = sagRatio * length
+  const band = sp.groundMax ?? sp.ground
+  const short: Stretch[] = []
+  let prevD = NaN
+  let prevSpare = NaN
+  let start = NaN
+  for (let i = 0; i <= last; i++) {
+    if (Number.isNaN(sp.ground[i]!)) continue
+    const t = last > 0 ? i / last : 0
+    const d = r2(t * length)
+    const spare = r2(lineHeightAt(hA, hB, sag, t)) - band[i]! - (sp.needed?.[i] ?? p.minClearance)
+    const edge = Number.isNaN(prevSpare) ? d : prevD + ((d - prevD) * prevSpare) / (prevSpare - spare)
+    if (spare < 0 && Number.isNaN(start)) start = edge
+    else if (spare >= 0 && !Number.isNaN(start)) {
+      short.push({ from: start, to: edge })
+      start = NaN
+    }
+    prevD = d
+    prevSpare = spare
+  }
+  if (!Number.isNaN(start)) short.push({ from: start, to: prevD })
+
+  // The last station's own distance, rounded like every other: clamping to the exact length would
+  // leave the station at B a hundredth outside the zone it is in.
+  const end = r2(length)
+  const zones: Stretch[] = []
+  for (const z of short) {
+    const from = Math.max(0, z.from - NO_FALL_MARGIN)
+    const to = Math.min(end, z.to + NO_FALL_MARGIN)
+    const tail = zones[zones.length - 1]
+    if (tail && from <= tail.to) tail.to = to
+    else zones.push({ from, to })
+  }
+  return zones
+}
+
+/** Whether clearance is waived at a fixed distance from each anchor, or where the line measures it is no-fall. */
+export type Zoning = 'fixed' | 'measured'
+
 /**
  * Clearance metrics read straight off a stored profile, without materialising it.
  *
@@ -184,11 +259,19 @@ export function rawMetricsAt(
   p: Params,
   /** What the line passes over that carries traffic. Empty means nothing but ground and canopy. */
   crossings: Crossing[] = [],
+  /**
+   * Where clearance is not required. `fixed` is the search's `anchorZone` at each end; `measured`
+   * is the line's own no-fall zones, which by construction take in every shortfall -- so a line
+   * measured that way fails on clearance only where it rests on the ground away from both anchors.
+   */
+  zoning: Zoning = 'fixed',
 ): Metrics | null {
   const last = sp.ground.length - 1
   const sag = sagRatio * length
   const inner0 = p.anchorZone
   const inner1 = length - p.anchorZone
+  const zones = zoning === 'measured' ? noFallZones(sp, length, hA, hB, sagRatio, p) : null
+  const end = r2(length)
   // Absent means the band said nothing the centreline did not, which is the whole of a run at
   // sideClearanceRatio 0 and most samples of a line over open ground.
   const band = sp.groundMax ?? sp.ground
@@ -205,6 +288,7 @@ export function rawMetricsAt(
   let weight = 0
   let zoneDeficit = 0
   let zoneWeight = 0
+  let seen = 0
 
   for (let i = 0; i <= last; i++) {
     const t = last > 0 ? i / last : 0
@@ -221,21 +305,25 @@ export function rawMetricsAt(
      * the ground actually seen, and the caller counts what was not.
      */
     if (Number.isNaN(ground)) continue
+    seen++
     const line = r2(lineHeightAt(hA, hB, sag, t))
     if (line - ground > exposure) exposure = line - ground
     const d = r2(t * length)
     // Fraction of the way from the nearer anchor to midspan: 0 at the ends, 1 in the middle.
     const central = Math.min(d, length - d) / (length / 2)
-    if (d < inner0 || d > inner1) {
+    const clear = line - band[i]!
+    const exempt = zones
+      ? zones.some((z) => d >= z.from && d <= z.to && (clear >= 0 || z.from === 0 || z.to === end))
+      : d < inner0 || d > inner1
+    if (exempt) {
       // Inside the anchor zone nothing is required, but being buried is still worth knowing about.
       // The same weighting as outside, which here reads as "how far from the anchor" -- and at the
       // anchor itself the band has no width and the line sits on its own ground, so it is zero.
-      zoneDeficit += central * Math.max(0, band[i]! - line)
+      zoneDeficit += central * Math.max(0, -clear)
       zoneWeight += central
       continue
     }
 
-    const clear = line - band[i]!
     if (clear < clearanceMin) clearanceMin = clear
     const need = needs?.[i] ?? p.minClearance
     if (clear - need < clearanceMargin) {
@@ -251,7 +339,7 @@ export function rawMetricsAt(
     samples++
   }
 
-  if (samples === 0) return null
+  if (seen === 0 || (samples === 0 && !zones)) return null
 
   /**
    * Road crossings, measured on their own terms.
@@ -304,14 +392,16 @@ export function rawMetricsAt(
     }
   }
 
+  // A line that is one no-fall zone end to end has no walkable stretch for these to describe.
+  const walked = samples > 0
   return {
-    clearanceMin,
-    clearanceMargin,
+    clearanceMin: walked ? clearanceMin : NaN,
+    clearanceMargin: walked ? clearanceMargin : 0,
     clearanceMarginAt,
     clearanceMarginNeeded,
     exposure,
-    canopyClearanceMin,
-    canopyBlockedFraction: blocked / samples,
+    canopyClearanceMin: walked ? canopyClearanceMin : NaN,
+    canopyBlockedFraction: walked ? blocked / samples : NaN,
     clearanceDeficit: weight > 0 ? deficit / weight : 0,
     anchorZoneDeficit: zoneWeight > 0 ? zoneDeficit / zoneWeight : 0,
     crossingDeficit: Math.max(0, worstShort),
@@ -349,8 +439,9 @@ export function metricsAt(
   sagRatio: number,
   p: Params,
   crossings: Crossing[] = [],
+  zoning: Zoning = 'fixed',
 ): Metrics | null {
-  const m = rawMetricsAt(sp, length, hA, hB, sagRatio, p, crossings)
+  const m = rawMetricsAt(sp, length, hA, hB, sagRatio, p, crossings, zoning)
   return m && !rejectionOf(m, p) ? m : null
 }
 
@@ -567,8 +658,9 @@ export function maxFeasibleSag(
   hB: number,
   p: Params,
   crossings: Crossing[] = [],
+  zoning: Zoning = 'fixed',
 ): number {
-  const feasible = (sag: number) => metricsAt(sp, length, hA, hB, sag, p, crossings) !== null
+  const feasible = (sag: number) => metricsAt(sp, length, hA, hB, sag, p, crossings, zoning) !== null
   let lo = 0
   let hi = 0.25
   if (!feasible(lo)) return 0

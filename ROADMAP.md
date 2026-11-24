@@ -11,37 +11,20 @@ anchors only, one AOI, static viewer.
   people actually do here. Needs trunk detection rather than canopy height: the `als` classified
   LAZ point clouds can distinguish trunk from crown, and OSM `natural=tree` cross-checks isolated
   trees. Usable anchor height is roughly 80 % of trunk height.
-- **A measured no-fall zone, instead of a constant one.** The allowance itself exists:
-  `anchorZone` is 10 m, and inside it neither terrain clearance nor canopy is required — the loop in
-  `rawMetricsAt` skips both, charging only `anchorZoneDeficit` so that being buried is still worth
-  knowing about. What is constant is the *width*, and that is the part worth replacing.
-
-  Two reasons it should not be a constant. It does not scale: 10 m of a 500 m span is nothing, and
-  of a 50 m span is a fifth of it, so the same number is lenient for short lines and strict for long
-  ones. And the real quantity is not a distance along the ground at all — it is where a fall stops
-  being survivable, which depends on the sag, the height at that station and what is underneath.
-  Measuring that per line and scoring it would replace a tuned constant with the thing the constant
-  is standing in for.
-
-  The replacement is per end, and taken on demand. The two anchors are different ground — one may
-  leave over a gully and the other out of a stand of pine — so a single number for the line is
-  already the wrong shape; what is wanted is a zone at A and a zone at B, each measured where a fall
-  at that station stops being survivable. And it cannot be baked into the dataset, because it moves
-  with the sag slider and with the rig heights, both of which the viewer changes live. That makes it
-  a measurement the planner takes when a line is opened, alongside the profile it already rebuilds
-  there.
-
-  The figure that falls out of it is the one worth having: **walk length**, the span minus the two
-  zones. A 494 m line with fifty metres of unwalkable end at each anchor is a 394 m walk, and the
-  walk is what a person is actually deciding about. It is also a better thing to rank and filter on
-  than anchor-to-anchor distance, which is what the length slider, the length term in the score and
-  `minLength` all read today — three places measuring a distance nobody walks.
-
-  Worth knowing what the constant costs today: it is enough for a tree anchor at the *edge* of a
-  wood, where the span leaves over open ground or a gully, and not enough for one running *through*
-  a stand — ten metres out the canopy is still full height and the line is below it. So the
-  free-height work is not blocked by this, but the lines it cannot describe are exactly the ones a
-  measured zone would.
+- **Measured no-fall zones in the search, and walk length in the score.** The planner measures
+  them already: `noFallZones` in `scoring.ts` takes every stretch where the sagging line is lower
+  over hard ground than a fall needs, widened by a metre, and the panel, the chart, the map and the
+  3D view show them with the **walk length** (span minus zones). The search still waives clearance
+  over a constant `anchorZone` of 10 m at each end, and the score, the length slider and
+  `minLength` all still read anchor-to-anchor distance. What is left:
+  - Run the search with `zoning: 'measured'`. The catch is `maxSagRatio`: the zones move with the
+    sag, so the stored validity threshold has to be bisected against measured zones too.
+  - Rank and filter on walk length rather than span. A 494 m line with fifty metres of unwalkable
+    end at each anchor is a 394 m walk, and the walk is what a person is deciding about.
+  - The score's margin term is now measured over the walkable stretch only, where it sits near
+    zero by construction, so it needs a different definition before it means anything again.
+  - Canopy is deliberately not part of a zone: a line through a wood can be perfectly good with the
+    crowns high above it, and without trunk positions nothing here can tell that apart.
 - **Buildings in the coarse pre-pass.** The search now stands on roofs — LoD1 CityGML rasterised
   per 1 km tile, see `src/pipeline/buildings.ts` — but the pre-pass that decides which tiles are
   worth loading at all still measures bare terrain. A flat tile with a thirty-metre building on it

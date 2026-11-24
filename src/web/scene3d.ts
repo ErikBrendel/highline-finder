@@ -28,7 +28,11 @@ export interface Other {
   index: number
   line: Float32Array
   anchors: [[number, number, number], [number, number, number]]
+  noFall: NoFall
 }
+
+/** Where along a span a fall would reach the ground, each as fractions of the span from A. */
+export type NoFall = [number, number][]
 
 export interface SceneInput {
   mesh: MeshData
@@ -36,6 +40,8 @@ export interface SceneInput {
   canopy: MeshData | null
   /** The span, three floats a point, sagging. */
   line: Float32Array
+  /** Drawn in their own colour along the span. */
+  noFall: NoFall
   /**
    * The span dropped onto what it passes over, twice.
    *
@@ -96,6 +102,8 @@ export interface SceneInput {
  */
 const ORTHO_MIX = 0.45
 
+const NOFALL_COLOR = new Color('#f59e0b')
+
 export interface Scene3D {
   dispose(): void
   /**
@@ -119,6 +127,7 @@ export interface Scene3D {
     anchors: [number, number, number][],
     mesh: MeshData,
     others: Other[],
+    noFall: NoFall,
   ): void
   /**
    * Marks where along the span something is being pointed at, or clears it.
@@ -348,6 +357,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   let overTrack = input.overTrack
   let anchors = input.anchors
   let others = input.others
+  let noFall = input.noFall
 
   const points = (a: Float32Array, k: number) => {
     const out: Vector3[] = []
@@ -379,18 +389,44 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
    */
   const baseRadius = Math.max(0.6, input.radius / 320)
   let tubeRadius = baseRadius
-  const spanMat = new MeshBasicMaterial({ color: '#f43f5e' })
-  const spanMesh = new Mesh(tubeAlong(points(line, exaggeration), tubeRadius, 6), spanMat)
+  /**
+   * Colours a span's tube by where each vertex falls along it, in plan, so a no-fall zone is the
+   * same stretch here as on the chart however the tube was subdivided or the heights exaggerated.
+   */
+  const paintSpan = (geom: BufferGeometry, span: Float32Array, zones: NoFall, base: Color) => {
+    const pos = geom.getAttribute('position')
+    const [x0, z0] = [span[0]!, span[2]!]
+    const [dx, dz] = [span[span.length - 3]! - x0, span[span.length - 1]! - z0]
+    const len2 = dx * dx + dz * dz
+    const colors = new Float32Array(pos.count * 3)
+    for (let i = 0; i < pos.count; i++) {
+      const t = len2 > 0 ? ((pos.getX(i) - x0) * dx + (pos.getZ(i) - z0) * dz) / len2 : 0
+      const c = zones.some(([from, to]) => t >= from && t <= to) ? NOFALL_COLOR : base
+      colors.set([c.r, c.g, c.b], i * 3)
+    }
+    geom.setAttribute('color', new BufferAttribute(colors, 3))
+    return geom
+  }
+  const spanColor = new Color('#f43f5e')
+  const spanMat = new MeshBasicMaterial({ vertexColors: true })
+  const spanGeometry = (pts: Vector3[]) =>
+    paintSpan(tubeAlong(pts, tubeRadius, 6), line, noFall, spanColor)
+  const spanMesh = new Mesh(spanGeometry(points(line, exaggeration)), spanMat)
   scene.add(spanMesh)
 
-  const otherMat = new MeshBasicMaterial({ color: '#fda4af', transparent: true, opacity: 0.85 })
+  const otherColor = new Color('#fda4af')
+  const otherSpanMat = new MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 })
+  const otherMat = new MeshBasicMaterial({ color: otherColor, transparent: true, opacity: 0.85 })
   const otherRoot = new Group()
   scene.add(otherRoot)
   const drawOthers = (k: number) => {
     for (const m of otherRoot.children as Mesh[]) if (m.geometry !== ballGeom) m.geometry.dispose()
     otherRoot.clear()
     others.forEach((o) => {
-      const span = new Mesh(tubeAlong(points(o.line, k), tubeRadius * 0.8, 6), otherMat)
+      const span = new Mesh(
+        paintSpan(tubeAlong(points(o.line, k), tubeRadius * 0.8, 6), o.line, o.noFall, otherColor),
+        otherSpanMat,
+      )
       span.userData.other = o.index
       otherRoot.add(span)
       for (const [x, y, z] of o.anchors) {
@@ -616,7 +652,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     buildings.scale.y = k
     canopy.scale.y = k
     spanMesh.geometry.dispose()
-    spanMesh.geometry = tubeAlong(points(line, k), tubeRadius, 6)
+    spanMesh.geometry = spanGeometry(points(line, k))
     trackMesh.geometry.dispose()
     trackMesh.geometry = tubeOnto(points(track, k), tubeRadius * 0.7, 5)
     overMesh.geometry.dispose()
@@ -743,7 +779,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       return new Vector3(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t - 4 * sag * t * (1 - t), p.z + (q.z - p.z) * t)
     })
     spanMesh.geometry.dispose()
-    spanMesh.geometry = tubeAlong(pts, tubeRadius, 6)
+    spanMesh.geometry = spanGeometry(pts)
   }
 
   /** Carries the pressed anchor to the ground under a point on the screen. */
@@ -990,7 +1026,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       hoverAt = t
       drawHover()
     },
-    setLine(nextLine, nextTrack, nextOver, nextAnchors, nextMesh, nextOthers) {
+    setLine(nextLine, nextTrack, nextOver, nextAnchors, nextMesh, nextOthers, nextNoFall) {
       const old = ground.geometry
       ground.geometry = geometryOf(nextMesh)
       old.dispose()
@@ -999,6 +1035,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       overTrack = nextOver
       anchors = nextAnchors
       others = nextOthers
+      noFall = nextNoFall
       rescale(exaggeration)
     },
     dispose() {
@@ -1030,7 +1067,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
       }
       orthoMap.value?.dispose()
       for (const m of [
-        groundMat, buildingMat, canopyMat, spanMat, trackMat, overMat, otherMat,
+        groundMat, buildingMat, canopyMat, spanMat, trackMat, overMat, otherMat, otherSpanMat,
         ...balls.map((b) => b.material), stemMat.wood, stemMat.metal, hoverBall.material as MeshBasicMaterial,
         hoverDrop.material as LineDashedMaterial,
       ]) {

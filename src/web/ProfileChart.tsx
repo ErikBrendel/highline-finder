@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { Candidate, Params, ProfileSample, RoadTier } from '../shared/types.js'
+import type { Stretch } from '../shared/scoring.js'
 import { COVER_BUILDING, type Cover, coverRuns } from './landcover.js'
 import { emitHoverPoint } from './hoverMarker.js'
 import { toWgs84 } from '../shared/geo.js'
@@ -98,6 +99,8 @@ interface Props {
    * knowing anything about how finely this chart happens to be sampled.
    */
   onHover?: (at: number | null) => void
+  /** Where a fall would reach the ground, shaded and the line drawn in their colour. */
+  noFall: Stretch[]
 }
 
 /**
@@ -151,8 +154,9 @@ function TrafficIcon({ tier }: { tier: RoadTier }) {
 }
 
 export function ProfileChart({
-  c, profile, wings, cover, params, fetching, canopyKnown, box, onHover,
+  c, profile, wings, cover, params, fetching, canopyKnown, box, onHover, noFall,
 }: Props) {
+  const clipId = useId()
   const { w: W, h: H } = box
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const { samples: p, gaps, measured } = bridgeGaps(profile)
@@ -431,6 +435,19 @@ export function ProfileChart({
         </g>
       ))}
 
+      <clipPath id={clipId}>
+        {noFall.map((z) => (
+          <rect key={z.from} x={x(z.from)} y={PAD.top} width={x(z.to) - x(z.from)} height={ih} />
+        ))}
+      </clipPath>
+      {noFall.map((z) => (
+        <rect
+          key={z.from}
+          x={x(z.from)} y={PAD.top} width={x(z.to) - x(z.from)} height={ih}
+          fill="var(--nofall)" opacity="0.12"
+        />
+      ))}
+
       {/* Vegetation the band reaches but the centreline misses: shown, never scored. */}
       {canopyBandShows && (
         <path
@@ -600,6 +617,17 @@ export function ProfileChart({
         )
       })}
       <path d={path('line')} stroke="var(--line)" strokeWidth="2" fill="none" />
+      <path d={path('line')} stroke="var(--nofall)" strokeWidth="2.5" fill="none" clipPath={`url(#${clipId})`} />
+      {noFall.map((z) => x(z.to) - x(z.from) > 24 && (
+        <text
+          key={z.from}
+          x={(x(z.from) + x(z.to)) / 2} y={PAD.top + ih - 5}
+          fill="var(--nofall)" fontSize="10" fontWeight="600" textAnchor="middle"
+          stroke="var(--sky)" strokeWidth="3" paintOrder="stroke"
+        >
+          {(z.to - z.from).toFixed(0)} m
+        </text>
+      ))}
       <circle cx={x(0)} cy={y(p[0]!.line)} r="3.5" fill="#f43f5e" />
       <circle cx={x(c.length)} cy={y(p[p.length - 1]!.line)} r="3.5" fill="#f43f5e" />
 

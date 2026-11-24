@@ -6,6 +6,7 @@ import type { Scene } from './scene.js'
 import type { Sampler } from './grid.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 import { RIG_RATE } from './anchoring.js'
+import { NO_FALL_MARGIN } from './scoring.js'
 
 const p = DEFAULT_PARAMS
 
@@ -109,16 +110,36 @@ describe('planLine', () => {
     expect(Number.isFinite(r.candidate.score)).toBe(true)
   })
 
-  it('raises no canopy fault for a buried line where the canopy is unknown', () => {
-    const { ground } = terrain(15)
-    // Rigged far enough below the rims that the span runs through the canyon floor, so every
-    // station counts as blocked once the surface is read as the terrain.
-    const rig = { a: -38, b: -38 }
+  it('raises no canopy fault where the canopy is unknown', () => {
+    // Crowns reaching to within a few metres of the rims, which the sagging span runs through.
+    const { ground, surface } = terrain(15, 36)
     const faults = (canopyKnown: boolean) =>
-      planLine(a, b, ground, ground, p.sagRatio, p, rig, {}, { canopyKnown })!.violations.join(' ')
+      planLine(a, b, ground, surface, p.sagRatio, p, null, {}, { canopyKnown })!.violations.join(' ')
     expect(faults(true)).toMatch(/inside canopy/)
     expect(faults(false)).not.toMatch(/inside canopy/)
-    expect(faults(false)).toMatch(/intersects the ground/)
+  })
+
+  it('measures no-fall zones where the line is too low, and walks the rest', () => {
+    const { ground, surface } = terrain(15)
+    const r = planLine(a, b, ground, surface, p.sagRatio, p)!
+    // The rims run 5 m out from each anchor before the canyon drops away.
+    expect(r.noFall).toHaveLength(2)
+    expect(r.noFall[0]!.from).toBe(0)
+    expect(r.noFall[0]!.to).toBeGreaterThan(5)
+    expect(r.noFall[0]!.to).toBeLessThan(5 + NO_FALL_MARGIN + 1)
+    expect(r.walk).toBeCloseTo(r.candidate.length - r.noFall.reduce((s, z) => s + z.to - z.from, 0), 1)
+  })
+
+  it('gives a hump midspan a zone of its own, and fails a line resting on it', () => {
+    const humped = (top: number) => {
+      const { ground, surface } = terrain(15)
+      for (let row = 0; row < 300; row++) for (let col = 145; col < 155; col++) ground.data[row * 300 + col] = top
+      return planLine(a, b, ground, surface, p.sagRatio, p)!
+    }
+    const close = humped(39)
+    expect(close.noFall).toHaveLength(3)
+    expect(close.violations).toEqual([])
+    expect(humped(45).violations).toEqual(['intersects the ground'])
   })
 
   it('returns null where there is no elevation data', () => {
@@ -210,7 +231,7 @@ describe('planLine', () => {
     const { ground, surface } = terrain(15)
     const tight = planLine(a, b, ground, surface, 0.05, p)!
     const loose = planLine(a, b, ground, surface, 0.09, p)!
-    expect(loose.candidate.clearanceMin).toBeLessThan(tight.candidate.clearanceMin)
+    expect(loose.walk).toBeLessThan(tight.walk)
     expect(loose.candidate.sag).toBeGreaterThan(tight.candidate.sag)
   })
 })
@@ -242,14 +263,14 @@ describe('planLine over ground the service has not covered', () => {
   })
 
   it('reports figures from the measured ground rather than counting a gap as clear air', () => {
-    const g = holed()
     // The same span with a wall standing in the part that is measured. If the gap were treated as
     // ground at zero, or skipped without dropping its weight, the wall would stop setting these.
     const walled = from((e: number) =>
-      e > 120 && e < 180 ? NaN : e > 105 && e < 115 ? 95 : 50)
-    const open = planLine(ends[0], ends[1], g, g, 0.05, p, null, {}, { tolerateGaps: true })!
+      e > 120 && e < 180 ? NaN : e > 105 && e < 115 ? 95 : e > 103 && e < 197 ? 20 : 50)
+    const deep = from((e: number) => (e > 120 && e < 180 ? NaN : e > 103 && e < 197 ? 20 : 50))
+    const open = planLine(ends[0], ends[1], deep, deep, 0.05, p, null, {}, { tolerateGaps: true })!
     const blocked = planLine(ends[0], ends[1], walled, walled, 0.05, p, null, {}, { tolerateGaps: true })!
-    expect(blocked.candidate.clearanceMin).toBeLessThan(open.candidate.clearanceMin)
+    expect(blocked.walk).toBeLessThan(open.walk)
     expect(blocked.candidate.score).toBeLessThan(open.candidate.score)
   })
 })
