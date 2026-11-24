@@ -15,7 +15,8 @@ const devFavicon: Plugin = {
 export default defineConfig({
   // React's plugin is what gives the dev server Fast Refresh: an edit swaps the changed components
   // in and keeps their state -- the open line, the secret spots shown -- where without it every
-  // save reloaded the page.
+  // save reloaded the page. A .tsx module that also exports a non-component (a constant, a hook)
+  // cannot be swapped in, and its importers are re-rendered instead, so helpers live in .ts files.
   plugins: [react(), devFavicon],
   /**
    * The surveys that answer a cross-origin request only for an `https://` origin, fetched by the dev

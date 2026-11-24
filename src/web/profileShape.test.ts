@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bridgeGaps, steppedOutline } from './ProfileChart.js'
+import { bridgeGaps, steppedOutline } from './profileShape.js'
 import { COVER_BUILDING, COVER_NONE } from './landcover.js'
 import type { ProfileSample } from '../shared/types.js'
 

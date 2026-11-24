@@ -11,7 +11,7 @@ import {
   lineOpacity,
   lineWidth,
   stopAt,
-} from './MapView.js'
+} from './mapStyle.js'
 import { SHADE_BASELINE, applyShading, makeOpaque, normaliseShade } from './shadeMath.js'
 import { toUtm33, toWgs84 } from '../shared/geo.js'
 

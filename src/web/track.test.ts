@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { logTrack } from './Slider.js'
+import { logTrack } from './track.js'
 
 /** The length filter's own range: the pipeline's floor to the longest line in the dataset. */
 const track = logTrack(50, 500, 10)

@@ -20,9 +20,8 @@ import { rescoreAtSag } from '../shared/scoring.js'
 import { VIEWER_PROFILE, measuredHalfWidth, unpackProfile } from '../shared/profile.js'
 import { DEFAULT_PARAMS } from '../pipeline/params.js'
 import { DEV_MODE } from './devMode.js'
-import {
-  BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, MapView, SAME_VINTAGE_MS, type TileLayer,
-} from './MapView.js'
+import { MapView, type TileLayer } from './MapView.js'
+import { BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, SAME_VINTAGE_MS } from './mapStyle.js'
 import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
 import { useSpots } from './useSpots.js'
 import { spotFromHash, type Spot, type SpotLine } from './spots.js'
@@ -40,7 +39,8 @@ import { coverAlong, coverFailed, ensureCover, onCoverChange, roadsFor, water } 
 
 import { Details } from './Details.js'
 import type { WingSample } from './ProfileChart.js'
-import { Guide, useGuide } from './Guide.js'
+import { Guide } from './Guide.js'
+import { useGuide } from './useGuide.js'
 import { fitHeader } from './headerFit.js'
 import { ShareButton } from './ShareButton.js'
 import { useRemembered } from './remembered.js'

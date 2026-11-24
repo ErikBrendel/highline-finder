@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stale, type Ground } from './Terrain3D.js'
+import { stale, type Ground } from './patch3d.js'
 
 /**
  * When the ground under the 3D view has to be read again.

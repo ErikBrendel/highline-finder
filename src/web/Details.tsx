@@ -5,7 +5,8 @@ import { DEV_MODE } from './devMode.js'
 import { TRUNK_FRACTION, rigMeans, rigRange, type Standing } from '../shared/anchoring.js'
 import type { Cover } from './landcover.js'
 import type { Canopy } from './terrain.js'
-import { CHART_NARROW, CHART_WIDE, ProfileChart, type Wings } from './ProfileChart.js'
+import { ProfileChart, type Wings } from './ProfileChart.js'
+import { CHART_NARROW, CHART_WIDE } from './profileShape.js'
 import { Slider, type SliderBand } from './Slider.js'
 import {
   NEIGHBOURHOOD,
