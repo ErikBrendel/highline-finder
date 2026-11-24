@@ -312,7 +312,12 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
         <button
           data-active={active || undefined}
           data-secret={secret || undefined}
-          onClick={active ? spots.leaveSpot : onOpen}
+          onClick={() => {
+            // Opening swaps this list for the spot's own, so the row is gone before the mouse leaves it.
+            onLit(null)
+            if (active) spots.leaveSpot()
+            else onOpen()
+          }}
           title={active ? 'Click again to close' : undefined}
           onMouseEnter={() => onLit(lit)}
           onMouseLeave={() => onLit(null)}
