@@ -173,10 +173,12 @@ export interface Ground {
   datum: number
 }
 
-/** Another line of the same spot, measured: drawn beside the one being worked on. */
+/** Another kept line, measured: drawn beside the one being worked on. */
 export interface Companion {
   a: Pos
   b: Pos
+  /** A line of the same spot, which the view is widened to take in; any other is drawn if it is in it. */
+  widens: boolean
   anchorA: number
   anchorB: number
   sagRatio: number
@@ -407,7 +409,7 @@ export function Terrain3D({
    * with a square sized to its length always leaves each end well inside the new edge, so this
    * settles in one step rather than chasing itself.
    */
-  const otherEnds = others.flatMap((o) => [o.a, o.b])
+  const otherEnds = others.filter((o) => o.widens).flatMap((o) => [o.a, o.b])
   const othersKey = otherEnds.map((p) => `${Math.round(p.e)},${Math.round(p.n)}`).join(';')
   useEffect(() => {
     if (!stale(ground.current, a, b, otherEnds)) return
@@ -495,7 +497,10 @@ export function Terrain3D({
     const sag = sagRatio * Math.hypot(b.e - a.e, b.n - a.n)
     const line = hang(a, b, anchorA, anchorB, sagRatio)
     const at = (p: Pos, h: number): [number, number, number] => [p.e - g.centre.e, h - g.datum, -(p.n - g.centre.n)]
-    const drawnOthers = others.map((o) => ({
+    const inView = (p: Pos) => Math.max(Math.abs(p.e - g.centre.e), Math.abs(p.n - g.centre.n)) < g.halfSide
+    const shown = others.flatMap((o, index) => (o.widens || (inView(o.a) && inView(o.b)) ? [{ ...o, index }] : []))
+    const drawnOthers = shown.map((o) => ({
+      index: o.index,
       line: hang(o.a, o.b, o.anchorA, o.anchorB, o.sagRatio),
       anchors: [at(o.a, o.anchorA), at(o.b, o.anchorB)] as [[number, number, number], [number, number, number]],
     }))
@@ -503,7 +508,7 @@ export function Terrain3D({
     // lies on it there. Where the buildings are drawn apart, the earth under them is drawn instead,
     // as it is everywhere else.
     const read = patch.current
-    const squares = read ? fineSquaresAround(read, [a, b, ...otherEnds], PAD_HALF) : []
+    const squares = read ? fineSquaresAround(read, [a, b, ...shown.flatMap((o) => [o.a, o.b])], PAD_HALF) : []
     const apart = roofs.current !== null
     const drawn: CellReader = apart
       ? (i, j) => (onBuilding(i + 0.5, j + 0.5) ? bareGround(i + 0.5, j + 0.5) : standingCell(i, j))

@@ -24,6 +24,8 @@ import { disposeProps, referenceProps } from './props3d.js'
 
 /** Another line of the same spot: its span, as `line` is, and its two anchors. */
 export interface Other {
+  /** Which of the caller's lines this is, handed back when it is tapped. */
+  index: number
   line: Float32Array
   anchors: [[number, number, number], [number, number, number]]
 }
@@ -387,15 +389,15 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const drawOthers = (k: number) => {
     for (const m of otherRoot.children as Mesh[]) if (m.geometry !== ballGeom) m.geometry.dispose()
     otherRoot.clear()
-    others.forEach((o, i) => {
+    others.forEach((o) => {
       const span = new Mesh(tubeAlong(points(o.line, k), tubeRadius * 0.8, 6), otherMat)
-      span.userData.other = i
+      span.userData.other = o.index
       otherRoot.add(span)
       for (const [x, y, z] of o.anchors) {
         const ball = new Mesh(ballGeom, otherMat)
         ball.position.set(x, y * k, z)
         ball.scale.setScalar(tubeRadius * 2.2)
-        ball.userData.other = i
+        ball.userData.other = o.index
         otherRoot.add(ball)
       }
     })

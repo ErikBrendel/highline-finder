@@ -61,7 +61,7 @@ import { emitProbes } from './probeOverlay.js'
  */
 const SAG_MIN_PCT = 1
 
-/** How far from the middle of the open line another line of its spot may be and still share its 3D view. */
+/** How far from the middle of the open line another kept line may be and still share its 3D view. */
 const COMPANION_REACH = 500
 
 /** How long the button keeps offering a wider search after a run ends. */
@@ -462,7 +462,8 @@ export function App() {
   }, [openSpotId])
   /** Which line of the open spot is the planner's, and so not drawn among the kept ones. */
   const openIndex = spots.open.kind === 'spot' || spots.open.kind === 'shared' ? spots.open.line : null
-  const savedDrawn: SavedDrawn[] = useMemo(() => {
+  /** Every kept line but the open one: the saved spots', a shared spot's and the draft. */
+  const kept = useMemo(() => {
     const o = spots.open
     const openId = o.kind === 'spot' ? o.spot : o.kind === 'shared' ? 'shared' : null
     const groups: [string, SavedDrawn['kind'], SpotLine[]][] = [
@@ -470,22 +471,31 @@ export function App() {
       ...(spots.shared ? [['shared', 'shared', spots.shared.lines] as [string, SavedDrawn['kind'], SpotLine[]]] : []),
       ...(spots.lib.draft && o.kind !== 'draft' ? [['draft', 'draft', [spots.lib.draft]] as [string, SavedDrawn['kind'], SpotLine[]]] : []),
     ]
-    return groups.flatMap(([id, kind, lines]) =>
-      lines.flatMap((l, i) =>
-        id === openId && i === openIndex
-          ? []
-          : [{
-              spot: id,
-              line: i,
-              kind,
-              a: l.a,
-              b: l.b,
-              working: id === openId,
-              lit: lit?.spot === id && (lit.line === null || lit.line === i),
-            }],
-      ),
+    return groups.flatMap(([spot, kind, lines]) =>
+      lines.flatMap((l, line) => (spot === openId && line === openIndex ? [] : [{ spot, line, kind, l, working: spot === openId }])),
     )
-  }, [spots.lib, spots.shared, spots.open, openIndex, lit])
+  }, [spots.lib, spots.shared, spots.open, openIndex])
+  const savedDrawn: SavedDrawn[] = useMemo(
+    () =>
+      kept.map(({ spot, line, kind, l, working }) => ({
+        spot, line, kind, a: l.a, b: l.b, working, lit: lit?.spot === spot && (lit.line === null || lit.line === line),
+      })),
+    [kept, lit],
+  )
+  /** Opens a kept line, or with no line a whole spot, from the map or the 3D view. */
+  const openSaved = (spot: string, i: number | null) => {
+    if (spots.holding) return
+    if (spot === 'draft') return spots.openDraft()
+    if (i !== null) return spot === 'shared' ? spots.openShared(i) : spots.openLine(spot, i)
+    const whole = spot === 'shared' ? spots.shared : spots.lib.spots.find((s) => s.id === spot)
+    if (!whole) return
+    if (spot === 'shared') spots.openShared(null)
+    else spots.openSpot(spot)
+    // Here and not left to the effect that follows the open spot: the map fits the spot into the
+    // room the panel leaves, so the panel has to be there in the same render.
+    setSpotsOpen(true)
+    focusOn(whole)
+  }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
@@ -847,24 +857,22 @@ export function App() {
   }, [params, customUtm, sagPct, terrainVersion, line.rig, scene])
 
   /**
-   * The spot's other lines that share the 3D view with this one, each measured like it.
+   * The kept lines that share the 3D view with this one, each measured like it: the spot's own,
+   * which the view is widened to take in, and any other near enough to be in it.
    *
    * Keyed on those lines alone, so dragging the active one does not measure them all again.
    */
-  const companionKey = JSON.stringify(
-    (spots.spot?.lines ?? []).map((l, i) => (i === openIndex ? null : [l.a, l.b, l.rig, l.sag])),
-  )
+  const companionKey = JSON.stringify(kept.map(({ spot, line, l }) => [spot, line, l.a, l.b, l.rig, l.sag]))
   const companionLines = useMemo(() => {
     if (!customUtm) return []
     const mid = { e: (customUtm.a.e + customUtm.b.e) / 2, n: (customUtm.a.n + customUtm.b.n) / 2 }
-    return (spots.spot?.lines ?? []).flatMap((l, index) => {
-      if (index === openIndex) return []
+    return kept.flatMap(({ spot, line, l, working }) => {
       const [a, b] = [l.a, l.b].map((p) => {
         const [e, n] = toUtm33(p.lat, p.lon)
         return { e, n }
       }) as [{ e: number; n: number }, { e: number; n: number }]
       if ([a, b].some((p) => Math.hypot(p.e - mid.e, p.n - mid.n) > COMPANION_REACH)) return []
-      return [{ index, a, b, rig: l.rig, sag: l.sag }]
+      return [{ spot, line, a, b, rig: l.rig, sag: l.sag, widens: working }]
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companionKey, customUtm && Math.round(customUtm.a.e / 50), customUtm && Math.round(customUtm.a.n / 50)])
@@ -873,7 +881,7 @@ export function App() {
     for (const c of companionLines) {
       const span = Math.hypot(c.b.e - c.a.e, c.b.n - c.a.n)
       ensureTerrain(c.a, c.b, measuredHalfWidth(span, params)).catch((e: unknown) =>
-        report('fetching elevation for the other lines of this spot', e),
+        report('fetching elevation for the kept lines near this one', e),
       )
     }
   }, [companionLines, params])
@@ -887,7 +895,10 @@ export function App() {
       })
       if (!measured) return []
       const m = measured.candidate
-      return [{ index: c.index, a: c.a, b: c.b, anchorA: m.a.anchor, anchorB: m.b.anchor, sagRatio: m.length > 0 ? m.sag / m.length : 0 }]
+      return [{
+        spot: c.spot, line: c.line, a: c.a, b: c.b, widens: c.widens,
+        anchorA: m.a.anchor, anchorB: m.b.anchor, sagRatio: m.length > 0 ? m.sag / m.length : 0,
+      }]
     })
   }, [companionLines, params, sagDefault, terrainVersion])
 
@@ -1751,19 +1762,7 @@ export function App() {
             onClearCustom={clearCustom}
             onMoveAnchor={moveAnchor}
             saved={savedDrawn}
-            onOpenSaved={(spot, i) => {
-              if (spots.holding) return
-              if (spot === 'draft') return spots.openDraft()
-              if (i !== null) return spot === 'shared' ? spots.openShared(i) : spots.openLine(spot, i)
-              const whole = spot === 'shared' ? spots.shared : spots.lib.spots.find((s) => s.id === spot)
-              if (!whole) return
-              if (spot === 'shared') spots.openShared(null)
-              else spots.openSpot(spot)
-              // Here and not left to the effect that follows the open spot: the map fits the spot
-              // into the room the panel leaves, so the panel has to be there in the same render.
-              setSpotsOpen(true)
-              focusOn(whole)
-            }}
+            onOpenSaved={openSaved}
             focus={focus}
             onViewport={(b, z) => {
               setBbox(b)
@@ -1837,9 +1836,7 @@ export function App() {
               companions={companions}
               onCompanion={(i) => {
                 const c = companions[i]
-                if (!c || !spots.spot) return
-                if (spots.open.kind === 'shared') spots.openShared(c.index)
-                else spots.openLine(spots.spot.id, c.index)
+                if (c) openSaved(c.spot, c.line)
               }}
               editable={spots.editable}
               holding={spots.holding}
