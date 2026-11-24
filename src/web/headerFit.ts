@@ -24,9 +24,9 @@
  * The GitHub link's word goes first: its initials point at the same place. Then the title, which
  * the logo beside it already says. Then the Google Maps link. The title disappears altogether only
  * at the end, because the links are the only way to reach what they point at and the title is not
- * a way to reach anything.
+ * a way to reach anything. The kept lines' toggle shortens last, since it is the most used of them.
  */
-const LADDER = ['gh', 'hf', 'gm', 'notitle'] as const
+const LADDER = ['gh', 'hf', 'gm', 'notitle', 'mine'] as const
 
 /** Room to keep between the two halves of the row, so a fit is not a collision. */
 const SLACK = 24

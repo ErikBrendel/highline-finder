@@ -331,9 +331,9 @@ header[data-measuring] .spacer { flex: none; }
 .guidewrap {
   position: fixed;
   inset: 0;
-  /* Above the full-screen line view, which is itself above everything else on the page. A shared
-     link can open straight into that view, and on a first visit the guide has to be readable over
-     it -- at 10 it was behind it, so a first-time reader following a link saw nothing. */
+  /* Above the full line view and the kept lines over it. A shared link can open straight into that
+     view, and on a first visit the guide has to be readable over it -- at 10 it was behind it, so a
+     first-time reader following a link saw nothing. */
   z-index: 30;
   display: flex;
   align-items: center;
@@ -713,21 +713,22 @@ header[data-measuring] .spacer { flex: none; }
 .details .close:hover { color: var(--text); border-color: var(--accent); }
 
 /*
- * One line, filling the window.
+ * One line, in place of the map.
  *
- * A fixed box rather than the card grown in place: the card is positioned by `left`/`bottom` with
+ * The header and the kept lines stay where they are, so the full view needs no copies of their
+ * buttons. A box over the map rather than the card grown in place: the card is positioned by `left`/`bottom` with
  * `top` at auto, and nothing interpolates from auto, so an honest expansion of it would not
  * animate at all. What animates instead is a scale about the corner the card was sitting in, which
  * reads as that card opening out -- and transform and opacity are the two things a browser will
  * always animate cheaply.
  */
 .details[data-full='true'] {
-  position: fixed;
+  position: absolute;
   inset: 0;
   width: auto;
   max-height: none;
   z-index: 20;
-  /* No inset, so no rounding and no shadow: the card is the window now, and a corner radius over
+  /* No inset, so no rounding and no shadow: the card is the map now, and a corner radius over
      nothing is a card pretending it is still floating on something. */
   border: 0;
   border-radius: 0;
@@ -765,14 +766,6 @@ header[data-measuring] .spacer { flex: none; }
     animation-duration: 1ms;
   }
 }
-/* The kept lines stay usable in the full view: beside it on a desk, over it on a phone. */
-.layout:has(.details[data-full='true']) .spots {
-  position: fixed; z-index: 21; left: 0; top: 0; bottom: 0;
-}
-@media (min-width: 721px) {
-  .layout:has(> .spots) .details[data-full='true'] { left: 280px; }
-}
-.details[data-full='true'] .head .close[data-active] { border-color: var(--accent); }
 .details[data-full='true'] .grip { display: none; }
 /* No padding above the head, because the head is the thing pinned to the top of this box: `top: 0`
    sticks to the padding edge, so any padding there is a strip of window that content scrolls up
@@ -1290,10 +1283,12 @@ header .share[data-state='failed'] { color: var(--bad); }
 header .abbr { display: none; }
 header[data-fit~='gh'] .gh .full,
 header[data-fit~='hf'] h1 .full,
-header[data-fit~='gm'] .gm .full { display: none; }
+header[data-fit~='gm'] .gm .full,
+header[data-fit~='mine'] .spotsbtn .full { display: none; }
 header[data-fit~='gh'] .gh .abbr,
 header[data-fit~='hf'] h1 .abbr,
-header[data-fit~='gm'] .gm .abbr { display: inline; }
+header[data-fit~='gm'] .gm .abbr,
+header[data-fit~='mine'] .spotsbtn .abbr { display: inline; }
 header[data-fit~='notitle'] h1 { display: none; }
 
 
@@ -1494,7 +1489,8 @@ header .spotsbtn:hover, header .spotsbtn[data-active] { border-color: var(--acce
 }
 @media (max-width: 720px) {
   .spots {
-    position: absolute; z-index: 6; left: 0; top: 0; bottom: 0; width: min(300px, 88vw);
+    /* Above the full line view too, which covers the map this panel lies over. */
+    position: absolute; z-index: 21; left: 0; top: 0; bottom: 0; width: min(300px, 88vw);
     box-shadow: 4px 0 20px var(--shadow);
   }
 }

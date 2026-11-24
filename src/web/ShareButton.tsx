@@ -8,9 +8,6 @@ import { useEffect, useRef, useState } from 'react'
  * viewport, the open line, the sag, the filters and whether it is full screen are all in it, and
  * `urlState` writes only what the sharer actually changed. What this replaces is selecting a URL by
  * hand -- which on the phone, in the chat app, is where most links to this thing start.
- *
- * It appears twice: in the header, which shares the map as it stands, and in the full-screen line
- * view, which covers the header and is the place a specific line gets sent from.
  */
 
 const WORDS = { copied: 'copied', failed: 'copy failed', asking: 'secret! share?' } as const
@@ -37,8 +34,7 @@ export function ShareButton({
   secret?: boolean
 }) {
   const [state, setState] = useState<keyof typeof WORDS | 'idle'>('idle')
-  // Cleared on unmount, because the full view's button goes away the moment the line is closed and
-  // a timer that outlives it would set state on nothing.
+  // Cleared on unmount, so a timer that outlives the button does not set state on nothing.
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { LINE_KINDS } from '../shared/types.js'
 import type { Pos } from '../shared/grid.js'
 import { withSpan } from '../shared/roads.js'
@@ -972,16 +972,6 @@ export function App() {
   const editButton = (label: string, title: string) => (
     <button className="keep" data-edit="true" onClick={() => spots.edit(line)} title={title}>{label}</button>
   )
-  const spotsToggle = (className: string, label: ReactNode) => (
-    <button
-      className={className}
-      data-active={spotsOpen || undefined}
-      onClick={() => setSpotsOpen(!spotsOpen)}
-      title="Lines you have kept"
-    >
-      {label}
-    </button>
-  )
   /** The card's buttons for keeping and changing the line, which depend on where it lives. */
   const placeButtons = (() => {
     const o = spots.open
@@ -1018,17 +1008,6 @@ export function App() {
       </>
     )
   })()
-  // The full view covers the header, and with it the header's way to the kept lines.
-  const keep = (
-    <>
-      {placeButtons}
-      {full && spotsToggle('close', 'my lines')}
-      {full && spots.secrets.shown && (
-        <button className="close" data-active onClick={spots.secrets.hide} title="Hide the secret spots (h)">hide secret</button>
-      )}
-    </>
-  )
-
   /** Dragging an anchor handle. */
   const moveAnchor = (which: 'a' | 'b', at: LatLon) => {
     if (spots.editable) commit(place(line, which, at))
@@ -1456,6 +1435,14 @@ export function App() {
   return (
     <>
       <header ref={header}>
+        <button
+          className="spotsbtn"
+          data-active={spotsOpen || undefined}
+          onClick={() => setSpotsOpen(!spotsOpen)}
+          title="Lines you have kept"
+        >
+          ☰ <Label full={`My lines${spots.lib.spots.length ? ` (${spots.lib.spots.length})` : ''}`} short="Mine" />
+        </button>
         <img className="logo" src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" />
         <h1><Label full="Highline Finder" short="HF" /></h1>
         {bbox && (
@@ -1482,8 +1469,7 @@ export function App() {
           <Label full="GitHub ↗" short="GH ↗" />
         </a>
         <SecretToggle secrets={spots.secrets} className="spotsbtn" />
-        {spotsToggle('spotsbtn', <Label full={`My lines${spots.lib.spots.length ? ` (${spots.lib.spots.length})` : ''}`} short="Mine" />)}
-        <ShareButton className="share" />
+        <ShareButton className="share" url={lineUrl} secret={secretOpen} />
         <button
           className="guidebtn"
           onClick={guide.show}
@@ -1836,7 +1822,6 @@ export function App() {
               onFull={setFull}
               onMoveAnchor={moveAnchor}
               onFlip={flipAnchors}
-              onGuide={guide.show}
               guideOpen={guide.open}
               rig={line.rig}
               onRig={setRig}
@@ -1849,9 +1834,7 @@ export function App() {
               }}
               editable={spots.editable}
               holding={spots.holding}
-              keep={keep}
-              shareUrl={lineUrl}
-              secret={secretOpen}
+              keep={placeButtons}
               onClose={clearCustom}
             />
           )}

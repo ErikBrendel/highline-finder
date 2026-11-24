@@ -16,7 +16,6 @@ import {
 } from './optimize.js'
 import { spanGeometry, type LatLon } from './planPoints.js'
 import { Terrain3D, type Companion } from './Terrain3D.js'
-import { ShareButton } from './ShareButton.js'
 import { useMedia } from './useMedia.js'
 
 const DASH = '—'
@@ -236,15 +235,10 @@ interface Props {
   onRig: (r: RigHeights | null) => void
   /** Swap which end is A. See flipAnchors in App. */
   onFlip: () => void
-  /** Open the guide, which the full view otherwise covers up. */
-  onGuide: () => void
   guideOpen: boolean
   onClose: () => void
   /** Saving the line, or where it is saved, and getting it into edit mode. */
   keep: ReactNode
-  /** A link to this line: the address bar has none while it is a secret one. */
-  shareUrl: () => string
-  secret: boolean
   /** Whether anchors and rig may be changed; framed in hazard stripes when they may. */
   editable: boolean
   /** A saved line held in edit mode, which the card cannot be closed out of. */
@@ -276,7 +270,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
   canopy, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep, shareUrl, secret, editable, holding, companions, onCompanion,
+  rig, onRig, onFlip, guideOpen, onClose, keep, editable, holding, companions, onCompanion,
 }: Props) {
   /**
    * How much room the profile has, which is the only thing that decides how it is drawn.
@@ -619,21 +613,6 @@ export function Details({
         )}
         <span className="headbtns">
           {keep}
-          {/* The header carries this everywhere else, and the full view covers the header. Without
-              it there is no way back to the guide from a link that opens straight into this. */}
-          {full && (
-            <button
-              className="guidebtn"
-              onClick={onGuide}
-              title="What this is, where the data comes from, and how to use it"
-              aria-label="About Highline Finder"
-            >
-              i
-            </button>
-          )}
-          {/* Only in the full view: on the card the header's own share button is in plain sight a
-              few pixels above, and this is the view a line actually gets sent from. */}
-          {full && <ShareButton className="close" url={shareUrl} secret={secret} />}
           {!full && (
             <button
               className="close"
