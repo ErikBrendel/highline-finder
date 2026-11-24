@@ -4,3 +4,8 @@ account_id = "053ba900a5229724c70287fff3635098"
 compatibility_date = "2026-11-01"
 workers_dev = true
 preview_urls = false
+
+# The OpenStreetMap blocks, served under /osm/. Filled by `npm run osm:upload`.
+[[r2_buckets]]
+binding = "OSM"
+bucket_name = "highline-finder-osm"

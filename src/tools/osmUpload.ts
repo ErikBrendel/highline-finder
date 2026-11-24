@@ -12,17 +12,18 @@ import { join } from 'node:path'
  * `--prune` then deletes every version but the newest two. The index is cached for five minutes, so
  * the one before is still being read by tabs opened just before the swap; prune on the next update.
  *
- * Talks to R2 through its S3 API with the aws CLI, under a profile named `r2` holding an R2 API
- * token's key pair. See ROADMAP.md, "R2 for the OSM blocks".
+ * Talks to R2 through its S3 API with the aws CLI. See ROADMAP.md, "R2 for the OSM blocks".
  */
 
 const BUCKET = 'highline-finder-osm'
+/** The local aws profile holding an R2 API token's key pair, scoped to this bucket. */
+const PROFILE = 'cloudflare-private-r2'
 const ACCOUNT = '053ba900a5229724c70287fff3635098'
 const DIR = new URL('../../data/osm/', import.meta.url).pathname
 const S3 = `s3://${BUCKET}/osm`
 
 const aws = (...args: string[]) =>
-  execFileSync('aws', [...args, '--profile', 'r2', '--endpoint-url', `https://${ACCOUNT}.r2.cloudflarestorage.com`], {
+  execFileSync('aws', [...args, '--profile', PROFILE, '--endpoint-url', `https://${ACCOUNT}.r2.cloudflarestorage.com`], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   })
