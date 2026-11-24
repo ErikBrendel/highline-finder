@@ -7,6 +7,7 @@ import type { Cover } from './landcover.js'
 import type { Canopy } from './terrain.js'
 import { ProfileChart, type Wings } from './ProfileChart.js'
 import { CHART_NARROW, CHART_WIDE } from './profileShape.js'
+import { SagHelp } from './SagHelp.js'
 import { Slider, type SliderBand } from './Slider.js'
 import {
   NEIGHBOURHOOD,
@@ -680,6 +681,7 @@ export function Details({
               step={0.5}
               unit=" % of span"
               format={(v) => v.toFixed(1)}
+              help={<SagHelp pct={sag.pct} />}
               onChange={onSag}
             />
           </div>

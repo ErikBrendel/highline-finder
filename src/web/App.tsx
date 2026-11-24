@@ -47,6 +47,7 @@ import { useRemembered } from './remembered.js'
 import { watchLocation, type Fix } from './locate.js'
 import { overlaps, touches, type Bbox } from './inView.js'
 import { failureText, report } from './report.js'
+import { SagHelp } from './SagHelp.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
@@ -1632,7 +1633,8 @@ export function App() {
                 step={0.5}
                 unit=" % of span"
                 format={(v) => v.toFixed(1)}
-                onChange={setSagPct}
+                help={<SagHelp pct={bounds.sag} />}
+              onChange={setSagPct}
               />
               <div className="note">
                 {lines
