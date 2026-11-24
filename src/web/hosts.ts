@@ -1,29 +1,34 @@
 import type { ProxiedHost } from '../shared/proxied.js'
 
 /**
- * The one survey that will not answer a development machine.
+ * The surveys that will not answer a development machine.
  *
- * Saxony-Anhalt's services echo any `https://` origin and send no CORS header at all to an
- * `http://` one, so every request to them succeeds from the deployed site and is blocked by the
- * browser on `http://localhost` -- as a bare `TypeError: NetworkError`, which says nothing about
- * why. Every other service this app talks to answers a plain localhost origin happily.
+ * Saxony-Anhalt's and Schleswig-Holstein's services echo any `https://` origin and send no CORS
+ * header at all to an `http://` one, so every request to them succeeds from the deployed site and
+ * is blocked by the browser on `http://localhost` -- as a bare `TypeError: NetworkError`, which
+ * says nothing about why. Every other service this app talks to answers a plain localhost origin
+ * happily.
  *
  * In development those requests go to the dev server instead, which fetches them from Node where
  * there is no such thing as CORS and hands them back same-origin. See `server.proxy` in
  * vite.config.ts. In a build the URL is untouched, because the deployed origin is https and the
- * service is content with that.
+ * services are content with that.
  */
-
-const FUSSY = 'https://geodatenportal.sachsen-anhalt.de'
-export const VIA_DEV = '/via/st'
+export const HTTPS_ONLY = {
+  st: 'https://geodatenportal.sachsen-anhalt.de',
+  sh: 'https://dienste.gdi-sh.de',
+}
 
 /**
  * Optional, because Node has no `import.meta.env` at all and the tools import this transitively:
  * `npm run slackmap` measures lines through the same source registry the browser uses, and there
  * neither the dev server nor CORS exists, so the untouched URL is the right one.
  */
-export const reachable = (url: string): string =>
-  import.meta.env?.DEV && url.startsWith(FUSSY) ? VIA_DEV + url.slice(FUSSY.length) : url
+export function reachable(url: string): string {
+  if (!import.meta.env?.DEV) return url
+  const [host, origin] = Object.entries(HTTPS_ONLY).find(([, origin]) => url.startsWith(origin)) ?? []
+  return host ? `/via/${host}${url.slice(origin!.length)}` : url
+}
 
 /**
  * The hosts that send no CORS header at all, through the Cloudflare worker in proxy/.

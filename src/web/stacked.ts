@@ -140,7 +140,7 @@ async function bitmap(url: string, signal: AbortSignal): Promise<ImageBitmap | n
   } catch (e) {
     // A survey that is down, or that answered with something that is not an image, costs its own
     // layer and nothing else: what is underneath it still draws.
-    if (!signal.aborted) report('fetching a basemap tile', e)
+    if (!signal.aborted) report(`fetching a basemap tile from ${new URL(url, location.href).host}`, e)
     return null
   }
 }

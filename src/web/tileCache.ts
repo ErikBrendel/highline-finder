@@ -152,6 +152,18 @@ async function write(url: string, bytes: ArrayBuffer): Promise<void> {
   if (memBytes > MAX_BYTES) await evict(d)
 }
 
+/**
+ * A reply's bytes, stored unless they are a page of text. A WMS that cannot draw a tile says so in
+ * an XML exception report with status 200, and a server in trouble sends an HTML page the same way.
+ * Cached, that answer would stand in for the tile for good, long after the server recovered.
+ */
+async function kept(url: string, res: Response): Promise<ArrayBuffer> {
+  const bytes = await res.arrayBuffer()
+  if (/xml|html|^text\//.test(res.headers.get('content-type') ?? '')) return bytes
+  void write(url, bytes).catch((e: unknown) => report('writing a tile to the cache', e))
+  return bytes
+}
+
 /** Rewrites an https tile template so MapLibre routes it through the cache. */
 export function cachedUrl(url: string): string {
   return url.replace(/^https:\/\//, `${SCHEME}://`)
@@ -167,9 +179,7 @@ export function installTileCache(): void {
 
     const res = await fetch(url, { signal: abortController.signal })
     if (!res.ok) throw new Error(`tile ${res.status} for ${url}`)
-    const bytes = await res.arrayBuffer()
-    void write(url, bytes).catch((e: unknown) => report('writing a tile to the cache', e))
-    return { data: bytes }
+    return { data: await kept(url, res) }
   })
 }
 
@@ -184,9 +194,7 @@ export async function fetchCached(url: string, signal?: AbortSignal): Promise<Ar
   if (hit) return hit
   const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`${res.status} for ${url}`)
-  const bytes = await res.arrayBuffer()
-  void write(url, bytes).catch((e: unknown) => report('writing a tile to the cache', e))
-  return bytes
+  return kept(url, res)
 }
 
 /**
