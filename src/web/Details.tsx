@@ -242,6 +242,9 @@ interface Props {
   onClose: () => void
   /** Saving the line, or where it is saved, and getting it into edit mode. */
   keep: ReactNode
+  /** A link to this line: the address bar has none while it is a secret one. */
+  shareUrl: () => string
+  secret: boolean
   /** Whether anchors and rig may be changed; framed in hazard stripes when they may. */
   editable: boolean
   /** A saved line held in edit mode, which the card cannot be closed out of. */
@@ -273,7 +276,7 @@ const KEEP_VISIBLE = 40
 export function Details({
   c, profile, wings, cover, params, roadState, onRoof, planned, at, failed, fetching,
   canopy, sag, onSag, full, onFull, onMoveAnchor, optimizing, offer, onOptimize,
-  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep, editable, holding, companions, onCompanion,
+  rig, onRig, onFlip, onGuide, guideOpen, onClose, keep, shareUrl, secret, editable, holding, companions, onCompanion,
 }: Props) {
   /**
    * How much room the profile has, which is the only thing that decides how it is drawn.
@@ -630,7 +633,7 @@ export function Details({
           )}
           {/* Only in the full view: on the card the header's own share button is in plain sight a
               few pixels above, and this is the view a line actually gets sent from. */}
-          {full && <ShareButton className="close" />}
+          {full && <ShareButton className="close" url={shareUrl} secret={secret} />}
           {!full && (
             <button
               className="close"

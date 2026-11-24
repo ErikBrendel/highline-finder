@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  exportText, merged, nearbySpots, parseExport, rebased, spotFromHash, spotHash, type Spot, type SpotLine,
+  exportText, merged, nearbySpots, opened, parseExport, rebased, sealedForm, spotFromHash, spotHash, spotOfText,
+  spotText, type Spot, type SpotLine,
 } from './spots.js'
-import { reopened, startingPoint } from './useSpots.js'
+import { reopened, startingPoint, visibleOf } from './useSpots.js'
+import { newVault, openVault, seal, unseal } from './vault.js'
 
 const line = (lat: number, name = 'a line'): SpotLine => ({
   id: `l${lat}`,
@@ -12,7 +14,7 @@ const line = (lat: number, name = 'a line'): SpotLine => ({
   rig: null,
   sag: null,
 })
-const spot = (id: string, ...lines: SpotLine[]): Spot => ({ id, name: '', lines, edited: 1 })
+const spot = (id: string, ...lines: SpotLine[]): Spot => ({ id, name: '', lines, edited: 1, secret: false })
 
 describe('merged', () => {
   it('adds what is new, skips what is held, and keeps both where they differ', () => {
@@ -26,7 +28,7 @@ describe('merged', () => {
 
   it('round-trips through an export file', () => {
     const mine = [spot('s1', line(52, 'top\nnotes')), spot('s2', line(53), line(53.01))]
-    expect(merged(mine, parseExport(exportText(mine))).added).toBe(0)
+    expect(merged(mine, parseExport(exportText(mine)).spots).added).toBe(0)
   })
 })
 
@@ -47,7 +49,7 @@ describe('spotHash', () => {
       { id: 'l1', name: 'Quarry\nbolts ü', a: at(52.1234567, 13.1), b: at(52.2, 13.2), rig: null, sag: null },
       { id: 'l2', name: '', a: at(52.3, 13.3), b: at(52.4, 13.4), rig: { a: 1.5, b: 0.8 }, sag: 4 },
     ]
-    const back = spotFromHash(`#${spotHash({ id: 's1', name: 'Crag', lines, edited: 1 })}`)!
+    const back = spotFromHash(`#${spotHash({ id: 's1', name: 'Crag', lines, edited: 1, secret: true })}`)!
     expect(back.name).toBe('Crag')
     expect(back.lines.map(({ id: _, ...rest }) => rest)).toEqual(lines.map(({ id: _, ...rest }) => rest))
     expect(back.lines[0]!.id).not.toBe('l1')
@@ -120,5 +122,38 @@ describe('reopened', () => {
 
   it('closes a spot another tab deleted', () => {
     expect(reopened(open, before, { spots: [], draft: null })).toEqual({ open: { kind: 'none' }, reload: true })
+  })
+})
+
+describe('secret spots', () => {
+  const hidden = { ...spot('s2', line(53, 'private land')), secret: true }
+  const lib = { spots: [spot('s1', line(52)), hidden], draft: null }
+
+  it('are left off screen until shown, and never as an unopened shell', () => {
+    expect(visibleOf(lib, false).spots.map((s) => s.id)).toEqual(['s1'])
+    expect(visibleOf(lib, true).spots.map((s) => s.id)).toEqual(['s1', 's2'])
+    expect(visibleOf(sealedForm(lib), true).spots.map((s) => s.id)).toEqual(['s1'])
+  })
+
+  it('reach the disk as a shell, and come back from what this tab opened', () => {
+    const stored = sealedForm(lib)
+    expect(JSON.stringify(stored)).not.toContain('private land')
+    expect(opened(stored, new Map([['s2', hidden]]))).toEqual(lib)
+  })
+
+  it('seal under a password, and open only with it and under their own id', async () => {
+    const { vault, key } = await newVault('correct horse')
+    const sealed = await seal(key, spotText(hidden), hidden.id)
+    expect(spotOfText(await unseal((await openVault(vault, 'correct horse'))!, sealed, 's2'))).toEqual(hidden)
+    expect(await openVault(vault, 'wrong')).toBeNull()
+    await expect(unseal(key, sealed, 's1')).rejects.toThrow()
+  })
+
+  it('travel in an export file sealed, with what it takes to open them', () => {
+    const vault = { salt: 'c2FsdA==', check: 'Y2hlY2s=' }
+    const file = parseExport(exportText([lib.spots[0]!], { vault, spots: [{ id: 's2', data: 'c2VhbGVk' }] }))
+    expect(file.spots.map((s) => s.id)).toEqual(['s1'])
+    expect(file.sealed).toEqual({ vault, spots: [{ id: 's2', data: 'c2VhbGVk' }] })
+    expect(parseExport(exportText([hidden])).spots[0]!.secret).toBe(true)
   })
 })

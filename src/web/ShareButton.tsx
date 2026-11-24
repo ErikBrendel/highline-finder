@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react'
  * view, which covers the header and is the place a specific line gets sent from.
  */
 
-const WORDS = { copied: 'copied', failed: 'copy failed' } as const
+const WORDS = { copied: 'copied', failed: 'copy failed', asking: 'secret! share?' } as const
 
 // The sheet is the better path only where the targets are chat apps and the alternative is copy,
 // switch app, paste. Desktop Chrome and Safari also offer `share`, but there it opens a Mail and
@@ -27,11 +27,14 @@ export function ShareButton({
   label = 'share',
   title = 'Send a link to exactly this view',
   url = () => location.href,
+  secret = false,
 }: {
   className?: string
   label?: string
   title?: string
   url?: () => string
+  /** A link to a secret spot: the first click only asks, because the link carries exact anchors. */
+  secret?: boolean
 }) {
   const [state, setState] = useState<keyof typeof WORDS | 'idle'>('idle')
   // Cleared on unmount, because the full view's button goes away the moment the line is closed and
@@ -73,8 +76,8 @@ export function ShareButton({
   return (
     <button
       className={className}
-      onClick={() => void share()}
-      title={title}
+      onClick={() => (secret && state !== 'asking' ? say('asking') : void share())}
+      title={secret ? 'This is a secret spot: the link carries its exact anchors. Click again to share it.' : title}
       data-state={state}
     >
       {state === 'idle' ? label : WORDS[state]}

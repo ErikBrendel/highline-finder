@@ -26,6 +26,13 @@ send the link. The found lines, hotspots and filters are behind **Developer mode
 the guide ("i"), which `npm run dev` switches on by default. See
 [`src/web/devMode.ts`](src/web/devMode.ts).
 
+Lines you keep (**My lines**) stay in your browser and go nowhere else. Many highline spots are
+quiet on purpose: private land, tolerated as long as nobody spreads them, or just someone's own.
+So a spot can be marked secret. It is then left off the map, the list, the line count and the
+address bar until **secret** in the top bar shows it. Every page load starts with secret spots hidden,
+and `h` hides them again in every open tab. An optional password encrypts them on disk, and exports
+can leave them out or carry them encrypted. See [`src/web/vault.ts`](src/web/vault.ts).
+
 Custom areas of interest — one rectangle, or several:
 
 ```bash

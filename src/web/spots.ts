@@ -1,6 +1,7 @@
 import type { RigHeights } from '../shared/plan.js'
 import { spanGeometry, type LatLon, type LineSpec } from './planPoints.js'
 import { report } from './report.js'
+import { parseVault, type Vault } from './vault.js'
 
 /**
  * Lines a person has kept, grouped into spots: one place, any number of lines.
@@ -10,6 +11,10 @@ import { report } from './report.js'
  *
  * The draft is one line apart from them: the line being planned by hand when nothing saved is being
  * edited. It is stored like the rest, so closing the tab loses nothing.
+ *
+ * A secret spot is one its keeper does not want on screen unless they asked for it: on private
+ * land, tolerated as long as it stays quiet, or simply theirs. Once a password is set, it is stored
+ * as a placeholder here, a shell with no lines, and its content sealed beside it -- see vault.ts.
  */
 
 export interface SpotLine extends LineSpec {
@@ -26,6 +31,7 @@ export interface Spot {
   name: string
   lines: SpotLine[]
   edited: number
+  secret: boolean
 }
 
 export interface Library {
@@ -39,6 +45,23 @@ export const NEARBY_METRES = 10_000
 const STORE_KEY = 'highline-finder.spots'
 
 export const newId = () => crypto.randomUUID()
+
+/** A sealed secret spot whose content this tab has not opened. */
+export const isShell = (s: Spot) => s.secret && !s.lines.length
+
+const shell = (s: Spot): Spot => ({ id: s.id, name: '', lines: [], edited: s.edited, secret: true })
+
+/** The library as stored once a password is set: every secret spot reduced to its shell. */
+export const sealedForm = (lib: Library): Library => ({
+  ...lib,
+  spots: lib.spots.map((s) => (s.secret ? shell(s) : s)),
+})
+
+/** A stored library with the shells filled in from what this tab has opened. */
+export const opened = (lib: Library, known: Map<string, Spot>): Library => ({
+  ...lib,
+  spots: lib.spots.map((s) => (isShell(s) ? known.get(s.id) ?? s : s)),
+})
 
 export const titleOf = (text: string) => text.split('\n')[0]!.trim()
 
@@ -145,18 +168,43 @@ function asSpot(raw: unknown): Spot | null {
     name: typeof s.name === 'string' ? s.name : '',
     lines: s.lines.map(asLine).filter((l): l is SpotLine => l !== null),
     edited: isNum(s.edited) ? s.edited : Date.now(),
+    secret: s.secret === true,
   }
 }
 
-/** Spots out of an export file. Throws on anything that is not one. */
-export function parseExport(text: string): Spot[] {
-  const raw = JSON.parse(text) as { spots?: unknown }
-  if (!Array.isArray(raw?.spots)) throw new Error('not a Highline Finder export')
-  return raw.spots.map(asSpot).filter((s): s is Spot => s !== null && s.lines.length > 0)
+/** Secret spots in an export file, encrypted under the password of the library they came from. */
+export interface SealedExport {
+  vault: Vault
+  spots: { id: string; data: string }[]
 }
 
-export const exportText = (spots: Spot[]) =>
-  JSON.stringify({ app: 'highline-finder', version: 1, spots }, null, 1)
+export interface ExportFile {
+  spots: Spot[]
+  sealed: SealedExport | null
+}
+
+/** Spots out of an export file. Throws on anything that is not one. */
+export function parseExport(text: string): ExportFile {
+  const raw = JSON.parse(text) as { spots?: unknown; sealed?: { vault?: unknown; spots?: unknown } }
+  if (!Array.isArray(raw?.spots)) throw new Error('not a Highline Finder export')
+  const vault = parseVault(raw.sealed?.vault)
+  const sealed = Array.isArray(raw.sealed?.spots)
+    ? (raw.sealed.spots as { id?: unknown; data?: unknown }[]).filter(
+        (s): s is { id: string; data: string } => typeof s?.id === 'string' && typeof s.data === 'string',
+      )
+    : []
+  return {
+    spots: raw.spots.map(asSpot).filter((s): s is Spot => s !== null && s.lines.length > 0),
+    sealed: vault && sealed.length ? { vault, spots: sealed.map(({ id, data }) => ({ id, data })) } : null,
+  }
+}
+
+/** One spot as sealed under a password, and back. The id is the label, as in storage. */
+export const spotText = (s: Spot) => JSON.stringify(s)
+export const spotOfText = (text: string) => asSpot(JSON.parse(text))
+
+export const exportText = (spots: Spot[], sealed: SealedExport | null = null) =>
+  JSON.stringify({ app: 'highline-finder', version: 2, spots, ...(sealed && { sealed }) }, null, 1)
 
 type Packed = [string, [string, number, number, number, number, number | null, number | null, number | null][]]
 
@@ -222,9 +270,10 @@ export function loadLibrary(): Library {
   }
 }
 
-export function storeLibrary(lib: Library): void {
+/** `sealing` once a password is set: secret spots are then written as shells. */
+export function storeLibrary(lib: Library, sealing: boolean): void {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(lib))
+    localStorage.setItem(STORE_KEY, JSON.stringify(sealing ? sealedForm(lib) : lib))
   } catch (e) {
     report('storing the saved lines', e)
   }

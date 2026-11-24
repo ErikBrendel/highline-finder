@@ -33,6 +33,8 @@
   --road: #a68a1f;
   /* Anything failing a hard constraint, so a too-low crossing reads as a problem at a glance. */
   --bad: #dc2626;
+  /* Secret spots: their tag, and the edge that marks them in the list while they are shown. */
+  --secret: #7c3aed;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -1575,3 +1577,27 @@ header .spotsbtn:hover, header .spotsbtn[data-active] { border-color: var(--acce
 fieldset.rig { border: 0; padding: 0; margin-inline: 0; min-width: 0; }
 fieldset.rig:disabled { opacity: 0.5; }
 .spotlist .draft { color: #c2410c; font-weight: 600; text-transform: uppercase; font-size: 10px; }
+
+/* Secret spots. */
+.spots .secret {
+  color: var(--secret); font-weight: 600; text-transform: uppercase; font-size: 10px;
+}
+.spotlist li > button:first-child[data-secret] { border-left: 3px solid var(--secret); }
+.spots label.check { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.spots .pane { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.spots .pwform { display: flex; flex-direction: column; gap: 8px; }
+.spots .pwform input, .unlock input {
+  font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--panel); color: var(--text);
+}
+.spots .bad, .unlock .bad { color: var(--bad-text); }
+.secretwrap { position: relative; flex: none; }
+header .spotsbtn[data-active] { background: var(--panel-2); }
+.unlock {
+  position: absolute; z-index: 30; top: calc(100% + 6px); right: 0;
+  display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 230px;
+  padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 6px 20px var(--shadow); font-size: 12px;
+}
+.unlock input { flex: 1; min-width: 0; }
+.unlock button { font: inherit; border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; background: var(--panel-2); color: var(--text); cursor: pointer; }

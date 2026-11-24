@@ -27,6 +27,7 @@ import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from '.
 import { useSpots } from './useSpots.js'
 import { defaultLineName, spotFromHash, spotTitle, type Spot, type SpotLine } from './spots.js'
 import { SpotsPanel, type Lit } from './SpotsPanel.js'
+import { SecretToggle } from './SecretToggle.js'
 import type { SavedDrawn } from './MapView.js'
 import { toUtm33 } from '../shared/geo.js'
 import { PLANNED_ID, planLine, type PlannedLine, type RigHeights } from '../shared/plan.js'
@@ -1022,6 +1023,9 @@ export function App() {
     <>
       {placeButtons}
       {full && spotsToggle('close', 'my lines')}
+      {full && spots.secrets.shown && (
+        <button className="close" data-active onClick={spots.secrets.hide} title="Hide the secret spots (h)">hide secret</button>
+      )}
     </>
   )
 
@@ -1384,10 +1388,16 @@ export function App() {
     ],
   )
 
+  /**
+   * A secret spot's anchors never reach the address bar, where they would stay in the browser's
+   * history and its suggestions. Its links are built on demand instead, and say what they carry.
+   */
+  const secretOpen = spots.open.kind === 'spot' && !!spots.spot?.secret
+  const lineUrl = () => `${location.origin}${location.pathname}${search ? `?${search}` : ''}`
   useEffect(() => {
     // replaceState, not pushState: panning the map should not fill the back button.
-    history.replaceState(null, '', search ? `?${search}` : window.location.pathname)
-  }, [search])
+    history.replaceState(null, '', search && !secretOpen ? `?${search}` : window.location.pathname)
+  }, [search, secretOpen])
 
   if (error) return <div className="loading">Failed to load the dataset &mdash; {error}</div>
 
@@ -1471,6 +1481,7 @@ export function App() {
         >
           <Label full="GitHub ↗" short="GH ↗" />
         </a>
+        <SecretToggle secrets={spots.secrets} className="spotsbtn" />
         {spotsToggle('spotsbtn', <Label full={`My lines${spots.lib.spots.length ? ` (${spots.lib.spots.length})` : ''}`} short="Mine" />)}
         <ShareButton className="share" />
         <button
@@ -1488,6 +1499,7 @@ export function App() {
           <SpotsPanel
             spots={spots}
             line={line}
+            lineUrl={lineUrl}
             centre={bbox && { lat: (bbox[0] + bbox[2]) / 2, lon: (bbox[1] + bbox[3]) / 2 }}
             saving={saving}
             onSaving={setSaving}
@@ -1842,6 +1854,8 @@ export function App() {
               editable={spots.editable}
               holding={spots.holding}
               keep={keep}
+              shareUrl={lineUrl}
+              secret={secretOpen}
               onClose={clearCustom}
             />
           )}

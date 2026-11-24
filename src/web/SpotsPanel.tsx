@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { spanGeometry, type LatLon, type LineSpec } from './planPoints.js'
 import {
-  defaultLineName, exportText, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type Spot,
+  defaultLineName, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type ExportFile, type Spot,
 } from './spots.js'
 import { ShareButton } from './ShareButton.js'
-import type { Spots } from './useSpots.js'
+import type { Imported, Spots } from './useSpots.js'
 import { failureText } from './report.js'
+import { useRemembered } from './remembered.js'
 
 export interface Lit {
   spot: string
@@ -83,12 +84,15 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
   const target = nearby.find((n) => n.spot.id === into)?.spot
   const needsSpotName = !!target && target.lines.length === 1 && !titleOf(target.name)
   const [spotName, setSpotName] = useState('')
+  const [secretChoice, setSecret] = useRemembered('highline-finder.save-secret', false)
+  const canSecret = spots.secrets.shown
+  const secret = secretChoice && canSecret
   useEffect(() => {
     if (needsSpotName) setSpotName(titleOf(target.lines[0]!.name))
   }, [needsSpotName, target])
 
   const save = () => {
-    spots.save({ into, lineName: name, spotName: needsSpotName ? spotName : undefined }, line)
+    spots.save({ into, lineName: name, spotName: needsSpotName ? spotName : undefined, secret }, line)
     onDone()
   }
 
@@ -103,7 +107,8 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
           {nearby.map(({ spot, metres }) => (
             <label key={spot.id}>
               <input type="radio" checked={into === spot.id} onChange={() => setInto(spot.id)} />
-              Add to <b>{spotTitle(spot)}</b> <span className="sub">{km(metres)} away</span>
+              Add to <b>{spotTitle(spot)}</b> {spot.secret && <SecretTag />}
+              <span className="sub">{km(metres)} away</span>
             </label>
           ))}
           <label>
@@ -118,6 +123,12 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
           <Grow value={spotName} onChange={setSpotName} placeholder="Spot name" onEnter={save} />
         </label>
       )}
+      {!target && (
+        <label className="check" title={canSecret ? undefined : 'Show secret spots first, from the top bar'}>
+          <input type="checkbox" checked={secret} disabled={!canSecret} onChange={(e) => setSecret(e.target.checked)} />
+          Secret spot{!canSecret && <span className="sub"> &mdash; show secret spots first</span>}
+        </label>
+      )}
       <div className="row">
         <button className="primary" onClick={save}>Save</button>
         <button onClick={onDone}>Cancel</button>
@@ -126,10 +137,71 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
   )
 }
 
+const SecretTag = () => <span className="secret">secret</span>
+
+function download(text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `highlines-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** A password field with its button, for every place that asks for one. */
+function PasswordForm({ label, action, onSubmit, repeat, children }: {
+  label: string
+  action: string
+  /** Resolves to an error to show, or null when done. */
+  onSubmit: (password: string) => Promise<string | null>
+  /** Asks twice, for a new password. */
+  repeat?: boolean
+  children?: ReactNode
+}) {
+  const [password, setPassword] = useState('')
+  const [again, setAgain] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const submit = async () => {
+    if (!password) return setError('enter a password')
+    if (repeat && password !== again) return setError('the two do not match')
+    setBusy(true)
+    setError(await onSubmit(password))
+    setBusy(false)
+  }
+  return (
+    <form className="pwform" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+      <label>
+        {label}
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
+      </label>
+      {repeat && (
+        <label>
+          Again
+          <input type="password" value={again} onChange={(e) => setAgain(e.target.value)} />
+        </label>
+      )}
+      <div className="row">
+        <button className="primary" type="submit" disabled={busy}>{busy ? '…' : action}</button>
+        {children}
+      </div>
+      {error && <span className="sub bad">{error}</span>}
+    </form>
+  )
+}
+
+const importNote = (r: Exclude<Imported, 'password' | 'wrong password'>) =>
+  [
+    r.added ? `${r.added} spot${r.added === 1 ? '' : 's'} added` : 'nothing new in that file',
+    r.skipped ? `${r.skipped} secret skipped: show secret spots and import again` : '',
+  ].filter(Boolean).join('; ')
+
 const linkTo = (s: Spot) => `${location.origin}${location.pathname}#${spotHash(s)}`
 
-export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFocus, onAddLine, onClose }: {
+export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onLit, onFocus, onAddLine, onClose }: {
   spots: Spots
+  /** A link to the open line, which the address bar does not carry while it is a secret one. */
+  lineUrl: () => string
   /** The planner's line, which is what gets saved. */
   line: LineSpec
   /** Where the map is looking, to sort the list by. */
@@ -143,6 +215,14 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
 }) {
   const [browsing, setBrowsing] = useState(false)
   const [note, setNote] = useState<string | null>(null)
+  /** What the foot of the list is asking about, if anything. */
+  const [pane, setPane] = useState<null | 'export' | 'password' | { file: ExportFile }>(null)
+  const [withSecret, setWithSecret] = useState(false)
+  const [encrypted, setEncrypted] = useState(true)
+  const { secrets } = spots
+  useEffect(() => {
+    if (!secrets.shown) setPane((p) => (p === 'password' || p === 'export' ? null : p))
+  }, [secrets.shown])
   const file = useRef<HTMLInputElement>(null)
   const { lib, spot, open, holding } = spots
   const spotKey = spot?.id ?? null
@@ -155,18 +235,25 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
         .sort((p, q) => p.metres - q.metres)
     : lib.spots.map((s) => ({ s, metres: null })).sort((p, q) => q.s.edited - p.s.edited)
 
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([exportText(lib.spots)], { type: 'application/json' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `highlines-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+  const exportNow = async (secret: boolean) => {
+    download(await spots.exportFile({ secret, encrypted }))
+    setPane(null)
+  }
+  /** Imports, or asks for the file's password first; the error to show, if any. */
+  const take = async (file: ExportFile, password: string | 'skip' | null): Promise<string | null> => {
+    const r = await spots.importFile(file, password)
+    if (r === 'password') {
+      setPane({ file })
+      return null
+    }
+    if (r === 'wrong password') return 'wrong password'
+    setPane(null)
+    setNote(importNote(r))
+    return null
   }
   const upload = async (f: File) => {
     try {
-      const added = spots.importSpots(parseExport(await f.text()))
-      setNote(added ? `${added} spot${added === 1 ? '' : 's'} added` : 'nothing new in that file')
+      await take(parseExport(await f.text()), null)
     } catch (e: unknown) {
       setNote(`could not import: ${failureText(e)}`)
     }
@@ -191,10 +278,11 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
   }
 
   if (!spot || browsing) {
-    const row = (key: string, title: string, sub: ReactNode, active: boolean, onOpen: () => void, lit: Lit) => (
+    const row = (key: string, title: string, sub: ReactNode, active: boolean, onOpen: () => void, lit: Lit, secret = false) => (
       <li key={key}>
         <button
           data-active={active || undefined}
+          data-secret={secret || undefined}
           onClick={active ? spots.leaveSpot : onOpen}
           title={active ? 'Click again to close' : undefined}
           onMouseEnter={() => onLit(lit)}
@@ -217,20 +305,92 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
             s.id,
             spotTitle(s),
             <>
+              {s.secret && <><SecretTag /> · </>}
               {s.lines.length > 1 ? `${s.lines.length} lines` : `${Math.round(spanGeometry(s.lines[0]!.a, s.lines[0]!.b).length)} m`}
               {metres !== null && ` · ${km(metres)} away`}
             </>,
             s.id === spot?.id,
             () => { spots.openSpot(s.id); setBrowsing(false); onFocus(s) },
             { spot: s.id, line: null },
+            s.secret,
           ))}
         </ul>
         {!lib.spots.length && !lib.draft && (
           <p className="note">Nothing kept yet. Pick or plan a line, then save it from its panel.</p>
         )}
+        {pane === 'export' && (
+          <div className="pane">
+            <label className="check">
+              <input type="checkbox" checked={withSecret} onChange={(e) => setWithSecret(e.target.checked)} />
+              Include secret spots
+            </label>
+            {withSecret && secrets.locked && (
+              <label className="check">
+                <input type="checkbox" checked={encrypted} onChange={(e) => setEncrypted(e.target.checked)} />
+                Encrypted with your password
+              </label>
+            )}
+            {withSecret && !(secrets.locked && encrypted) && (
+              <p className="note bad">Anyone who gets this file can read the secret spots in it.</p>
+            )}
+            <div className="row">
+              <button className="primary" onClick={() => void exportNow(withSecret)}>Download</button>
+              <button onClick={() => setPane(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+        {pane === 'password' && (secrets.locked ? (
+          <div className="pane">
+            <p className="note">Secret spots are encrypted on this device. Removing the password stores them readable again.</p>
+            <PasswordForm
+              label="Password"
+              action="Remove password"
+              onSubmit={async (p) => ((await secrets.removePassword(p)) ? (setPane(null), null) : 'wrong password')}
+            >
+              <button type="button" onClick={() => setPane(null)}>Cancel</button>
+            </PasswordForm>
+          </div>
+        ) : (
+          <div className="pane">
+            <p className="note">
+              Encrypts the secret spots on this device, and asks for the password every time they are shown.
+              <b> A forgotten password cannot be recovered, and the secret spots are then lost.</b>
+            </p>
+            <PasswordForm
+              label="New password"
+              action="Set password"
+              repeat
+              onSubmit={async (p) => (await secrets.setPassword(p), setPane(null), null)}
+            >
+              <button type="button" onClick={() => setPane(null)}>Cancel</button>
+            </PasswordForm>
+          </div>
+        ))}
+        {pane !== null && typeof pane === 'object' && pane.file.sealed && (
+          <div className="pane">
+            <p className="note">
+              This file holds {pane.file.sealed.spots.length} encrypted secret spot{pane.file.sealed.spots.length === 1 ? '' : 's'},
+              under the password of the device it was exported from.
+            </p>
+            <PasswordForm label="Its password" action="Import" onSubmit={(p) => take(pane.file, p)}>
+              <button type="button" onClick={() => void take(pane.file, 'skip')}>Without them</button>
+            </PasswordForm>
+          </div>
+        )}
         <div className="spotsfoot">
-          <button onClick={download} disabled={!lib.spots.length} title="Download every saved spot as a file">Export</button>
+          <button
+            onClick={() => (secrets.any ? setPane(pane === 'export' ? null : 'export') : void exportNow(false))}
+            disabled={!lib.spots.length}
+            title="Download the saved spots as a file"
+          >
+            Export
+          </button>
           <button onClick={() => file.current?.click()} title="Add the spots from an exported file; nothing here is overwritten">Import</button>
+          {secrets.shown && (
+            <button onClick={() => setPane(pane === 'password' ? null : 'password')} title="Encrypt the secret spots on this device">
+              {secrets.locked ? 'Password…' : 'Set password…'}
+            </button>
+          )}
           <input
             ref={file}
             type="file"
@@ -281,6 +441,17 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
           <li><span className="placing">new line &mdash; place A and B on the map</span></li>
         )}
       </ul>
+      {!isShared && (
+        <label className="check" title={secrets.shown ? undefined : 'Show secret spots first, from the top bar'}>
+          <input
+            type="checkbox"
+            checked={spot.secret}
+            disabled={!secrets.shown}
+            onChange={(e) => spots.setSecret(spot.id, e.target.checked)}
+          />
+          Secret spot <span className="sub">&mdash; hidden unless secret spots are shown</span>
+        </label>
+      )}
       {active && !isShared && (
         <label className="linename">
           Line
@@ -300,9 +471,11 @@ export function SpotsPanel({ spots, line, centre, saving, onSaving, onLit, onFoc
             <button onClick={spots.redo} disabled={!spots.canRedo} title="Redo (Ctrl+Shift+Z)">redo</button>
           </div>
           <div className="row">
-            {active && <ShareButton label="share line" title="Send a link to this line, with its name and notes" />}
+            {active && (
+              <ShareButton label="share line" title="Send a link to this line, with its name and notes" url={lineUrl} secret={spot.secret} />
+            )}
             {spot.lines.length > 1 && (
-              <ShareButton label="share spot" title="Send a link to all lines of this spot" url={() => linkTo(spot)} />
+              <ShareButton label="share spot" title="Send a link to all lines of this spot" url={() => linkTo(spot)} secret={spot.secret} />
             )}
           </div>
           <div className="row">
