@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  exportText, merged, nearbySpots, opened, parseExport, rebased, sealedForm, spotFromHash, spotHash, spotOfText,
-  spotText, spotTitle, type Spot, type SpotLine,
+  exportText, linesInOrder, merged, nearbySpots, opened, parseExport, rebased, sealedForm, spotFromHash, spotHash, spotOfText,
+  spotsInOrder, spotText, spotTitle, type Spot, type SpotLine,
 } from './spots.js'
 import { joined, movedLine, reopened, startingPoint, visibleOf } from './useSpots.js'
 import { newVault, openVault, seal, unseal } from './vault.js'
@@ -39,6 +39,16 @@ describe('nearbySpots', () => {
       { lat: 52, lon: 13 },
     ])
     expect(near.map((n) => n.spot.id)).toEqual(['here', 'mid'])
+  })
+})
+
+describe('in order', () => {
+  it('lists spots by name, then by place, and lines shortest first', () => {
+    const named = (s: Spot, name: string): Spot => ({ ...s, name })
+    const long: SpotLine = { ...line(52.3), id: 'long', b: { lat: 52.31, lon: 13 } }
+    const spots = [named(spot('z', line(52)), 'Zoo'), named(spot('b', line(52.2)), 'crag 10'), named(spot('a', line(52.1)), 'Crag 9')]
+    expect(spotsInOrder([...spots, named(spot('c', line(52.05)), 'crag 9')]).map((s) => s.id)).toEqual(['c', 'a', 'b', 'z'])
+    expect(linesInOrder([long, line(52.5), line(52.4)]).map((l) => l.index)).toEqual([2, 1, 0])
   })
 })
 

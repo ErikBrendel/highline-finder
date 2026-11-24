@@ -78,6 +78,26 @@ export function spotTitle(s: Spot): string {
   return titleOf(s.name) || (s.lines[0] ? lineTitle(s.lines[0]) : 'Untitled')
 }
 
+const byPlace = (p: LatLon, q: LatLon) => p.lat - q.lat || p.lon - q.lon
+
+/** A spot's lines shortest first, each with its index in the spot; equal lengths by where they lie. */
+export const linesInOrder = (lines: SpotLine[]) =>
+  lines
+    .map((line, index) => ({ line, index, metres: spanGeometry(line.a, line.b).length }))
+    .sort((p, q) => p.metres - q.metres || byPlace(p.line.a, q.line.a) || byPlace(p.line.b, q.line.b))
+
+const names = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+/** Spots by name, and spots of the same name by where their shortest line lies. */
+export function spotsInOrder(spots: Spot[]): Spot[] {
+  const at = (s: Spot) => linesInOrder(s.lines)[0]?.line.a
+  return spots
+    .map((s) => ({ s, title: spotTitle(s), at: at(s) }))
+    .sort((p, q) =>
+      names.compare(p.title, q.title) || (p.at && q.at ? byPlace(p.at, q.at) : 0) || (p.s.id < q.s.id ? -1 : 1))
+    .map(({ s }) => s)
+}
+
 /** Appends to the title, leaving the notes under it alone. */
 export function retitled(text: string, suffix: string): string {
   const [first, ...rest] = text.split('\n')

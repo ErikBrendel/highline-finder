@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { spanGeometry, type LatLon, type LineSpec } from './planPoints.js'
 import {
-  defaultLineName, lineTitle, nearbySpots, parseExport, spotHash, spotTitle, type ExportFile, type Spot,
+  defaultLineName, lineTitle, linesInOrder, nearbySpots, spotsInOrder, parseExport, spotHash, spotTitle, type ExportFile, type Spot,
 } from './spots.js'
 import { ShareButton } from './ShareButton.js'
 import type { Imported, MoveTarget, Spots } from './useSpots.js'
@@ -262,11 +262,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
   useEffect(() => setBrowsing(false), [spotKey])
   useEffect(() => () => onLit(null), [onLit])
 
-  const sorted = centre
-    ? lib.spots
-        .map((s) => ({ s, metres: spanGeometry(centre, centreOf(s)).length }))
-        .sort((p, q) => p.metres - q.metres)
-    : lib.spots.map((s) => ({ s, metres: null })).sort((p, q) => q.s.edited - p.s.edited)
+  const sorted = spotsInOrder(lib.spots).map((s) => ({ s, metres: centre ? spanGeometry(centre, centreOf(s)).length : null }))
 
   const exportNow = async (secret: boolean) => {
     download(await spots.exportFile({ secret, encrypted }))
@@ -454,7 +450,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
         </label>
       )}
       <ul className="spotlist lines">
-        {spot.lines.map((l, i) => (
+        {linesInOrder(spot.lines).map(({ line: l, index: i, metres }) => (
           <li key={l.id}>
             <button
               data-active={i === at || undefined}
@@ -465,7 +461,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
               onMouseLeave={() => onLit(null)}
             >
               <span className="title">{lineTitle(l)}</span>
-              <span className="sub">{Math.round(spanGeometry(l.a, l.b).length)} m</span>
+              <span className="sub">{Math.round(metres)} m</span>
             </button>
             {!isShared && !holding && <MoveTo spots={spots} from={spot} index={i} />}
             {!isShared && !holding && <Confirm label="&times;" sure="delete" onConfirm={() => spots.removeLine(spot.id, i)} />}
