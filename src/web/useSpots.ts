@@ -651,7 +651,8 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
       const { a, b, rig, sag } = current
       if ((o.kind !== 'draft' && o.kind !== 'found') || !a || !b) return
       const target = into ? spotOf(into) : undefined
-      const line: SpotLine = { id: newId(), name: target ? name : defaultLineName(a, b), a, b, rig, sag }
+      // Enter saves without the box being left, so the name it falls back to is given here as well.
+      const line: SpotLine = { id: newId(), name: target && titleOf(name) ? name : defaultLineName(a, b), a, b, rig, sag }
       if (o.kind === 'draft') change(DRAFT, null)
       if (target) {
         changeSpot(target.id, (s) => joined(s, line))

@@ -30,13 +30,19 @@ const enterTo = (done: () => void) => (e: KeyboardEvent) => {
   done()
 }
 
-/** A text box as tall as what is in it, so a name with notes under it is all on screen. */
-function Grow({ value, onChange, placeholder, onEnter, autoFocus }: {
+/**
+ * A text box as tall as what is in it, so a name with notes under it is all on screen.
+ *
+ * With a `fallback`, a title left empty gets it back when the box is left, not while typing: a line
+ * always has a name, and clearing one to type another must not have the old one jump back in.
+ */
+function Grow({ value, onChange, placeholder, onEnter, autoFocus, fallback }: {
   value: string
   onChange: (v: string) => void
   placeholder: string
   onEnter?: () => void
   autoFocus?: boolean
+  fallback?: string
 }) {
   return (
     <textarea
@@ -47,6 +53,9 @@ function Grow({ value, onChange, placeholder, onEnter, autoFocus }: {
       autoFocus={autoFocus}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={onEnter ? enterTo(onEnter) : undefined}
+      onBlur={() => {
+        if (fallback && !titleOf(value)) onChange([fallback, ...value.split('\n').slice(1)].join('\n'))
+      }}
     />
   )
 }
@@ -95,7 +104,14 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
     <div className="savesheet">
       <label>
         {target ? 'Name of the line' : 'Name of the spot'}
-        <Grow value={name} onChange={setName} placeholder="Name, and notes under it" onEnter={save} autoFocus />
+        <Grow
+          value={name}
+          onChange={setName}
+          placeholder="Name, and notes under it"
+          onEnter={save}
+          autoFocus
+          fallback={target ? defaultLineName(line.a, line.b) : undefined}
+        />
       </label>
       {nearby.length > 0 && (
         <div className="targets" role="radiogroup">
@@ -480,7 +496,12 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
       {active && !isShared && spot.lines.length > 1 && (
         <label className="linename">
           Line
-          <Grow value={active.name} onChange={spots.renameActive} placeholder="Name, and notes under it" />
+          <Grow
+            value={active.name}
+            onChange={spots.renameActive}
+            placeholder="Name, and notes under it"
+            fallback={defaultLineName(active.a, active.b)}
+          />
         </label>
       )}
       {isShared ? (
