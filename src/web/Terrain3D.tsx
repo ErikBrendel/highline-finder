@@ -306,6 +306,9 @@ export function Terrain3D({
    * brings the camera to it and offers steps: exact, and as small as a decimetre.
    */
   const [picked, setPicked] = useState<'a' | 'b' | null>(null)
+  useEffect(() => {
+    if (!onMoveAnchor) setPicked(null)
+  }, [!onMoveAnchor])
   const pickedRef = useRef(picked)
   pickedRef.current = picked
   const [step, setStep] = useState(0.5)
@@ -616,12 +619,11 @@ export function Terrain3D({
         offset,
         spin: spinRef.current,
         props: referenceSpot(rough, g),
-        onAnchorTapped: onMoveAnchor
-          ? (which) => {
-              const end = which === 0 ? 'a' : 'b'
-              setPicked((cur) => (cur === end ? null : end))
-            }
-          : undefined,
+        movable: () => !!moveRef.current,
+        onAnchorTapped: (which) => {
+          const end = which === 0 ? 'a' : 'b'
+          setPicked((cur) => (cur === end ? null : end))
+        },
         onAnchorMoved: (which, x, z) => moveRef.current?.(which === 0 ? 'a' : 'b', toWgs84(g.centre.e + x, g.centre.n - z)),
         onElsewhereTapped: () => setPicked(null),
         onOtherTapped: (i) => otherTappedRef.current?.(i),

@@ -54,8 +54,10 @@ export interface SceneInput {
   /** Height to look at, so the camera frames the line rather than the middle of the sky. */
   lookAt: number
   exaggeration: number
-  /** Called when an anchor is tapped. Omit to make the anchors inert. */
-  onAnchorTapped?: (which: 0 | 1) => void
+  /** Whether the anchors can be picked up now: asked on every touch, as editing comes and goes. */
+  movable: () => boolean
+  /** Called when an anchor is tapped. */
+  onAnchorTapped: (which: 0 | 1) => void
   /** Called when the focused anchor is dropped somewhere else, with where, from the patch centre. */
   onAnchorMoved?: (which: 0 | 1, x: number, z: number) => void
   /** Called when the view is tapped anywhere but on an anchor. */
@@ -757,7 +759,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   let hover: { x: number; y: number } | null = null
 
   const onDown = (ev: PointerEvent) => {
-    if (!input.onAnchorTapped) return
+    if (!input.movable()) return
     const which = anchorAt(ev.clientX, ev.clientY)
     if (which === null) {
       pressedElsewhere = { x: ev.clientX, y: ev.clientY }
@@ -775,7 +777,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const onMove = (ev: PointerEvent) => {
     // A larger ball in its own colour, and a cursor that changes, are what say an anchor can be
     // taken. Mouse only: a finger has no hover, and there is nothing to show it.
-    hover = ev.pointerType === 'mouse' && input.onAnchorTapped ? { x: ev.clientX, y: ev.clientY } : null
+    hover = ev.pointerType === 'mouse' && input.movable() ? { x: ev.clientX, y: ev.clientY } : null
     if (!pressed) return
     ev.stopPropagation()
     if (pressed.which !== focused || !input.onAnchorMoved) return
@@ -804,7 +806,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
     controls.enabled = true
     resumeLater()
     if (canvas.hasPointerCapture(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId)
-    if (!dragging) return input.onAnchorTapped?.(which)
+    if (!dragging) return input.onAnchorTapped(which)
     dragging = false
     hovered = null
     const at = balls[which]!.position.clone()
