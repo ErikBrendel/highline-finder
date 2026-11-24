@@ -112,9 +112,19 @@ export interface Water {
 export const blockKey = (e: number, n: number) =>
   `${Math.floor(e / BLOCK)}-${Math.floor(n / BLOCK)}`
 
+/**
+ * The two grid numbers in a block or patch key. Either may be negative: west of about 7.9 degrees
+ * east, zone 33 eastings are, so a key can read `-16-707` and splitting on the dash would not do.
+ */
+export function keyParts(key: string): [number, number] {
+  const m = /^(-?\d+)-(-?\d+)$/.exec(key)
+  if (!m) throw new Error(`not a grid key: ${key}`)
+  return [Number(m[1]), Number(m[2])]
+}
+
 /** The south-west corner of a block, from its key. */
 export function blockOrigin(key: string): { e: number; n: number } {
-  const [bx, by] = key.split('-').map(Number) as [number, number]
+  const [bx, by] = keyParts(key)
   return { e: bx * BLOCK, n: by * BLOCK }
 }
 

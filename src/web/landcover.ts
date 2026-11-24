@@ -1,7 +1,7 @@
 import type { Pos } from '../shared/grid.js'
 import { RoadIndex } from '../shared/roads.js'
 import {
-  blockKeysFor, decodeBlock, splitFeatures, type OsmFeature, type Water,
+  blockKeysFor, decodeBlock, keyParts, splitFeatures, type OsmFeature, type Water,
 } from '../shared/osmBlocks.js'
 import { PATCH, fetchPatch, patchKeysFor } from './overpass.js'
 import type { Roads } from '../shared/scene.js'
@@ -179,7 +179,7 @@ function loadPatch(key: string): Promise<void> {
 }
 
 const blockUnder = (patch: string) => {
-  const [x, y] = patch.split('-').map(Number) as [number, number]
+  const [x, y] = keyParts(patch)
   return blockKeysFor(x * PATCH, y * PATCH, x * PATCH, y * PATCH)[0]!
 }
 

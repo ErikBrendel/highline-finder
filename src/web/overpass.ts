@@ -1,6 +1,6 @@
 import { classifyWay } from '../shared/roads.js'
 import { waterKind } from '../shared/water-tags.js'
-import { decodeBlock, encodeBlock, type OsmFeature } from '../shared/osmBlocks.js'
+import { decodeBlock, encodeBlock, keyParts, type OsmFeature } from '../shared/osmBlocks.js'
 import { toUtm33, toWgs84 } from '../shared/geo.js'
 import { readCached, writeCached } from './tileCache.js'
 
@@ -70,7 +70,7 @@ export function patchKeysFor(
  * too little leaves a strip of the line unchecked.
  */
 function queryFor(key: string): string {
-  const [x, y] = key.split('-').map(Number) as [number, number]
+  const [x, y] = keyParts(key)
   const lats: number[] = []
   const lons: number[] = []
   for (const e of [x * PATCH, (x + 1) * PATCH]) {

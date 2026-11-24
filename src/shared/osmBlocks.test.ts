@@ -18,6 +18,7 @@ describe('block keys', () => {
   it('names the block a point falls in, and locates its corner', () => {
     expect(blockKey(419_663, 5_854_284)).toBe(`${Math.floor(419663 / BLOCK)}-${Math.floor(5854284 / BLOCK)}`)
     expect(blockOrigin('52-731')).toEqual({ e: 52 * BLOCK, n: 731 * BLOCK })
+    expect(blockOrigin('-16-707')).toEqual({ e: -16 * BLOCK, n: 707 * BLOCK })
   })
 
   it('covers every block a box touches, corners included', () => {
