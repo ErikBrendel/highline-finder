@@ -152,6 +152,11 @@ export const FEDERAL_SHADE = {
   ),
   attr: BKG_ATTR,
   contrast: 0.86,
+  /**
+   * Germany, with a margin. Without it the layer is asked for every tile on earth, and zoomed out
+   * to the whole world the service answers one of them with "Invalid BBOX" in XML.
+   */
+  bbox: [5.5, 47, 15.5, 55.2] as [number, number, number, number],
 }
 
 /**
