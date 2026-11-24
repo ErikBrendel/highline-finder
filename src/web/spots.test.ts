@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  exportText, merged, nearbySpots, parseExport, spotFromHash, spotHash, type Spot, type SpotLine,
+  exportText, merged, nearbySpots, parseExport, rebased, spotFromHash, spotHash, type Spot, type SpotLine,
 } from './spots.js'
-import { startingPoint } from './useSpots.js'
+import { reopened, startingPoint } from './useSpots.js'
 
 const line = (lat: number, name = 'a line'): SpotLine => ({
   id: `l${lat}`,
@@ -87,5 +87,38 @@ describe('startingPoint', () => {
 
   it('comes back to the draft line on a bare link', () => {
     expect(arrive(null).open).toEqual({ kind: 'draft' })
+  })
+})
+
+describe('rebased', () => {
+  it('lays this tab\'s change over another tab\'s, keeping both', () => {
+    const base = { spots: [spot('s1', line(52)), spot('s2', line(53))], draft: line(60) }
+    const next = { ...base, spots: [{ ...base.spots[0]!, name: 'mine' }] }
+    const stored = { spots: [...base.spots, spot('s3', line(54))], draft: line(61) }
+    const out = rebased(base, next, stored)
+    expect(out.spots.map((s) => [s.id, s.name])).toEqual([['s1', 'mine'], ['s3', '']])
+    expect(out.draft).toEqual(line(61))
+    expect(out.spots[0]).toBe(next.spots[0])
+  })
+})
+
+describe('reopened', () => {
+  const before = { spots: [spot('s1', line(52), line(53), line(54))], draft: null }
+  const open = { kind: 'spot', spot: 's1', line: 2, editing: true } as const
+
+  it('follows the open line when another tab removes one before it', () => {
+    const after = { ...before, spots: [spot('s1', line(52), line(54))] }
+    expect(reopened(open, before, after)).toEqual({ open: { ...open, line: 1 }, reload: false })
+  })
+
+  it('reloads the open line another tab changed, and lets go of one it removed', () => {
+    const changed = { ...before, spots: [spot('s1', line(52), line(53), line(54, 'theirs'))] }
+    expect(reopened(open, before, changed).reload).toBe(true)
+    const removed = { ...before, spots: [spot('s1', line(52))] }
+    expect(reopened(open, before, removed).open).toEqual({ ...open, line: null, editing: false })
+  })
+
+  it('closes a spot another tab deleted', () => {
+    expect(reopened(open, before, { spots: [], draft: null })).toEqual({ open: { kind: 'none' }, reload: true })
   })
 })

@@ -1,9 +1,9 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { RigHeights } from '../shared/plan.js'
 import type { LineSpec } from './planPoints.js'
 import {
-  defaultLineName, findLine, loadLibrary, merged, newId, sameAnchors, sameLines, storeLibrary,
-  type Library, type Spot, type SpotLine,
+  defaultLineName, findLine, loadLibrary, merged, newId, normalized, rebased, sameAnchors, sameLines, storeLibrary,
+  watchLibrary, type Library, type Spot, type SpotLine,
 } from './spots.js'
 
 /**
@@ -72,8 +72,46 @@ export function startingPoint(lib: Library, { line: { a, b }, name, spot: shared
   return { open: lib.draft ? { kind: 'draft' } : { kind: 'none' }, shared: null }
 }
 
+const same = (p: unknown, q: unknown) => JSON.stringify(p) === JSON.stringify(q)
+
+/** The draft line and the spots whose stored state differs between two libraries. */
+export function changedKeys(before: Library, after: Library): string[] {
+  const ids = new Set([...before.spots, ...after.spots].map((s) => s.id))
+  const spot = (lib: Library, id: string) => lib.spots.find((s) => s.id === id)
+  return [
+    ...(same(before.draft, after.draft) ? [] : [DRAFT]),
+    ...[...ids].filter((id) => !same(spot(before, id), spot(after, id))),
+  ]
+}
+
+/**
+ * What stays open when another tab changes the library: the same line, found by its id since lines
+ * before it may have come or gone. `reload` when the open line itself changed, so the planner shows
+ * the other tab's version. A line being placed stays the one after the last.
+ */
+export function reopened(o: Open, before: Library, after: Library): { open: Open; reload: boolean } {
+  if (o.kind === 'draft') {
+    if (same(before.draft, after.draft)) return { open: o, reload: false }
+    return { open: after.draft ? o : { kind: 'none' }, reload: true }
+  }
+  if (o.kind !== 'spot') return { open: o, reload: false }
+  const was = before.spots.find((s) => s.id === o.spot)
+  const now = after.spots.find((s) => s.id === o.spot)
+  if (!now) return { open: { kind: 'none' }, reload: true }
+  if (o.line === null || !was) return { open: o, reload: false }
+  const held = was.lines[o.line]
+  if (!held) return { open: { ...o, line: now.lines.length }, reload: false }
+  const line = now.lines.findIndex((l) => l.id === held.id)
+  if (line < 0) return { open: { ...o, line: null, editing: false }, reload: true }
+  return { open: { ...o, line }, reload: !same(held, now.lines[line]) }
+}
+
 /**
  * The kept lines, what is open, and undo per spot and for the draft line.
+ *
+ * Other tabs keep the same library. Each write takes only this tab's change onto what is stored now,
+ * and what another tab stores is taken in here as it happens. Undo of a spot or draft line another
+ * tab changed is forgotten, so undoing here can never bring back what was overwritten there.
  *
  * `load` puts a line into the planner: the hook owns which line is open, the App owns the planner's
  * state, and every switch of line goes through here so the two cannot disagree. Everything the
@@ -93,10 +131,14 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
   const histories = useRef(new Map<string, History>())
   const [, setVersion] = useState(0)
 
-  const commit = (next: Library) => {
+  const adopt = (next: Library) => {
     libRef.current = next
     setLib(next)
-    storeLibrary(next)
+  }
+  const commit = (next: Library) => {
+    const stored = rebased(libRef.current, next, loadLibrary())
+    adopt(stored)
+    storeLibrary(stored)
   }
   const show = (next: Open) => {
     openRef.current = next
@@ -190,6 +232,20 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
     const o = openRef.current
     if (o.kind === 'spot' && o.spot === id) go({ kind: 'none' })
   }
+
+  useEffect(
+    () =>
+      watchLibrary((theirs) => {
+        const before = normalized(libRef.current)
+        for (const key of changedKeys(before, theirs)) histories.current.delete(key)
+        adopt(theirs)
+        const { open: next, reload } = reopened(openRef.current, before, theirs)
+        if (reload) go(next)
+        else show(next)
+        setVersion((v) => v + 1)
+      }),
+    [],
+  )
 
   const held = () => {
     const o = openRef.current

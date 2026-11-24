@@ -207,11 +207,15 @@ export function spotFromHash(hash: string): Spot | null {
   }
 }
 
+function parseLibrary(text: string | null): Library {
+  const raw = JSON.parse(text ?? 'null') as { spots?: unknown; draft?: unknown } | null
+  const spots = Array.isArray(raw?.spots) ? raw.spots.map(asSpot).filter((s): s is Spot => s !== null) : []
+  return { spots, draft: asLine(raw?.draft) }
+}
+
 export function loadLibrary(): Library {
   try {
-    const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as { spots?: unknown; draft?: unknown } | null
-    const spots = Array.isArray(raw?.spots) ? raw.spots.map(asSpot).filter((s): s is Spot => s !== null) : []
-    return { spots, draft: asLine(raw?.draft) }
+    return parseLibrary(localStorage.getItem(STORE_KEY))
   } catch (e) {
     report('reading the saved lines', e)
     return { spots: [], draft: null }
@@ -224,4 +228,34 @@ export function storeLibrary(lib: Library): void {
   } catch (e) {
     report('storing the saved lines', e)
   }
+}
+
+/** The library as it reads back from storage, so it compares equal to what another tab stored. */
+export const normalized = (lib: Library) => parseLibrary(JSON.stringify(lib))
+
+/**
+ * This tab's change, `base` to `next`, applied to what is stored now, which another tab may have
+ * changed since this one last read it. Only the spots this tab touched and the draft, if it touched
+ * it, are taken from `next`; everything else stays as stored. A spot changed here and removed
+ * elsewhere comes back, so neither tab loses an edit. Whatever is unchanged keeps its object.
+ */
+export function rebased(base: Library, next: Library, stored: Library): Library {
+  const kept = new Set(next.spots.map((s) => s.id))
+  const removed = new Set(base.spots.filter((s) => !kept.has(s.id)).map((s) => s.id))
+  const touched = new Map(next.spots.filter((s) => !base.spots.includes(s)).map((s) => [s.id, s]))
+  const asBefore = <T>(theirs: T, mine: T | undefined) => (JSON.stringify(theirs) === JSON.stringify(mine) ? mine! : theirs)
+  const spots = stored.spots
+    .filter((s) => !removed.has(s.id))
+    .map((s) => touched.get(s.id) ?? asBefore(s, base.spots.find((t) => t.id === s.id)))
+  for (const s of touched.values()) if (!spots.some((t) => t.id === s.id)) spots.push(s)
+  return { spots, draft: next.draft === base.draft ? asBefore(stored.draft, base.draft) : next.draft }
+}
+
+/** Calls `changed` whenever another tab stores the library. */
+export function watchLibrary(changed: (lib: Library) => void): () => void {
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === STORE_KEY || e.key === null) changed(loadLibrary())
+  }
+  addEventListener('storage', onStorage)
+  return () => removeEventListener('storage', onStorage)
 }
