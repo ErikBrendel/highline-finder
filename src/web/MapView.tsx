@@ -24,7 +24,7 @@ import {
 import { integration } from './integration.js'
 import { CANOPY_MAP_ATTRIBUTION } from './canopyMap.js'
 import { PLANNED_ID } from '../shared/plan.js'
-import type { CustomPoints, LatLon } from './planPoints.js'
+import { spanGeometry, type CustomPoints, type LatLon } from './planPoints.js'
 import type { Fix } from './locate.js'
 import { LocateControl } from './locateControl.js'
 import { installLoadingOverlay } from './loadingOverlay.js'
@@ -623,7 +623,63 @@ export interface SavedDrawn {
 /** Saved lines green, the draft line orange, a shared spot's lines violet. */
 const KIND_COLOUR: maplibregl.ExpressionSpecification = ['match', ['get', 'kind'], 'draft', '#fb923c', 'shared', '#a78bfa', '#22c55e']
 
-/** Each kept line, and a dot per spot at the middle of its anchors for when the lines are too small. */
+/** Metres of ground round a spot's outermost anchors, so they sit inside its circle rather than on it. */
+const SPOT_MARGIN = 15
+/** Pixels: a spot never shrinks below this, so zoomed out it is still a mark you can see and click. */
+const SPOT_MIN_RADIUS = 6
+/** Fractions of the map's shorter side: a spot's circle starts to fade once it is this wide... */
+const SPOT_FADE_FROM = 0.25
+/** ...and is gone at this width, where it no longer marks a place but only tints the map. */
+const SPOT_GONE_AT = 0.5
+
+type Expression = maplibregl.ExpressionSpecification
+
+/**
+ * The circle's radius in pixels at zoom `z`: the ground it covers, but never less than the minimum.
+ * `r0` is the ground radius in pixels at zoom 0; each zoom level doubles it. A zoom expression may
+ * only be the input of the outermost interpolate, so everything that depends on it is built per stop.
+ */
+const spotRadius = (z: number): Expression => ['max', SPOT_MIN_RADIUS, ['*', ['get', 'r0'], 2 ** z]]
+
+const SPOT_RADIUS = [
+  'interpolate', ['exponential', 2], ['zoom'],
+  ...Array.from({ length: 23 }, (_, z) => [z, spotRadius(z)]).flat(),
+] as Expression
+
+/** 1 while the circle is small on a `screen` pixels wide map, falling to 0 as it widens to the limit. */
+const sizeFade = (z: number, screen: number): Expression => [
+  'max', 0,
+  ['min', 1, ['/', ['-', SPOT_GONE_AT * screen, ['*', 2, spotRadius(z)]], (SPOT_GONE_AT - SPOT_FADE_FROM) * screen]],
+]
+
+/** Fainter towards the whole country, where many spots would otherwise blot the map. */
+const countryFade = (z: number, far: number, near: number) => far + (near - far) * Math.min(1, Math.max(0, (z - 5) / 5))
+
+/**
+ * The circles' opacity for a map whose shorter side is `screen` pixels. Linear between half zoom
+ * levels, which follows the doubling radius closely enough for a fade.
+ */
+function spotFading(screen: number) {
+  const byZoom = (value: (z: number) => Expression) =>
+    ['interpolate', ['linear'], ['zoom'], ...Array.from({ length: 45 }, (_, i) => [i / 2, value(i / 2)]).flat()] as Expression
+  return {
+    'circle-opacity': byZoom((z) => ['*', sizeFade(z, screen), ['case', ['get', 'lit'], 0.9, countryFade(z, 0.3, 0.55)]]),
+    'circle-stroke-opacity': byZoom((z) => ['*', sizeFade(z, screen), countryFade(z, 0.5, 0.95)]),
+  }
+}
+
+const mapScreen = (m: maplibregl.Map) => Math.min(m.getCanvas().clientWidth, m.getCanvas().clientHeight)
+
+/** Once a circle starts to fade, the lines inside it are what is clicked, not the circle. */
+const spotClickable = (m: maplibregl.Map, f: maplibregl.MapGeoJSONFeature) =>
+  f.layer.id !== 'saved-dot' ||
+  2 * Math.max(SPOT_MIN_RADIUS, Number(f.properties.r0) * 2 ** m.getZoom()) < SPOT_FADE_FROM * mapScreen(m)
+
+/**
+ * Each kept line, and a circle per spot covering all its anchors, for when the lines are too small
+ * to see. The circle is centred on the box round the anchors, which needs a smaller radius than
+ * their average would.
+ */
 function savedFeatures(saved: SavedDrawn[]): GeoJSON.FeatureCollection {
   const props = (s: SavedDrawn) => ({ spot: s.spot, line: s.line, kind: s.kind, working: s.working, lit: s.lit })
   const spots = new Map<string, SavedDrawn[]>()
@@ -638,16 +694,16 @@ function savedFeatures(saved: SavedDrawn[]): GeoJSON.FeatureCollection {
       })),
       ...[...spots.values()].map((lines) => {
         const ends = lines.flatMap((l) => [l.a, l.b])
+        const lats = ends.map((p) => p.lat)
+        const lons = ends.map((p) => p.lon)
+        const centre = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lon: (Math.min(...lons) + Math.max(...lons)) / 2 }
+        const metres = Math.max(...ends.map((p) => spanGeometry(centre, p).length)) + SPOT_MARGIN
+        // Web Mercator at MapLibre's 512-pixel tiles: the equator's length over the zoom-0 world width.
+        const metresPerPixel0 = (40_075_016.686 * Math.cos((centre.lat * Math.PI) / 180)) / 512
         return {
           type: 'Feature' as const,
-          properties: { ...props(lines[0]!), lit: lines.some((l) => l.lit) },
-          geometry: {
-            type: 'Point' as const,
-            coordinates: [
-              ends.reduce((sum, p) => sum + p.lon, 0) / ends.length,
-              ends.reduce((sum, p) => sum + p.lat, 0) / ends.length,
-            ],
-          },
+          properties: { ...props(lines[0]!), lit: lines.some((l) => l.lit), r0: metres / metresPerPixel0 },
+          geometry: { type: 'Point' as const, coordinates: [centre.lon, centre.lat] },
         }
       }),
     ],
@@ -1232,27 +1288,35 @@ export function MapView({
           'line-opacity': ['case', ['get', 'lit'], 1, ['get', 'working'], 0.8, 0.45],
         },
       })
-      // A spot is a few metres across, so zoomed out it is drawn as a dot or it is not seen at all.
+      // A spot is a few metres across, so zoomed out its lines are not seen at all. The circle
+      // round them is, at its real size where that is big enough and at a minimum where it is not.
+      // It fades out as it grows on screen, where the lines inside it are the thing to see.
       m.addLayer({
         id: 'saved-dot',
         type: 'circle',
         source: 'saved',
-        maxzoom: 13,
         filter: ['==', ['geometry-type'], 'Point'],
         paint: {
-          'circle-radius': 6,
+          'circle-radius': SPOT_RADIUS,
           'circle-color': ['case', ['get', 'lit'], '#facc15', KIND_COLOUR],
-          'circle-opacity': ['case', ['get', 'lit'], 1, 0.6],
           'circle-stroke-width': 1.5,
-          'circle-stroke-color': '#052e16',
+          'circle-stroke-color': ['case', ['get', 'lit'], '#a16207', KIND_COLOUR],
+          ...spotFading(mapScreen(m)),
         },
+      })
+      m.on('resize', () => {
+        for (const [prop, value] of Object.entries(spotFading(mapScreen(m)))) m.setPaintProperty('saved-dot', prop, value)
       })
       for (const id of ['saved', 'saved-dot']) {
         m.on('click', id, (e) => {
           const f = e.features?.[0]
-          if (f && !placingRef.current.placing) onOpenSavedRef.current(String(f.properties!.spot), Number(f.properties!.line))
+          if (f && spotClickable(m, f) && !placingRef.current.placing) {
+            onOpenSavedRef.current(String(f.properties!.spot), Number(f.properties!.line))
+          }
         })
-        m.on('mouseenter', id, () => { m.getCanvas().style.cursor = 'pointer' })
+        m.on('mousemove', id, (e) => {
+          if (e.features?.some((f) => spotClickable(m, f))) m.getCanvas().style.cursor = 'pointer'
+        })
         m.on('mouseleave', id, () => { m.getCanvas().style.cursor = '' })
       }
 
@@ -1304,7 +1368,7 @@ export function MapView({
         const hit = m.queryRenderedFeatures(e.point, {
           layers: ['lines-hit', 'custom', 'customCasing', 'saved', 'saved-dot'].filter((id) => m.getLayer(id)),
         })
-        if (hit.length) return setMenu(null)
+        if (hit.some((f) => spotClickable(m, f))) return setMenu(null)
         const dismissed = openRef.current || !!menuRef.current
         onSelectRef.current(null)
         setMenu(null)
