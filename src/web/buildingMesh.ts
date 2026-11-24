@@ -348,14 +348,22 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
   const onEdge = (a: Pt, b: Pt) =>
     (a[0] === 0 && b[0] === 0) || (a[0] === w && b[0] === w) || (a[1] === 0 && b[1] === 0) || (a[1] === h && b[1] === h)
   /**
-   * A loop with a point beside every cell along each cut, so the cut's top follows the roof the
-   * cells measured rather than running straight between the two corners, and the roof does not fan
-   * out from those corners in slivers.
+   * A loop with a point about every metre along each wall, so the wall's top follows the roof the
+   * cells beside it measured rather than running straight between its two corners. Without them a
+   * long wall whose one corner takes its height from a low annex is a triangle, and the roof band
+   * along it a slope from the rim to the cells, neither of which is in the data. Along a cut the
+   * points sit beside the cells exactly, so the cut's top is each cell's own roof.
    */
-  const alongCuts = (loop: Pt[]): Pt[] =>
+  const alongWalls = (loop: Pt[]): Pt[] =>
     loop.flatMap((a, i) => {
       const b = loop[(i + 1) % loop.length]!
-      if (!onEdge(a, b)) return [a]
+      if (!onEdge(a, b)) {
+        const steps = Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]))
+        return [a, ...Array.from({ length: Math.max(0, steps - 1) }, (_, k): Pt => {
+          const t = (k + 1) / steps
+          return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]
+        })]
+      }
       const axis = a[0] === b[0] ? 1 : 0
       const [from, to] = [a[axis], b[axis]]
       const step = Math.sign(to - from)
@@ -461,7 +469,9 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
       const whole = roofNear(p, (c, j) => isUsable(c - x0, j - y0))
       return Number.isNaN(whole) ? roofNear(p) : whole
     }
-    for (const loop of loops) {
+    // The walls' points only here, as triangulation constraints: they lie on the walls, so every
+    // test against a wall above is the same without them, and many times quicker.
+    for (const loop of loops.map(alongWalls)) {
       if (loop.some((p) => Number.isNaN(top(p)))) return null
       constrain(loop, (p) => () => vertex(p, top(p), grey))
     }
@@ -500,7 +510,7 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
   for (const footprint of footprints(cells)) {
     const { traced } = footprint
     let rim: ((p: Pt) => number) | null = null
-    const fitted = [footprint.fitted.map(alongCuts), traced.map(alongCuts)].find(
+    const fitted = [footprint.fitted, traced].find(
       (loops, k) => (k === 0 || footprint.fitted !== traced) && (rim = roofOver(loops, traced[0]!)),
     )
     if (!fitted || !rim) continue
@@ -510,7 +520,7 @@ export function buildingMesh(cells: BuildingCells, centre: Pos, datum: number): 
     // round over both edges as the terrain grid's do. Only the shading is soft; the edge stays where
     // it is. A cut is not part of the building's skin and keeps its own corners.
     const feet = new Map<string, number>()
-    for (const loop of fitted) {
+    for (const loop of fitted.map(alongWalls)) {
       loop.forEach((a, i) => {
         const b = loop[(i + 1) % loop.length]!
         const cut = onEdge(a, b)

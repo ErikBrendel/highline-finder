@@ -82,12 +82,26 @@ describe('buildingMesh', () => {
     expect(cut.reduce((sum, f) => sum + Math.hypot(...f.normal) / 2, 0)).toBeCloseTo(24 * 12, 4)
     // Out of the square is west, -x in the scene.
     for (const f of cut) expect(f.normal[0]!).toBeLessThan(0)
-    // The other three are facades, each facing away from the building's middle.
+    // The other three are facades, 44 m of them, each facing away from the building's middle.
     const middle = [5 - SIDE / 2, -(18 - SIDE / 2)]
     const facades = walls.filter((f) => !f.cut)
-    expect(facades).toHaveLength(6)
+    expect(facades.reduce((sum, f) => sum + Math.hypot(...f.normal) / 2, 0)).toBeCloseTo(44 * 12, 4)
     for (const f of facades) {
       expect(f.normal[0]! * (f.mid[0]! - middle[0]!) + f.normal[2]! * (f.mid[1]! - middle[1]!)).toBeGreaterThan(0)
+    }
+  })
+
+  it('tops a long wall with the roof beside it, not a line between its corners', () => {
+    const p = buildingMesh(square((c, j) => (c >= 5 && c < 30 && j >= 10 && j < 20 ? (c < 17 ? 60 : 70) : NaN)), centre, 0).positions
+    const south: [number, number][] = []
+    for (let v = 0; v < p.length / 3; v++) {
+      const [x, y, height] = [p[v * 3]! + SIDE / 2, -p[v * 3 + 2]! + SIDE / 2, p[v * 3 + 1]!]
+      if (Math.abs(y - 10) < 0.01 && height > 50) south.push([x, height])
+    }
+    expect(south.length).toBeGreaterThan(20)
+    for (const [x, height] of south) {
+      if (x < 16.9) expect(height).toBe(60)
+      if (x > 17.1) expect(height).toBe(70)
     }
   })
 
