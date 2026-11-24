@@ -3,7 +3,7 @@ import {
   exportText, merged, nearbySpots, opened, parseExport, rebased, sealedForm, spotFromHash, spotHash, spotOfText,
   spotText, type Spot, type SpotLine,
 } from './spots.js'
-import { reopened, startingPoint, visibleOf } from './useSpots.js'
+import { movedLine, reopened, startingPoint, visibleOf } from './useSpots.js'
 import { newVault, openVault, seal, unseal } from './vault.js'
 
 const line = (lat: number, name = 'a line'): SpotLine => ({
@@ -155,5 +155,27 @@ describe('secret spots', () => {
     expect(file.spots.map((s) => s.id)).toEqual(['s1'])
     expect(file.sealed).toEqual({ vault, spots: [{ id: 's2', data: 'c2VhbGVk' }] })
     expect(parseExport(exportText([hidden])).spots[0]!.secret).toBe(true)
+  })
+})
+
+describe('movedLine', () => {
+  const lib = { spots: [spot('s1', line(52), line(53)), spot('s2', line(60))], draft: null }
+
+  it('moves a line into another spot and opens it there', () => {
+    const out = movedLine(lib, 's1', 0, { kind: 'spot', id: 's2' })!
+    expect(out.lib.spots.map((s) => s.lines.map((l) => l.id))).toEqual([['l53'], ['l60', 'l52']])
+    expect(out.open).toEqual({ kind: 'spot', spot: 's2', line: 1, editing: false })
+  })
+
+  it('moves the last line to the draft line, and the empty spot goes', () => {
+    const out = movedLine(lib, 's2', 0, { kind: 'draft' })!
+    expect(out.lib.spots.map((s) => s.id)).toEqual(['s1'])
+    expect(out.lib.draft?.id).toBe('l60')
+    expect(movedLine(out.lib, 's1', 0, { kind: 'draft' })).toBeNull()
+  })
+
+  it('gives a line a spot of its own, as secret as the one it left', () => {
+    const out = movedLine({ ...lib, spots: [{ ...lib.spots[0]!, secret: true }] }, 's1', 1, { kind: 'own' })!
+    expect(out.lib.spots.map((s) => [s.lines.map((l) => l.id), s.secret])).toEqual([[['l52'], true], [['l53'], true]])
   })
 })

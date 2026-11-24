@@ -18,7 +18,8 @@ import {
  * shared spot are only looked at: their anchors and rig heights stay put, and the sag is a what-if
  * that is never stored. Only the draft line and a saved line opened for editing are written to.
  *
- * In a spot, `line` null is the spot with no line open, and `lines.length` a new one being placed.
+ * In a spot, `line` null is the spot with no line open. A new line is always placed as the draft
+ * line, never straight into a spot, so one can never land in the spot that happened to be open.
  *
  * Editing a saved line holds it: until it is done, nothing else can be opened, so a change can never
  * land on a line other than the one the person set out to change. The draft line is editable without
@@ -85,6 +86,32 @@ export const visibleOf = (lib: Library, shown: boolean): Library => ({
   spots: lib.spots.filter((s) => !s.secret || (shown && !isShell(s))),
 })
 
+/** Where a line of a spot can be moved: the draft line, a spot of its own, or another spot. */
+export type MoveTarget = { kind: 'draft' } | { kind: 'own' } | { kind: 'spot'; id: string }
+
+/**
+ * A line taken out of its spot, to the draft line, a spot of its own or another spot, and what to
+ * open afterwards: the line where it now is. A spot left empty goes. Null where the move cannot be
+ * made, which includes onto a draft line already there, since that would replace it.
+ */
+export function movedLine(lib: Library, from: string, index: number, to: MoveTarget): { lib: Library; open: Open } | null {
+  const source = lib.spots.find((s) => s.id === from)
+  const moved = source?.lines[index]
+  if (!source || !moved || (to.kind === 'draft' && lib.draft)) return null
+  if (to.kind === 'spot' && (to.id === from || !lib.spots.some((s) => s.id === to.id))) return null
+  const now = Date.now()
+  const rest = source.lines.filter((_, i) => i !== index)
+  let spots = lib.spots.flatMap((s) => (s.id !== from ? [s] : rest.length ? [{ ...s, lines: rest, edited: now }] : []))
+  if (to.kind === 'draft') return { lib: { spots, draft: moved }, open: { kind: 'draft' } }
+  if (to.kind === 'own') {
+    const own: Spot = { id: newId(), name: '', lines: [moved], edited: now, secret: source.secret }
+    return { lib: { ...lib, spots: [...spots, own] }, open: { kind: 'spot', spot: own.id, line: 0, editing: false } }
+  }
+  spots = spots.map((s) => (s.id === to.id ? { ...s, lines: [...s.lines, moved], edited: now } : s))
+  const line = spots.find((s) => s.id === to.id)!.lines.length - 1
+  return { lib: { ...lib, spots }, open: { kind: 'spot', spot: to.id, line, editing: false } }
+}
+
 /** What an import did, or what it needs first. */
 export type Imported =
   | { added: number; skipped: number }
@@ -107,7 +134,7 @@ export function changedKeys(before: Library, after: Library): string[] {
 /**
  * What stays open when another tab changes the library: the same line, found by its id since lines
  * before it may have come or gone. `reload` when the open line itself changed, so the planner shows
- * the other tab's version. A line being placed stays the one after the last.
+ * the other tab's version.
  */
 export function reopened(o: Open, before: Library, after: Library): { open: Open; reload: boolean } {
   if (o.kind === 'draft') {
@@ -120,7 +147,7 @@ export function reopened(o: Open, before: Library, after: Library): { open: Open
   if (!now) return { open: { kind: 'none' }, reload: true }
   if (o.line === null || !was) return { open: o, reload: false }
   const held = was.lines[o.line]
-  if (!held) return { open: { ...o, line: now.lines.length }, reload: false }
+  if (!held) return { open: { ...o, line: null, editing: false }, reload: false }
   const line = now.lines.findIndex((l) => l.id === held.id)
   if (line < 0) return { open: { ...o, line: null, editing: false }, reload: true }
   return { open: { ...o, line }, reload: !same(held, now.lines[line]) }
@@ -545,12 +572,26 @@ export function useSpots(arrival: Arrival, load: (line: LineSpec | null) => void
       const o = openRef.current
       if (o.kind === 'spot') show({ ...o, editing: false })
     },
-    /** The first point of a new line is down: as a new line of the open spot, or as the new draft line. */
+    /** The first point of a new line is down. It is the new draft line, kept in a spot only once saved. */
     beginNewLine: () => {
-      const o = openRef.current
-      if (o.kind === 'spot') return show({ ...o, line: spotOf(o.spot)?.lines.length ?? 0, editing: true })
       if (libRef.current.draft) change(DRAFT, null)
       show({ kind: 'draft' })
+    },
+    /**
+     * Takes a line out of its spot to wherever it should have gone, and opens it there; see
+     * `movedLine`.
+     *
+     * Not a step of undo: it changes two places at once, and undo works on one. Their undo is
+     * forgotten instead, and moving back is the way back.
+     */
+    moveLine: (from: string, index: number, to: MoveTarget) => {
+      const moved = held() ? null : movedLine(libRef.current, from, index, to)
+      if (!moved) return
+      histories.current.delete(from)
+      histories.current.delete(to.kind === 'spot' ? to.id : DRAFT)
+      commit(moved.lib)
+      go(moved.open)
+      setVersion((v) => v + 1)
     },
     /** Closes the open line, deleting nothing: a kept line stays where it is, drawn on the map. */
     close: () => {

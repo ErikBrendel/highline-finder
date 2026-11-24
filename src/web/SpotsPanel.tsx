@@ -4,7 +4,7 @@ import {
   defaultLineName, nearbySpots, parseExport, spotHash, spotTitle, titleOf, type ExportFile, type Spot,
 } from './spots.js'
 import { ShareButton } from './ShareButton.js'
-import type { Imported, Spots } from './useSpots.js'
+import type { Imported, MoveTarget, Spots } from './useSpots.js'
 import { failureText } from './report.js'
 import { useRemembered } from './remembered.js'
 
@@ -137,6 +137,45 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
   )
 }
 
+/**
+ * Where one line of a spot can go instead: the draft line, a spot of its own, or another spot,
+ * nearest first. Picking one moves it straight away; moving it back is the undo.
+ */
+function MoveTo({ spots, from, index }: { spots: Spots; from: Spot; index: number }) {
+  const moved = from.lines[index]!
+  const others = spots.lib.spots
+    .filter((s) => s.id !== from.id)
+    .map((s) => ({ s, metres: spanGeometry(moved.a, centreOf(s)).length }))
+    .sort((p, q) => p.metres - q.metres)
+  const targets: Record<string, MoveTarget> = {
+    draft: { kind: 'draft' },
+    own: { kind: 'own' },
+    ...Object.fromEntries(others.map(({ s }) => [s.id, { kind: 'spot', id: s.id }])),
+  }
+  return (
+    <select
+      className="move"
+      value=""
+      title="Move this line to the draft line, a spot of its own, or another spot"
+      onChange={(e) => {
+        const to = targets[e.target.value]
+        if (to) spots.moveLine(from.id, index, to)
+      }}
+    >
+      <option value="" disabled>move</option>
+      <option value="draft" disabled={!!spots.lib.draft}>
+        {spots.lib.draft ? 'to the draft line (save or discard yours first)' : 'to the draft line'}
+      </option>
+      {from.lines.length > 1 && <option value="own">to a spot of its own</option>}
+      {others.map(({ s, metres }) => (
+        <option key={s.id} value={s.id}>
+          to {spotTitle(s)}{s.secret ? ' (secret)' : ''} · {km(metres)}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 const SecretTag = () => <span className="secret">secret</span>
 
 function download(text: string) {
@@ -198,7 +237,7 @@ const importNote = (r: Exclude<Imported, 'password' | 'wrong password'>) =>
 
 const linkTo = (s: Spot) => `${location.origin}${location.pathname}#${spotHash(s)}`
 
-export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onLit, onFocus, onAddLine, onClose }: {
+export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onLit, onFocus, onClose }: {
   spots: Spots
   /** A link to the open line, which the address bar does not carry while it is a secret one. */
   lineUrl: () => string
@@ -210,7 +249,6 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
   onSaving: (on: boolean) => void
   onLit: (lit: Lit | null) => void
   onFocus: (spot: Spot) => void
-  onAddLine: () => void
   onClose: () => void
 }) {
   const [browsing, setBrowsing] = useState(false)
@@ -434,12 +472,10 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
               <span className="title">{titleOf(l.name) || 'Untitled'}</span>
               <span className="sub">{Math.round(spanGeometry(l.a, l.b).length)} m</span>
             </button>
+            {!isShared && !holding && <MoveTo spots={spots} from={spot} index={i} />}
             {!isShared && !holding && <Confirm label="&times;" sure="delete" onConfirm={() => spots.removeLine(spot.id, i)} />}
           </li>
         ))}
-        {at !== null && at >= spot.lines.length && (
-          <li><span className="placing">new line &mdash; place A and B on the map</span></li>
-        )}
       </ul>
       {!isShared && (
         <label className="check" title={secrets.shown ? undefined : 'Show secret spots first, from the top bar'}>
@@ -466,7 +502,6 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
       ) : (
         <>
           <div className="row">
-            <button onClick={onAddLine} disabled={holding} title="Place another line in this spot">+ line</button>
             <button onClick={spots.undo} disabled={!spots.canUndo} title="Undo (Ctrl+Z)">undo</button>
             <button onClick={spots.redo} disabled={!spots.canRedo} title="Redo (Ctrl+Shift+Z)">redo</button>
           </div>

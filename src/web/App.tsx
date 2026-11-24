@@ -25,7 +25,7 @@ import {
 } from './MapView.js'
 import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
 import { useSpots } from './useSpots.js'
-import { defaultLineName, spotFromHash, spotTitle, type Spot, type SpotLine } from './spots.js'
+import { defaultLineName, spotFromHash, type Spot, type SpotLine } from './spots.js'
 import { SpotsPanel, type Lit } from './SpotsPanel.js'
 import { SecretToggle } from './SecretToggle.js'
 import type { SavedDrawn } from './MapView.js'
@@ -1505,7 +1505,6 @@ export function App() {
             onSaving={setSaving}
             onLit={setLit}
             onFocus={focusOn}
-            onAddLine={() => setPlacing('a')}
             onClose={() => {
               setSpotsOpen(false)
               setSaving(false)
@@ -1718,7 +1717,6 @@ export function App() {
             title={
               placing ? 'Stop placing'
               : spots.holding ? 'Stop editing this line; it is saved as it is'
-              : spots.open.kind === 'spot' ? 'Place another line in this spot'
               : spots.lib.draft ? 'Place two anchors for a new draft line; the first one replaces the draft line you have (undo brings it back)'
               : 'Place two anchors on the map'
             }
@@ -1727,11 +1725,9 @@ export function App() {
               ? `Tap the map for point ${placing.toUpperCase()} — cancel`
               : spots.holding
                 ? 'Done editing'
-                : spots.open.kind === 'spot' && spots.spot
-                  ? `+ line in ${spotTitle(spots.spot)}`
-                  : spots.lib.draft
-                    ? 'Plan a new line (replaces draft)'
-                    : 'Plan a line'}
+                : spots.lib.draft
+                  ? 'Plan a new line (replaces draft)'
+                  : 'Plan a line'}
           </button>
 
           <CacheBadge />
