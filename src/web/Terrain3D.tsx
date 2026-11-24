@@ -261,13 +261,10 @@ export function Terrain3D({
   const [textured, setTextured] = useState(false)
 
   /**
-   * The anchor being placed by hand, and how far one press of an arrow moves it. Tapping an anchor
-   * brings the camera to it and offers steps: exact, and as small as a decimetre.
+   * The anchor looked at, and how far one press of an arrow moves it. Tapping an anchor brings the
+   * camera to it, and while editing offers steps: exact, and as small as a decimetre.
    */
   const [picked, setPicked] = useState<'a' | 'b' | null>(null)
-  useEffect(() => {
-    if (!onMoveAnchor) setPicked(null)
-  }, [!onMoveAnchor])
   const pickedRef = useRef(picked)
   pickedRef.current = picked
   const [step, setStep] = useState(0.5)
@@ -767,34 +764,38 @@ export function Terrain3D({
           &#x25b1;
         </button>
       )}
-      {state === 'ready' && picked && onMoveAnchor && (
-        <div className="nudge" role="group" aria-label={`Move anchor ${picked.toUpperCase()}`}>
+      {state === 'ready' && picked && (
+        <div className="nudge" role="group" aria-label={`Anchor ${picked.toUpperCase()}`}>
           <div className="which">
             {(['a', 'b'] as const).map((end) => (
               <button
                 key={end}
                 data-active={end === picked}
                 onClick={() => setPicked(end)}
-                aria-label={`Move anchor ${end.toUpperCase()}`}
+                aria-label={`Look at anchor ${end.toUpperCase()}`}
               >
                 {end.toUpperCase()}
               </button>
             ))}
           </div>
-          <div className="pad">
-            <button onClick={() => nudge(0, 1)} aria-label="Away from you" style={{ gridArea: 'up' }}>&#9650;</button>
-            <button onClick={() => nudge(-1, 0)} aria-label="Left" style={{ gridArea: 'left' }}>&#9664;</button>
-            <button onClick={() => nudge(1, 0)} aria-label="Right" style={{ gridArea: 'right' }}>&#9654;</button>
-            <button onClick={() => nudge(0, -1)} aria-label="Towards you" style={{ gridArea: 'down' }}>&#9660;</button>
-          </div>
-          <div className="steps">
-            {STEPS.map((m) => (
-              <button key={m} data-active={m === step} onClick={() => setStep(m)}>
-                {m < 1 ? `${m * 100} cm` : `${m} m`}
-              </button>
-            ))}
-          </div>
-          <button className="done" onClick={() => setPicked(null)}>done</button>
+          {onMoveAnchor && (
+            <>
+              <div className="pad">
+                <button onClick={() => nudge(0, 1)} aria-label="Away from you" style={{ gridArea: 'up' }}>&#9650;</button>
+                <button onClick={() => nudge(-1, 0)} aria-label="Left" style={{ gridArea: 'left' }}>&#9664;</button>
+                <button onClick={() => nudge(1, 0)} aria-label="Right" style={{ gridArea: 'right' }}>&#9654;</button>
+                <button onClick={() => nudge(0, -1)} aria-label="Towards you" style={{ gridArea: 'down' }}>&#9660;</button>
+              </div>
+              <div className="steps">
+                {STEPS.map((m) => (
+                  <button key={m} data-active={m === step} onClick={() => setStep(m)}>
+                    {m < 1 ? `${m * 100} cm` : `${m} m`}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          <button className="done" onClick={() => setPicked(null)}>{onMoveAnchor ? 'done' : 'back'}</button>
         </div>
       )}
       {state === 'ready' && (

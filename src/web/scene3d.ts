@@ -62,7 +62,7 @@ export interface SceneInput {
   /** Height to look at, so the camera frames the line rather than the middle of the sky. */
   lookAt: number
   exaggeration: number
-  /** Whether the anchors can be picked up now: asked on every touch, as editing comes and goes. */
+  /** Whether the anchors can be carried now: asked on every touch, as editing comes and goes. */
   movable: () => boolean
   /** Called when an anchor is tapped. */
   onAnchorTapped: (which: 0 | 1) => void
@@ -731,8 +731,9 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   controls.addEventListener('end', resumeLater)
 
   /**
-   * Tapping an anchor hands it to the step controls beside this view; once it is picked, it can
-   * also be dragged onto the ground, and a tap anywhere else lets it go again.
+   * Tapping an anchor brings the camera to it, and while editing hands it to the step controls
+   * beside this view; once it is picked, it can also be dragged onto the ground. A tap anywhere
+   * else lets it go again.
    *
    * An anchor is taken within a finger's width of where it is drawn, not by its few pixels of
    * sphere. Registered in the capture phase so a press on an anchor is decided before OrbitControls
@@ -797,7 +798,6 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   let hover: { x: number; y: number } | null = null
 
   const onDown = (ev: PointerEvent) => {
-    if (!input.movable()) return
     const which = anchorAt(ev.clientX, ev.clientY)
     if (which === null) {
       pressedElsewhere = { x: ev.clientX, y: ev.clientY }
@@ -815,10 +815,10 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
   const onMove = (ev: PointerEvent) => {
     // A larger ball in its own colour, and a cursor that changes, are what say an anchor can be
     // taken. Mouse only: a finger has no hover, and there is nothing to show it.
-    hover = ev.pointerType === 'mouse' && input.movable() ? { x: ev.clientX, y: ev.clientY } : null
+    hover = ev.pointerType === 'mouse' ? { x: ev.clientX, y: ev.clientY } : null
     if (!pressed) return
     ev.stopPropagation()
-    if (pressed.which !== focused || !input.onAnchorMoved) return
+    if (pressed.which !== focused || !input.movable()) return
     if (!dragging && Math.hypot(ev.clientX - pressed.x, ev.clientY - pressed.y) < TAP_SLOP_PX) return
     dragging = true
     hovered = pressed.which
@@ -948,7 +948,7 @@ export function createScene(canvas: HTMLCanvasElement, input: SceneInput): Scene
         if (under === null) resumeLater()
         else pause()
       }
-      canvas.style.cursor = under === null ? '' : under === focused && input.onAnchorMoved ? 'grab' : 'pointer'
+      canvas.style.cursor = under === null ? '' : under === focused && input.movable() ? 'grab' : 'pointer'
     }
     styleBalls(HOVER_EASE)
     controls.update()
