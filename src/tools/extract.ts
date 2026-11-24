@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { join } from 'node:path'
@@ -17,14 +17,17 @@ import { join } from 'node:path'
 
 const CACHE = new URL('../../data/cache/', import.meta.url).pathname
 const geofabrik = (state: string) =>
-  `https://download.geofabrik.de/europe/germany/${state}-latest.osm.pbf`
+  state === 'germany'
+    ? 'https://download.geofabrik.de/europe/germany-latest.osm.pbf'
+    : `https://download.geofabrik.de/europe/germany/${state}-latest.osm.pbf`
 
 export function extractPath(state: string): string {
   return join(CACHE, `${state}-latest.osm.pbf`)
 }
 
-export async function ensureExtract(state: string): Promise<string> {
+export async function ensureExtract(state: string, fresh = false): Promise<string> {
   const path = extractPath(state)
+  if (fresh) await rm(path, { force: true })
   try {
     const { size, mtime } = await stat(path)
     console.log(
@@ -40,7 +43,9 @@ export async function ensureExtract(state: string): Promise<string> {
   console.log(`${state}: downloading ${url}`)
   const res = await fetch(url, { headers: { 'User-Agent': 'highline-finder/0.1' } })
   if (!res.ok || !res.body) throw new Error(`${state}: extract download failed, HTTP ${res.status}`)
-  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(path))
+  // Into a side file first, so an interrupted download is never mistaken for a cached extract.
+  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(`${path}.part`))
+  await rename(`${path}.part`, path)
   console.log(`  ${((await stat(path)).size / 1048576).toFixed(0)} MB`)
   return path
 }

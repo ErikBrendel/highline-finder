@@ -15,29 +15,70 @@ import { ensureExtract, extractPath } from './extract.js'
  * the whole state, changes only when OpenStreetMap does, and its output is committed. Coupling them
  * would mean every parameter tweak re-read three hundred megabytes to produce identical bytes.
  *
- * What it costs: one 285 MB download, cached, and about a minute of work. What it buys: the
+ * What it costs: one 4.4 GB download, cached, and a quarter of an hour of work. What it buys: the
  * deployed site asks nothing of any third party at run time, and the pipeline and the browser read
  * the same bytes rather than querying the same service separately and disagreeing.
  *
+ * `npm run osm -- --fresh` downloads a new extract first; `npm run osm:upload` then publishes the
+ * result. The blocks are not committed: they live in data/osm/ here and in R2 for the site.
+ *
  * Three passes over the extract, which is cheaper than it sounds -- inflating the whole file takes
- * six seconds and the alternative is holding thirty million node positions.
+ * a minute and the alternative is holding four hundred million node positions.
  *
  *   1. ways and relations, keeping only what classifies as something a line must clear
  *   2. nodes, keeping only the positions those ways referred to
  *   3. assemble, project, block and write
  */
 
-const OUT = new URL('../web/public/osm/', import.meta.url).pathname
+const OUT = new URL('../../data/osm/', import.meta.url).pathname
 /**
- * Brandenburg only, deliberately.
- *
- * These blocks are shipped with the app, and roads are a hard constraint the *search* enforces --
- * so what is here is the ground the search covers. A planned line elsewhere is measured without
- * them and the panel says so; shipping the road network of every state a browser can fetch
- * elevation for would be tens of megabytes for the sake of a banner not appearing.
+ * All of Germany, because a line can be planned anywhere the elevation reaches, which is all of it.
+ * Anything less leaves a live fallback in the browser for the rest, and that fallback was a shared
+ * public service that is down often enough to read every lake outside the extract as dry ground.
  */
-const STATE = 'brandenburg'
+const STATE = 'germany'
 const PBF = extractPath(STATE)
+
+/**
+ * Node ids, gathered with repeats and then sorted and made unique.
+ *
+ * Typed rather than a Set: V8 caps a Set at 2^24 entries and Germany's roads and water refer to
+ * well over a hundred million nodes.
+ */
+class IdList {
+  private ids = new Float64Array(1 << 20)
+  private n = 0
+
+  push(id: number): void {
+    if (this.n === this.ids.length) {
+      const grown = new Float64Array(this.n * 2)
+      grown.set(this.ids)
+      this.ids = grown
+    }
+    this.ids[this.n++] = id
+  }
+
+  sortedUnique(): Float64Array {
+    const s = this.ids.subarray(0, this.n).sort()
+    let w = 0
+    for (let i = 0; i < s.length; i++) if (w === 0 || s[i] !== s[w - 1]) s[w++] = s[i]!
+    this.ids = new Float64Array(0)
+    return s.slice(0, w)
+  }
+}
+
+function indexOf(sorted: Float64Array, id: number): number {
+  let lo = 0
+  let hi = sorted.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1
+    const v = sorted[mid]!
+    if (v === id) return mid
+    if (v < id) lo = mid + 1
+    else hi = mid - 1
+  }
+  return -1
+}
 
 /** A way we intend to keep, with its classification already decided. */
 interface Kept {
@@ -120,7 +161,7 @@ const reverse = (pts: number[]): number[] => {
 
 async function main(): Promise<void> {
   const started = Date.now()
-  await ensureExtract(STATE)
+  await ensureExtract(STATE, process.argv.includes('--fresh'))
 
   /**
    * Relations first, on their own pass.
@@ -150,7 +191,7 @@ async function main(): Promise<void> {
       `(${waterRelations.filter((r) => r.inner.length).length.toLocaleString()} with islands)`,
   )
 
-  const kept = new Map<number, Kept>()
+  const kept: (Kept & { id: number })[] = []
   /** Geometry of relation members, which are outlines rather than features in their own right. */
   const memberRefs = new Map<number, number[]>()
   let ways = 0
@@ -159,36 +200,48 @@ async function main(): Promise<void> {
     (w) => {
       ways++
       const k = keep(w)
-      if (k) kept.set(w.id, k)
+      if (k) kept.push({ ...k, id: w.id })
       if (memberOf.has(w.id)) memberRefs.set(w.id, w.refs)
     },
     () => {},
   )
   console.log(
-    `  ${ways.toLocaleString()} ways read, ${kept.size.toLocaleString()} kept, ` +
+    `  ${ways.toLocaleString()} ways read, ${kept.length.toLocaleString()} kept, ` +
       `${memberRefs.size.toLocaleString()} outline members`,
   )
 
-  const wanted = new Set<number>()
-  for (const k of kept.values()) for (const ref of k.refs) wanted.add(ref)
-  for (const refs of memberRefs.values()) for (const ref of refs) wanted.add(ref)
-  console.log(`  ${wanted.size.toLocaleString()} node positions needed`)
+  const gathered = new IdList()
+  for (const k of kept) for (const ref of k.refs) gathered.push(ref)
+  for (const refs of memberRefs.values()) for (const ref of refs) gathered.push(ref)
+  const wanted = gathered.sortedUnique()
+  console.log(`  ${wanted.length.toLocaleString()} node positions needed`)
 
   console.log('[2/3] nodes')
-  // Projected on the way in: proj4 over ten million points is the expensive part of this script,
-  // and doing it here means it happens once per node rather than once per way that shares it.
-  const at = new Map<number, [number, number]>()
+  // Projected on the way in: proj4 over every point is the expensive part of this script, and
+  // doing it here means it happens once per node rather than once per way that shares it.
+  // Nodes arrive sorted by id, so one cursor walks `wanted` alongside them; that is checked rather
+  // than assumed, because an unsorted file would silently lose positions.
+  const pos = new Float64Array(wanted.length * 2).fill(NaN)
+  let cursor = 0
+  let last = -Infinity
+  let found = 0
   let outside = 0
   const seen = readNodes(PBF, (id, lat, lon) => {
-    if (!wanted.has(id)) return
+    if (id <= last) throw new Error(`nodes not sorted by id at ${id}`)
+    last = id
+    while (cursor < wanted.length && wanted[cursor]! < id) cursor++
+    if (wanted[cursor] !== id) return
     if (lat < 45 || lat > 60 || lon < 5 || lon > 25) {
       outside++
       return
     }
-    at.set(id, toUtm33(lat, lon))
+    const [e, n] = toUtm33(lat, lon)
+    pos[cursor * 2] = e
+    pos[cursor * 2 + 1] = n
+    found++
   })
   if (seen.plain) throw new Error(`${seen.plain} plain node groups: geometry would be incomplete`)
-  console.log(`  ${seen.dense.toLocaleString()} scanned, ${at.size.toLocaleString()} kept`)
+  console.log(`  ${seen.dense.toLocaleString()} scanned, ${found.toLocaleString()} kept`)
   if (outside) throw new Error(`${outside} nodes outside plausible bounds: the decode is wrong`)
 
   console.log('[3/3] blocks')
@@ -216,22 +269,23 @@ async function main(): Promise<void> {
   const geometryOf = (refs: number[]): number[] | null => {
     const pts: number[] = []
     for (const ref of refs) {
-      const p = at.get(ref)
-      if (!p) return null
-      pts.push(p[0], p[1])
+      const i = indexOf(wanted, ref)
+      if (i < 0 || Number.isNaN(pos[i * 2]!)) return null
+      pts.push(pos[i * 2]!, pos[i * 2 + 1]!)
     }
     return pts.length >= 4 ? pts : null
   }
 
   let incomplete = 0
-  for (const [id, k] of kept) {
+  for (const k of kept) {
     const pts = geometryOf(k.refs)
     if (!pts) {
       incomplete++
       continue
     }
-    add({ id, kind: k.kind, name: k.name, half: k.half, bridge: k.bridge, pts })
+    add({ id: k.id, kind: k.kind, name: k.name, half: k.half, bridge: k.bridge, pts })
   }
+  kept.length = 0
 
   let stitched = 0
   let islands = 0
@@ -271,20 +325,25 @@ async function main(): Promise<void> {
     }
   }
 
+  // The version names the directory the blocks are published under, so a browser holding blocks of
+  // one build in its cache can never mix them with another's index.
+  const generated = new Date().toISOString()
+  const version = generated.slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
   await rm(OUT, { recursive: true, force: true })
-  await mkdir(OUT, { recursive: true })
+  await mkdir(join(OUT, version), { recursive: true })
   let bytes = 0
   for (const [key, features] of blocks) {
     const packed = encodeBlock(key, features)
     bytes += packed.length
-    await writeFile(join(OUT, `${key}.bin`), packed)
+    await writeFile(join(OUT, version, `${key}.bin`), packed)
   }
   await writeFile(
     join(OUT, 'index.json'),
     JSON.stringify({
       block: BLOCK,
       source: `geofabrik ${STATE}`,
-      generated: new Date().toISOString(),
+      generated,
+      version,
       blocks: [...blocks.keys()].sort(),
     }),
   )
@@ -305,8 +364,8 @@ async function main(): Promise<void> {
   )
   console.log(`done in ${((Date.now() - started) / 1000).toFixed(1)}s`)
 
-  const listing = await readdir(OUT)
-  console.log(`${listing.length} files in src/web/public/osm/`)
+  const listing = await readdir(join(OUT, version))
+  console.log(`${listing.length} blocks in data/osm/${version}/`)
 }
 
 main().catch((e) => {

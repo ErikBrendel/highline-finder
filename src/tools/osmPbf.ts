@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import { inflateSync } from 'node:zlib'
 import { PbfReader } from 'pbf'
 
@@ -48,24 +48,37 @@ export const MEMBER_WAY = 1
 /**
  * Every OSMData blob in the file, inflated, one at a time.
  *
- * The whole file is read into one buffer and walked with a cursor rather than streamed. Streaming
+ * Each blob is read at its own position, exactly as long as its header says. Streaming in chunks
  * meant re-concatenating the pending bytes on every chunk, which is quadratic and turned a
- * six-second pass into one that had not finished after ten minutes. 285 MB in a Buffer sits off the
- * JS heap and costs nothing to hold; only one inflated block exists at a time, which is the part
- * that actually matters.
+ * six-second pass into one that had not finished after ten minutes; reading the whole file into one
+ * buffer stops at 2 GiB, and the Germany extract is twice that.
  */
 function* blocks(path: string): Generator<Uint8Array> {
-  const buf = readFileSync(path)
-  let at = 0
-  while (at + 4 <= buf.length) {
-    const headerLen = buf.readUInt32BE(at)
-    at += 4
-    const header = readBlobHeader(buf.subarray(at, at + headerLen))
-    at += headerLen
-    const blob = buf.subarray(at, at + header.size)
-    at += header.size
-    if (header.type === 'OSMData') yield inflateBlob(blob)
+  const fd = openSync(path, 'r')
+  try {
+    const size = fstatSync(fd).size
+    let at = 0
+    while (at + 4 <= size) {
+      const headerLen = readAt(fd, at, 4).readUInt32BE(0)
+      at += 4
+      const header = readBlobHeader(readAt(fd, at, headerLen))
+      at += headerLen
+      if (header.type === 'OSMData') yield inflateBlob(readAt(fd, at, header.size))
+      at += header.size
+    }
+  } finally {
+    closeSync(fd)
   }
+}
+
+function readAt(fd: number, position: number, length: number): Buffer {
+  const buf = Buffer.alloc(length)
+  for (let got = 0; got < length; ) {
+    const n = readSync(fd, buf, got, length - got, position + got)
+    if (!n) throw new Error(`PBF ends inside a blob at byte ${position}`)
+    got += n
+  }
+  return buf
 }
 
 /** BlobHeader: 1 = type (string), 3 = datasize (int32). */
