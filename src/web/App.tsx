@@ -1751,9 +1751,16 @@ export function App() {
             saved={savedDrawn}
             onOpenSaved={(spot, i) => {
               if (spots.holding) return
-              if (spot === 'draft') spots.openDraft()
-              else if (spot === 'shared') spots.openShared(i)
-              else spots.openLine(spot, i)
+              if (spot === 'draft') return spots.openDraft()
+              if (i !== null) return spot === 'shared' ? spots.openShared(i) : spots.openLine(spot, i)
+              const whole = spot === 'shared' ? spots.shared : spots.lib.spots.find((s) => s.id === spot)
+              if (!whole) return
+              if (spot === 'shared') spots.openShared(null)
+              else spots.openSpot(spot)
+              // Here and not left to the effect that follows the open spot: the map fits the spot
+              // into the room the panel leaves, so the panel has to be there in the same render.
+              setSpotsOpen(true)
+              focusOn(whole)
             }}
             focus={focus}
             onViewport={(b, z) => {

@@ -774,7 +774,8 @@ interface Props {
   onMoveAnchor: (which: 'a' | 'b', at: LatLon) => void
   /** The kept lines other than the one being planned, drawn faintly. */
   saved: SavedDrawn[]
-  onOpenSaved: (spot: string, line: number) => void
+  /** A line is null where the circle round a spot was clicked, which opens the spot itself. */
+  onOpenSaved: (spot: string, line: number | null) => void
   /** Where to fly to; a new key flies again. */
   focus: { bbox: [number, number, number, number]; key: number } | null
   onViewport: (bbox: [number, number, number, number], zoom: number) => void
@@ -1311,7 +1312,7 @@ export function MapView({
         m.on('click', id, (e) => {
           const f = e.features?.[0]
           if (f && spotClickable(m, f) && !placingRef.current.placing) {
-            onOpenSavedRef.current(String(f.properties!.spot), Number(f.properties!.line))
+            onOpenSavedRef.current(String(f.properties!.spot), id === 'saved' ? Number(f.properties!.line) : null)
           }
         })
         m.on('mousemove', id, (e) => {
@@ -1624,7 +1625,12 @@ export function MapView({
     if (!m || !ready || !focus) return
     const [south, west, north, east] = focus.bbox
     userMoved.current = true
-    m.fitBounds([[west, south], [east, north]], { padding: 80, maxZoom: 17, duration: 800 })
+    // The side panel may have opened in the same render, and the map only notices on its next
+    // frame: fitted before that, the spot would land off to one side of what is left of it.
+    m.resize()
+    // A fifth of the map round the spot on every side, so its lines are seen with their surroundings.
+    const padding = mapScreen(m) / 5
+    m.fitBounds([[west, south], [east, north]], { padding, maxZoom: 17, duration: 800 })
   }, [focus, ready])
 
   /**
