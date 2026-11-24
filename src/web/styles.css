@@ -763,6 +763,14 @@ header[data-measuring] .spacer { flex: none; }
     animation-duration: 1ms;
   }
 }
+/* The kept lines stay usable in the full view: beside it on a desk, over it on a phone. */
+.layout:has(.details[data-full='true']) .spots {
+  position: fixed; z-index: 21; left: 0; top: 0; bottom: 0;
+}
+@media (min-width: 721px) {
+  .layout:has(> .spots) .details[data-full='true'] { left: 280px; }
+}
+.details[data-full='true'] .head .close[data-active] { border-color: var(--accent); }
 .details[data-full='true'] .grip { display: none; }
 /* No padding above the head, because the head is the thing pinned to the top of this box: `top: 0`
    sticks to the padding edge, so any padding there is a strip of window that content scrolls up

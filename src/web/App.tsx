@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { LINE_KINDS } from '../shared/types.js'
 import type { Pos } from '../shared/grid.js'
 import { withSpan } from '../shared/roads.js'
@@ -971,8 +971,18 @@ export function App() {
   const editButton = (label: string, title: string) => (
     <button className="keep" data-edit="true" onClick={() => spots.edit(line)} title={title}>{label}</button>
   )
+  const spotsToggle = (className: string, label: ReactNode) => (
+    <button
+      className={className}
+      data-active={spotsOpen || undefined}
+      onClick={() => setSpotsOpen(!spotsOpen)}
+      title="Lines you have kept"
+    >
+      {label}
+    </button>
+  )
   /** The card's buttons for keeping and changing the line, which depend on where it lives. */
-  const keep = (() => {
+  const placeButtons = (() => {
     const o = spots.open
     if (o.kind === 'draft') {
       return (
@@ -1007,6 +1017,13 @@ export function App() {
       </>
     )
   })()
+  // The full view covers the header, and with it the header's way to the kept lines.
+  const keep = (
+    <>
+      {placeButtons}
+      {full && spotsToggle('close', 'my lines')}
+    </>
+  )
 
   /** Dragging an anchor handle. */
   const moveAnchor = (which: 'a' | 'b', at: LatLon) => {
@@ -1454,14 +1471,7 @@ export function App() {
         >
           <Label full="GitHub ↗" short="GH ↗" />
         </a>
-        <button
-          className="spotsbtn"
-          data-active={spotsOpen || undefined}
-          onClick={() => setSpotsOpen(!spotsOpen)}
-          title="Lines you have kept"
-        >
-          <Label full={`My lines${spots.lib.spots.length ? ` (${spots.lib.spots.length})` : ''}`} short="Mine" />
-        </button>
+        {spotsToggle('spotsbtn', <Label full={`My lines${spots.lib.spots.length ? ` (${spots.lib.spots.length})` : ''}`} short="Mine" />)}
         <ShareButton className="share" />
         <button
           className="guidebtn"
