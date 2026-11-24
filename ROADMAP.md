@@ -706,7 +706,12 @@ The cost is that land cover is a snapshot: a gap is fixed by rebuilding and re-u
 query.
 
 **Spending.** R2 and Workers bill past the free tier automatically once a payment method is on the
-account. Alerts and a guard on `/osm/` requests are still to be set up.
+account, and Cloudflare's hard spending limits cover Workers but not R2. They do not need to: the
+bucket has no public access, so every read goes through the Worker and costs at most one Class B
+operation. Workers Free stops at 100,000 requests a day, about 3 million a month, against R2's 10
+million free reads. Storage is two builds, about 1 GB of the free 10 GB, and an upload is about 6,200
+of the free million writes. On Workers Paid the same holds once a Workers spending limit is set.
+A budget alert on the account reports anything else.
 
 ### A Worker for CORS, and for nothing else
 
