@@ -439,7 +439,9 @@ export function App() {
   /** The card is the open line: there is one exactly when a line is open, and closing it closes the line. */
   const open = !!line.a && !!line.b
   const [spotsOpen, setSpotsOpen] = useRemembered('highline-finder.spotsopen', false)
-  const activeName = spots.active?.name ?? (spots.open.kind === 'found' ? spots.open.name : null)
+  // A spot of one line is called by the spot's name, and so is a link to its line.
+  const single = spots.spot?.lines.length === 1 ? spots.spot : null
+  const activeName = (single && spots.active ? single.name : spots.active?.name) ?? (spots.open.kind === 'found' ? spots.open.name : null)
   const ownName = activeName && line.a && line.b && activeName !== defaultLineName(line.a, line.b) ? activeName : null
   const [saving, setSaving] = useState(false)
   const [lit, setLit] = useState<Lit | null>(null)

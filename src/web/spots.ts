@@ -65,9 +65,12 @@ export const opened = (lib: Library, known: Map<string, Spot>): Library => ({
 
 export const titleOf = (text: string) => text.split('\n')[0]!.trim()
 
+/**
+ * A spot is called by its own name. Its lines' names are only shown once it holds more than one:
+ * a spot of one line is that line, and the name given when it was saved is the spot's.
+ */
 export function spotTitle(s: Spot): string {
-  const own = s.lines.length > 1 ? titleOf(s.name) : ''
-  return own || titleOf(s.lines[0]?.name ?? '') || 'Untitled'
+  return titleOf(s.name) || titleOf(s.lines[0]?.name ?? '') || 'Untitled'
 }
 
 export const defaultLineName = (a: LatLon, b: LatLon) => `${Math.round(spanGeometry(a, b).length)} m line`
@@ -125,13 +128,7 @@ export function merged(mine: Spot[], incoming: Spot[]): { spots: Spot[]; added: 
       out.push(spot)
       continue
     }
-    const single = spot.lines.length === 1
-    out.push({
-      ...spot,
-      id: newId(),
-      name: single ? spot.name : retitled(spot.name || spotTitle(spot), ' (imported)'),
-      lines: single ? [{ ...spot.lines[0]!, name: retitled(spot.lines[0]!.name, ' (imported)') }] : spot.lines,
-    })
+    out.push({ ...spot, id: newId(), name: retitled(spot.name || spotTitle(spot), ' (imported)') })
   }
   return { spots: out, added }
 }

@@ -82,24 +82,19 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
   const [name, setName] = useState(named ?? defaultLineName(line.a, line.b))
   const [into, setInto] = useState<string | null>(nearby.length === 1 ? nearby[0]!.spot.id : null)
   const target = nearby.find((n) => n.spot.id === into)?.spot
-  const needsSpotName = !!target && target.lines.length === 1 && !titleOf(target.name)
-  const [spotName, setSpotName] = useState('')
   const [secretChoice, setSecret] = useRemembered('highline-finder.save-secret', false)
   const canSecret = spots.secrets.shown
   const secret = secretChoice && canSecret
-  useEffect(() => {
-    if (needsSpotName) setSpotName(titleOf(target.lines[0]!.name))
-  }, [needsSpotName, target])
 
   const save = () => {
-    spots.save({ into, lineName: name, spotName: needsSpotName ? spotName : undefined, secret }, line)
+    spots.save({ into, name, secret }, line)
     onDone()
   }
 
   return (
     <div className="savesheet">
       <label>
-        Name
+        {target ? 'Name of the line' : 'Name of the spot'}
         <Grow value={name} onChange={setName} placeholder="Name, and notes under it" onEnter={save} autoFocus />
       </label>
       {nearby.length > 0 && (
@@ -116,12 +111,6 @@ function SaveSheet({ spots, line, onDone }: { spots: Spots; line: LineSpec & { a
             On its own
           </label>
         </div>
-      )}
-      {needsSpotName && (
-        <label>
-          Name for the spot, now it holds more than one line
-          <Grow value={spotName} onChange={setSpotName} placeholder="Spot name" onEnter={save} />
-        </label>
       )}
       {!target && (
         <label className="check" title={canSecret ? undefined : 'Show secret spots first, from the top bar'}>
@@ -452,7 +441,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
   return (
     <aside className="spots">
       {head(spotTitle(spot), () => setBrowsing(true), isShared ? 'shared, not saved' : undefined)}
-      {!isShared && spot.lines.length > 1 && (
+      {!isShared && (
         <label className="spotname">
           Spot
           <Grow value={spot.name} onChange={(v) => spots.renameSpot(spot.id, v)} placeholder="Name of this spot" />
@@ -488,7 +477,7 @@ export function SpotsPanel({ spots, line, lineUrl, centre, saving, onSaving, onL
           Secret spot <span className="sub">&mdash; hidden unless secret spots are shown</span>
         </label>
       )}
-      {active && !isShared && (
+      {active && !isShared && spot.lines.length > 1 && (
         <label className="linename">
           Line
           <Grow value={active.name} onChange={spots.renameActive} placeholder="Name, and notes under it" />

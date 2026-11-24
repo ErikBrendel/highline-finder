@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   exportText, merged, nearbySpots, opened, parseExport, rebased, sealedForm, spotFromHash, spotHash, spotOfText,
-  spotText, type Spot, type SpotLine,
+  spotText, spotTitle, type Spot, type SpotLine,
 } from './spots.js'
-import { movedLine, reopened, startingPoint, visibleOf } from './useSpots.js'
+import { joined, movedLine, reopened, startingPoint, visibleOf } from './useSpots.js'
 import { newVault, openVault, seal, unseal } from './vault.js'
 
 const line = (lat: number, name = 'a line'): SpotLine => ({
@@ -22,7 +22,7 @@ describe('merged', () => {
     const theirs = [spot('s1', line(52)), spot('s2', line(53, 'theirs')), spot('s3', line(54))]
     const { spots, added } = merged(mine, theirs)
     expect(added).toBe(2)
-    expect(spots.map((s) => s.lines[0]!.name)).toEqual(['a line', 'mine', 'theirs (imported)', 'a line'])
+    expect(spots.map(spotTitle)).toEqual(['a line', 'mine', 'theirs (imported)', 'a line'])
     expect(new Set(spots.map((s) => s.id)).size).toBe(4)
   })
 
@@ -177,5 +177,14 @@ describe('movedLine', () => {
   it('gives a line a spot of its own, as secret as the one it left', () => {
     const out = movedLine({ ...lib, spots: [{ ...lib.spots[0]!, secret: true }] }, 's1', 1, { kind: 'own' })!
     expect(out.lib.spots.map((s) => [s.lines.map((l) => l.id), s.secret])).toEqual([[['l52'], true], [['l53'], true]])
+  })
+})
+
+describe('joined', () => {
+  it('keeps the spot its name, and moves an old single line\'s name up to the spot', () => {
+    const named = { ...spot('s1', line(52, '61 m line')), name: 'Crag' }
+    expect(joined(named, line(53)).name).toBe('Crag')
+    const old = joined(spot('s1', line(52, 'Quarry')), line(53))
+    expect([old.name, old.lines[0]!.name]).toEqual(['Quarry', '111 m line'])
   })
 })
