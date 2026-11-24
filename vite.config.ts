@@ -13,7 +13,10 @@ const devFavicon: Plugin = {
 }
 
 export default defineConfig({
-  plugins: [devFavicon],
+  // React's plugin is what gives the dev server Fast Refresh: an edit swaps the changed components
+  // in and keeps their state -- the open line, the secret spots shown -- where without it every
+  // save reloaded the page.
+  plugins: [react(), devFavicon],
   /**
    * The surveys that answer a cross-origin request only for an `https://` origin, fetched by the dev
    * server on the browser's behalf. Rather than put the whole dev server behind a self-signed
