@@ -130,6 +130,24 @@ function RigCalculator({ pct, lengthM, onPlan, onClose }: {
             </tbody>
           </table>
 
+          <h3>What sets it</h3>
+          <ul>
+            <li>
+              <b>Pretension and span</b> do most of it. Longer lines are rigged tighter, so the
+              default falls from about 8 % at 50 m to about 3 % from 600 m.
+            </li>
+            <li>
+              <b>Material</b> barely does once the pretension is set. Makers give Dyneema, hybrid,
+              Vectran and polyester webbings overlapping tension ranges (Balance: 1-4.5 kN for Blue
+              and Spider Silk MK4/MK5, 1.5-6 kN for Mantra), and over those ranges their leash falls
+              overlap almost completely.
+            </li>
+            <li>
+              <b>Nylon</b> is the exception: rigged softer (about 2 kN) and stretchier, it falls
+              roughly half as deep again. It is a short-line webbing, sold for lines up to about 250 m.
+            </li>
+          </ul>
+
           <h3>Webbings</h3>
           <p>
             Stretch as the retailer publishes it. The last column is the leash fall at the pretension,
