@@ -4,8 +4,9 @@
  * The line view has one number for all of this, the fall depth as a fraction of span, and this is
  * what turns a rig into it. A point load at midspan on a webbing of known stretch: walking is the
  * static balance, a leash fall and a backup fall are energy balances with nothing lost, so both
- * are worst cases -- real webbing turns part of a fall into heat. The webbing's own weight is left
- * out, which on a 500 m line hides roughly another percent of span.
+ * are worst cases -- real webbing turns part of a fall into heat. The webbing's own weight counts as
+ * half of it hung at midspan, which sags a uniform load exactly as far as a point load would; it is
+ * what puts the 100 m of sag into a 2.5 km line at 2.5 kN.
  *
  * Forces are kN, lengths metres, stretch a fraction.
  */
@@ -160,16 +161,58 @@ export function depths(r: Rig): Depths {
   const { curve } = r.webbing
   const w = weightKn(r.walkerKg)
   const L = r.lengthM
+  const own = weightKn((r.webbing.gPerM * L) / 1000) / 2
   // The span is rigged at pretension, so its relaxed length is the span less that stretch.
   const mainRest = L / (1 + strainAt(curve, r.pretensionKn))
-  const main = (s: number) => lift(curve, L, mainRest, s)
+  const main = (s: number) => lift(curve, L, mainRest, s) - own
   const walking = bisect(0, L, (s) => main(s) >= w)
   // The harness falls from above the webbing to a leash's length below it.
   const drop = HARNESS_ABOVE_M + LEASH_M - walking
   const leashFall = caught(main, w, drop, walking, L)
   // The mainline is gone and takes its energy with it. A backup short enough to be taut where the
   // walker stood was already carrying some of them, and gives that back too.
-  const backup = (s: number) => lift(curve, L, L + r.backupSlackM, s)
+  const backup = (s: number) => lift(curve, L, L + r.backupSlackM, s) - own
   const backupFall = caught(backup, w, drop, walking, L)
   return { walking, leashFall, backupFall }
+}
+
+/**
+ * Pretension a line of this span is commonly rigged at, kN.
+ *
+ * Measured only at the short end: 1.4-2.4 kN on 39-65 m lines (Slacktivity). Past that it is
+ * pieced together -- grips are rated to 6 kN on longline webbing, polyester records at 110-140 m
+ * ran at 9-12 kN, LineGrip puts lines over 500 m at 13-20 kN -- so the middle is an estimate.
+ */
+const PRETENSION: [number, number][] = [[50, 2], [100, 2.5], [250, 6], [600, 12]]
+
+export function referencePretension(lengthM: number): number {
+  const i = PRETENSION.findIndex(([l]) => l >= lengthM)
+  if (i === 0) return PRETENSION[0]![1]
+  if (i < 0) return PRETENSION[PRETENSION.length - 1]![1]
+  const [l0, t0] = PRETENSION[i - 1]!
+  const [l1, t1] = PRETENSION[i]!
+  return t0 + ((t1 - t0) * (lengthM - l0)) / (l1 - l0)
+}
+
+export const REFERENCE_WEBBING = WEBBINGS[0]!
+export const REFERENCE_WALKER_KG = 80
+
+const defaults = new Map<number, number>()
+
+/**
+ * The fall depth a line starts at, % of span: a leash fall on the reference webbing at the
+ * pretension its span is commonly rigged at.
+ */
+export function defaultFallDepthPct(lengthM: number): number {
+  const key = Math.max(10, Math.round(lengthM / 10) * 10)
+  let pct = defaults.get(key)
+  if (pct === undefined) {
+    const { leashFall } = depths({
+      webbing: REFERENCE_WEBBING, pretensionKn: referencePretension(key), walkerKg: REFERENCE_WALKER_KG,
+      lengthM: key, backupSlackM: 0,
+    })
+    pct = Math.round((200 * leashFall) / key) / 2
+    defaults.set(key, pct)
+  }
+  return pct
 }

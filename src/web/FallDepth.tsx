@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { depths, HARNESS_ABOVE_M, LEASH_M, WEBBINGS, type Rig } from './rig.js'
+import {
+  depths, HARNESS_ABOVE_M, LEASH_M, REFERENCE_WALKER_KG, REFERENCE_WEBBING, referencePretension, WEBBINGS, type Rig,
+} from './rig.js'
 import { Slider } from './Slider.js'
 
 const MAX_PCT = 25
@@ -56,9 +58,9 @@ function RigCalculator({ pct, lengthM, onPlan, onClose }: {
   onClose: () => void
 }) {
   const start = Math.round(lengthM ?? 150)
-  const [webbing, setWebbing] = useState(WEBBINGS[0]!)
-  const [pretensionKn, setPretension] = useState(1.5)
-  const [walkerKg, setWalker] = useState(80)
+  const [webbing, setWebbing] = useState(REFERENCE_WEBBING)
+  const [pretensionKn, setPretension] = useState(Math.round(referencePretension(start) * 2) / 2)
+  const [walkerKg, setWalker] = useState(REFERENCE_WALKER_KG)
   const [length, setLength] = useState(start)
   const [slack, setSlack] = useState(Math.max(1, Math.round(start * 0.02)))
 
@@ -95,6 +97,12 @@ function RigCalculator({ pct, lengthM, onPlan, onClose }: {
             hanging under it. Yours is at <b>{pct.toFixed(1)} %</b>. Describe a rig here to see what
             it should be.
           </p>
+          <p>
+            A line starts at the leash fall of {REFERENCE_WEBBING.name} at the pretension its span is
+            usually rigged at, which is where this opens: about 2 kN for 50 m lines, 6 kN at 250 m
+            and 12 kN from 600 m. Only the short end is measured; the rest is pieced together from
+            grip ratings, record reports and LineGrip's figures for lines over 500 m.
+          </p>
 
           <label className="rigpick">
             <span>Webbing</span>
@@ -104,7 +112,7 @@ function RigCalculator({ pct, lengthM, onPlan, onClose }: {
               ))}
             </select>
           </label>
-          <Slider label="Pretension" value={pretensionKn} min={0.5} max={6} step={0.1} unit=" kN" format={(v) => v.toFixed(1)} onChange={setPretension} />
+          <Slider label="Pretension" value={pretensionKn} min={0.5} max={20} step={0.5} unit=" kN" format={(v) => v.toFixed(1)} onChange={setPretension} />
           <Slider label="Walker" value={walkerKg} min={40} max={120} step={1} unit=" kg" onChange={setWalker} />
           <Slider label="Span" value={length} min={20} max={1500} step={10} unit=" m" onChange={setLength} />
           <Slider label="Backup slack" value={slack} min={0} max={Math.max(10, Math.round(length * 0.08))} step={0.5} unit=" m longer than span" onChange={setSlack} />
@@ -162,7 +170,8 @@ function RigCalculator({ pct, lengthM, onPlan, onClose }: {
               10 kN against the 3.8 % listed here.
             </li>
             <li>
-              The webbing's own weight is left out: about another percent of span at 500 m.
+              The webbing's own weight counts as half of it hung at midspan, which is exact for the
+              sag and rough for the falls.
             </li>
             <li>
               The backup is taken to be the same webbing as the mainline, and the line a single

@@ -22,7 +22,8 @@ import { DEFAULT_PARAMS } from '../pipeline/params.js'
 import { DEV_MODE } from './devMode.js'
 import { MapView, type TileLayer } from './MapView.js'
 import { BASEMAPS, DEBUG_COLORS, LINES_FROM, MIX_MAX, SAME_VINTAGE_MS } from './mapStyle.js'
-import { NO_LINE, place, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
+import { defaultFallDepthPct } from './rig.js'
+import { NO_LINE, place, spanGeometry, type CustomPoints, type LatLon, type LineSpec } from './planPoints.js'
 import { useSpots } from './useSpots.js'
 import { spotFromHash, type Spot, type SpotLine } from './spots.js'
 import { SpotsPanel, type Lit } from './SpotsPanel.js'
@@ -63,11 +64,11 @@ import { emitProbes } from './probeOverlay.js'
 const SAG_MIN_PCT = 1
 
 /**
- * The fall depth a line is measured at until someone says otherwise: a leash fall on a stiff
- * longline webbing at a common pretension, which lands between 7 and 10 % of span on 50-500 m
- * lines in the rig calculator. A walking-only number would hide the case people actually plan for.
+ * The fall depth a line starts at until someone sets one: a leash fall of the rig its span is
+ * commonly walked on, from the rig calculator. Without a span yet, a mid-length line's.
  */
-const FALL_DEPTH_PCT = 9
+const fallDepthFor = (a: LatLon | null, b: LatLon | null) =>
+  defaultFallDepthPct(a && b ? spanGeometry(a, b).length : 150)
 
 /** How far from the middle of the open line another kept line may be and still share its 3D view. */
 const COMPANION_REACH = 500
@@ -604,7 +605,7 @@ export function App() {
    * the way the search measured it; the current defaults otherwise, with no file to wait for.
    */
   const params: Params | null = DEV_MODE ? (meta?.params ?? null) : DEFAULT_PARAMS
-  const sagDefault = params ? FALL_DEPTH_PCT : null
+  const sagDefault = params ? fallDepthFor(line.a, line.b) : null
   const sagPct = sagDefault === null ? line.sag : Math.max(SAG_MIN_PCT, line.sag ?? sagDefault)
   const setSagPct = (pct: number) => setLine((l) => ({ ...l, sag: changed(pct, sagDefault) }))
   const setRig = (r: RigHeights | null) => {
@@ -894,10 +895,11 @@ export function App() {
     }
   }, [companionLines, params])
   const companions = useMemo(() => {
-    if (!params || sagDefault === null) return []
+    if (!params) return []
     void terrainVersion
     return companionLines.flatMap((c) => {
-      const sag = Math.max(SAG_MIN_PCT, c.sag ?? sagDefault) / 100
+      const span = Math.hypot(c.b.e - c.a.e, c.b.n - c.a.n)
+      const sag = Math.max(SAG_MIN_PCT, c.sag ?? defaultFallDepthPct(span)) / 100
       const measured = planLine(c.a, c.b, groundSampler, surfaceSampler, sag, params, c.rig, { roofs, water }, {
         tolerateGaps: true,
       })
@@ -909,7 +911,7 @@ export function App() {
         noFall: measured.noFall.map((z): [number, number] => [z.from / m.length, z.to / m.length]),
       }]
     })
-  }, [companionLines, params, sagDefault, terrainVersion])
+  }, [companionLines, params, terrainVersion])
 
   /**
    * A placed line with no measurement yet. The details panel renders regardless, blank and with a

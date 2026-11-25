@@ -77,9 +77,10 @@ anchors only, one AOI, static viewer.
 
 - **Real sag in the search.** The line view now takes one fall depth (% of span) and the rig
   calculator behind its "?" (`src/web/rig.ts`) derives it from webbing curve, pretension, walker and
-  backup slack. Still missing: the webbing's own weight (about a percent at 500 m), segmented lines,
-  a backup of a different webbing, and generating the dataset at the shallowest depth a rig can
-  give (about 4 %) rather than 5 %.
+  backup slack, and a line's default is the leash fall of a reference rig at its span. Still
+  missing: measured pretensions for 100 m - 1 km (the reference curve in `rig.ts` is pieced
+  together there), segmented lines, a backup of a different webbing, and generating the dataset at
+  the shallowest default (about 3 %) rather than 5 %.
 - **The "low highline" backup check.** ISA 2017 requires that where height is less than length —
   which is every candidate this tool finds — the backup be tensioned enough that a mainline failure
   does not put the walker on the ground. That is computable from span, height and backup slack, and
