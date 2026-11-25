@@ -75,13 +75,11 @@ anchors only, one AOI, static viewer.
   the two be set independently, since "how much sag I rig at" and "how much side excursion I want
   cleared" are separate appetites for risk.
 
-- **Real sag.** Replace the flat fraction-of-span constant with a catenary under tension,
-  parameterised by webbing, pretension and walker mass, and evaluate the worst load case rather
-  than assuming midspan. Balance Community's relation `S = W·L/(4·T)` gives ~7.9 % for 100 m at
-  2.5 kN and ~6.5 % for 275 m at 3 kN with an 80 kg walker, so a constant fraction is the wrong
-  *shape*, not just the wrong number — a real model would let sag fall with length at constant
-  tension, and expose tension rather than sag as the control.
-  <https://www.balancecommunity.com/pages/tension-calculator>
+- **Real sag in the search.** The line view now takes one fall depth (% of span) and the rig
+  calculator behind its "?" (`src/web/rig.ts`) derives it from webbing curve, pretension, walker and
+  backup slack. Still missing: the webbing's own weight (about a percent at 500 m), segmented lines,
+  a backup of a different webbing, and generating the dataset at the shallowest depth a rig can
+  give (about 4 %) rather than 5 %.
 - **The "low highline" backup check.** ISA 2017 requires that where height is less than length —
   which is every candidate this tool finds — the backup be tensioned enough that a mainline failure
   does not put the walker on the ground. That is computable from span, height and backup slack, and

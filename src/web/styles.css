@@ -1609,15 +1609,26 @@ header .spotsbtn[data-active] { background: var(--panel-2); }
   font-size: 10px; font-weight: 600; line-height: 1; cursor: pointer; vertical-align: 1px;
 }
 .helpbtn:hover, .helpbtn[aria-expanded='true'] { color: var(--accent); border-color: var(--accent); }
-.sliderhelp {
-  margin-top: 6px; padding: 8px 10px;
-  font-size: 11px; line-height: 1.5; color: var(--muted);
-  background: var(--panel-2); border-radius: 6px;
-}
-.sliderhelp p { margin: 0 0 6px; }
-.sliderhelp b { color: var(--text); }
-.sliderhelp table { border-collapse: collapse; margin-bottom: 6px; }
-.sliderhelp td { padding: 1px 8px 1px 0; vertical-align: top; }
-.sliderhelp td:not(:last-child) { white-space: nowrap; color: var(--text); font-variant-numeric: tabular-nums; }
-.sliderhelp ul { margin: 0; padding-left: 16px; }
-.sliderhelp a { color: var(--accent); }
+
+.rigcalc { width: min(760px, 100%); animation: guide-fade 170ms ease-out; }
+.rigcalc .body { overflow-y: auto; font-size: 12px; line-height: 1.5; }
+.rigcalc h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 16px 0 6px; }
+.rigcalc p { margin: 0 0 10px; }
+.rigcalc ul { margin: 0; padding-left: 18px; color: var(--muted); }
+.rigcalc a { color: var(--accent); }
+.rigpick { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 12px; }
+.rigpick select { flex: 1; min-width: 0; max-width: 340px; font: inherit; }
+.rigcases { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.rigcases td { padding: 6px 8px 6px 0; border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.rigcases td span { color: var(--muted); font-size: 11px; }
+.rigcases td:last-child { text-align: right; }
+.rigcases td:nth-child(2), .rigcases td:nth-child(3), .rigcases button { white-space: nowrap; }
+.rigcases button { font: inherit; font-size: 11px; padding: 3px 8px; border: 1px solid var(--accent); border-radius: 4px; background: transparent; color: var(--accent); cursor: pointer; }
+.rigtablewrap { overflow-x: auto; }
+.rigwebbings { width: 100%; border-collapse: collapse; font-size: 11px; }
+.rigwebbings th { text-align: left; font-weight: 600; color: var(--muted); padding: 4px 8px 4px 0; }
+.rigwebbings td { padding: 4px 8px 4px 0; border-top: 1px solid var(--border); vertical-align: top; }
+.rigwebbings td span { color: var(--muted); }
+.rigwebbings td:nth-child(3), .rigwebbings td:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rigwebbings tr { cursor: pointer; }
+.rigwebbings tr[data-active] td { background: var(--panel-2); }

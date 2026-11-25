@@ -7,7 +7,7 @@ import type { Cover } from './landcover.js'
 import type { Canopy } from './terrain.js'
 import { ProfileChart, type Wings } from './ProfileChart.js'
 import { CHART_NARROW, CHART_WIDE } from './profileShape.js'
-import { SagHelp } from './SagHelp.js'
+import { FallDepthSlider } from './FallDepth.js'
 import { Slider, type SliderBand } from './Slider.js'
 import {
   NEIGHBOURHOOD,
@@ -609,7 +609,7 @@ export function Details({
           <span className="sub">
             {c && Number.isFinite(c.score) ? (
               <>
-                {c.exposure.toFixed(0)} m air &middot; midspan sag {c.sag.toFixed(1)} m
+                {c.exposure.toFixed(0)} m air &middot; fall depth {c.sag.toFixed(1)} m
                 &middot; offlevel {c.offLevel.toFixed(1)} m (
                 {(c.offLevelRatio * 100).toFixed(1)} %)
               </>
@@ -673,17 +673,7 @@ export function Details({
             more than a duplicate. Here there is room, and this is where the answer it changes is. */}
         {full && sag && (
           <div className="sagbar">
-            <Slider
-              label="Midspan sag"
-              value={sag.pct}
-              min={sag.floor}
-              max={10}
-              step={0.5}
-              unit=" % of span"
-              format={(v) => v.toFixed(1)}
-              help={<SagHelp pct={sag.pct} />}
-              onChange={onSag}
-            />
+            <FallDepthSlider value={sag.pct} min={sag.floor} lengthM={c?.length ?? null} onChange={onSag} />
           </div>
         )}
 
@@ -747,7 +737,7 @@ export function Details({
             <span><i style={{ background: 'var(--water)' }} />water (OSM)</span>
             <span><i style={{ background: 'var(--road)' }} />road or rail crossed (OSM)</span>
             <span><i className="dashed" style={{ borderColor: 'var(--road)' }} />clearance required</span>
-            <span><i style={{ background: 'var(--line)' }} />line with sag</span>
+            <span><i style={{ background: 'var(--line)' }} />line at fall depth</span>
             <span><i style={{ background: 'var(--nofall)' }} />no-fall zone: a fall would reach the ground</span>
           </div>
         </div>

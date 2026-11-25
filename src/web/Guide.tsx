@@ -63,7 +63,7 @@ const LineGuide = () => (
 
     <h2><span className="ico">🎚️</span>What you can change</h2>
     <ul>
-      <li><b>Sag</b> and the <b>rig height</b> at each end. Everything re-measures as you move them.</li>
+      <li><b>Fall depth</b> and the <b>rig height</b> at each end. Everything re-measures as you move them.</li>
       <li>Drag either anchor to move the span itself.</li>
       <li>The address bar follows all of it, so <b>share</b> sends exactly what you are looking at.</li>
     </ul>
@@ -98,7 +98,7 @@ const PlannerGuide = () => (
       </li>
       <li>Drag either anchor to move it. The profile re-measures as it moves.</li>
       <li>
-        <b>Sag</b> and the <b>rig height</b> at each end are in the line&rsquo;s panel;{' '}
+        <b>Fall depth</b> and the <b>rig height</b> at each end are in the line&rsquo;s panel;{' '}
         <b>optimise</b> walks both anchors to a better spot nearby.
       </li>
     </ul>
@@ -175,7 +175,7 @@ const MapGuide = ({ regions }: { regions: Region[] | null }) => (
 
     <h2><span className="ico">🎚️</span>Filters</h2>
     <ul>
-      <li><b>Sag</b> re-measures every line against the terrain.</li>
+      <li><b>Fall depth</b> re-measures every line against the terrain.</li>
       <li>Use score, length, exposure, canopy and offlevel to narrow the results.</li>
     </ul>
 

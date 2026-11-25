@@ -47,7 +47,7 @@ import { useRemembered } from './remembered.js'
 import { watchLocation, type Fix } from './locate.js'
 import { overlaps, touches, type Bbox } from './inView.js'
 import { failureText, report } from './report.js'
-import { SagHelp } from './SagHelp.js'
+import { FallDepthSlider } from './FallDepth.js'
 import { RangeSlider, Slider } from './Slider.js'
 import { cacheStats, clearTileCache } from './tileCache.js'
 import { changed, FILTER_DEFAULTS, movedFilters, parseUrl, toSearch } from './urlState.js'
@@ -61,6 +61,13 @@ import { emitProbes } from './probeOverlay.js'
  * the found lines are bound to the sag the dataset was generated at -- see `rescored`.
  */
 const SAG_MIN_PCT = 1
+
+/**
+ * The fall depth a line is measured at until someone says otherwise: a leash fall on a stiff
+ * longline webbing at a common pretension, which lands between 7 and 10 % of span on 50-500 m
+ * lines in the rig calculator. A walking-only number would hide the case people actually plan for.
+ */
+const FALL_DEPTH_PCT = 9
 
 /** How far from the middle of the open line another kept line may be and still share its 3D view. */
 const COMPANION_REACH = 500
@@ -597,7 +604,7 @@ export function App() {
    * the way the search measured it; the current defaults otherwise, with no file to wait for.
    */
   const params: Params | null = DEV_MODE ? (meta?.params ?? null) : DEFAULT_PARAMS
-  const sagDefault = params ? params.sagRatio * 100 : null
+  const sagDefault = params ? FALL_DEPTH_PCT : null
   const sagPct = sagDefault === null ? line.sag : Math.max(SAG_MIN_PCT, line.sag ?? sagDefault)
   const setSagPct = (pct: number) => setLine((l) => ({ ...l, sag: changed(pct, sagDefault) }))
   const setRig = (r: RigHeights | null) => {
@@ -1625,24 +1632,14 @@ export function App() {
           {DEV_MODE && showFilters && meta && bounds && (
             <div className="filters">
               <h2>Rigging</h2>
-              <Slider
-                label="Midspan sag"
-                value={bounds.sag}
-                min={bounds.sagFloor}
-                max={10}
-                step={0.5}
-                unit=" % of span"
-                format={(v) => v.toFixed(1)}
-                help={<SagHelp pct={bounds.sag} />}
-              onChange={setSagPct}
-              />
+              <FallDepthSlider value={bounds.sag} min={bounds.sagFloor} lengthM={selected?.length ?? null} onChange={setSagPct} />
               <div className="note">
                 {lines
                   ? `${rescored.length} of ${candidates.length} lines still clear the terrain at ` +
                     `${bounds.sag.toFixed(1)} %. `
                   : 'Applies to the lines as they arrive. '}
                 Cannot go below {bounds.sagFloor.toFixed(1)} % &mdash; the dataset was generated
-                there, so looser lines were never evaluated.
+                there, so shallower lines were never evaluated.
               </div>
 
               <h2 style={{ marginTop: 14 }}>Anchors</h2>

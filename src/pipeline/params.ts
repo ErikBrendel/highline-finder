@@ -18,7 +18,8 @@ export const DEFAULT_PARAMS: Params = {
   // 1.5 m of offlevel on a 50 m line, scaling linearly to 15 m at 500 m.
   maxOffLevelRatio: 0.03,
 
-  // Enough that a walker plus sag does not scrape. Applies only outside anchorZone.
+  // A walker hanging from the leash under the line at its fall depth: leash plus body, and a
+  // little to spare. Applies only outside anchorZone.
   minClearance: 3.0,
 
   // What a line owes water instead. Falling in a lake is how a session ends; falling on ground is

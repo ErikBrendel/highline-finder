@@ -1,4 +1,3 @@
-import { useState, type ReactNode } from 'react'
 import { linearTrack, logTrack } from './track.js'
 
 /**
@@ -19,18 +18,17 @@ export interface SliderBand {
  * own -- which looks like a glitch unless the readout says so. Touching it takes over.
  */
 export function Slider({
-  label, value, min, max, step, unit, format, derived, bands, help, onChange,
+  label, value, min, max, step, unit, format, derived, bands, onHelp, onChange,
 }: {
   label: string; value: number; min: number; max: number; step: number; unit: string
   format?: (v: number) => string
   derived?: boolean
   /** Paint the track in stretches. See {@link SliderBand}. */
   bands?: SliderBand[]
-  /** Guidance behind a "?" beside the label, for a value whose sensible range is not obvious. */
-  help?: ReactNode
+  /** A "?" beside the label, for a value whose sensible range is not obvious. */
+  onHelp?: () => void
   onChange: (v: number) => void
 }) {
-  const [helping, setHelping] = useState(false)
   const input = (
     <input
       type="range" min={min} max={max} step={step} value={value}
@@ -44,11 +42,8 @@ export function Slider({
       <label>
         <span>
           {label}
-          {help && (
-            <button
-              type="button" className="helpbtn" aria-expanded={helping}
-              aria-label={`About ${label}`} onClick={() => setHelping(!helping)}
-            >?</button>
+          {onHelp && (
+            <button type="button" className="helpbtn" aria-label={`About ${label}`} onClick={onHelp}>?</button>
           )}
         </span>
         <span className={derived ? 'derived' : undefined}>
@@ -79,7 +74,6 @@ export function Slider({
       ) : (
         input
       )}
-      {helping && <div className="sliderhelp">{help}</div>}
     </div>
   )
 }
